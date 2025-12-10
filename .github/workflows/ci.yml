@@ -15,9 +15,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Lint (pre-commit inside wunder-devtools)
-        run: ./scripts/wunder-devtools-ee.sh sh -c "pip install -q pre-commit && pre-commit run --all-files"
+      - name: YAML lint (wunder-devtools)
+        run: ./scripts/wunder-devtools-ee.sh yamllint ansible
+      - name: Ansible lint (wunder-devtools)
+        run: ./scripts/wunder-devtools-ee.sh ansible-lint ansible/playbooks/keycloak.yml
 
   deploy-keycloak:
     name: Deploy Keycloak
