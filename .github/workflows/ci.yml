@@ -11,7 +11,7 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: [self-hosted, mac]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
 
   deploy-keycloak:
     name: Deploy Keycloak
-    runs-on: [self-hosted, mac]
+    runs-on: [self-hosted]
     needs: lint
     # Only run on real pushes to main (not on PRs, not on manual runs on other refs)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
