@@ -1,0 +1,8 @@
+# inventories/prd/group_vars/keycloak/vars.yml
+---
+keycloak_realms:
+  - name: "tier0"
+    display_name: "TIER0"
+
+keycloak_url: "https://kc.example.int"
+keycloak_master_realm: "master"

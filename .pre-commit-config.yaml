@@ -1,0 +1,16 @@
+---
+repos:
+  - repo: local
+    hooks:
+      - id: yamllint-ansible
+        name: yamllint (ansible/)
+        language: system
+        entry: ./scripts/wunder-devtools-ee.sh yamllint
+        pass_filenames: true
+        files: ^ansible/.*\.(yml|yaml)$
+
+      - id: ansible-inventory-validate
+        name: ansible-inventory validate (ansible/)
+        language: system
+        entry: ./scripts/wunder-devtools-ee.sh ./scripts/test-ansible.sh
+        pass_filenames: false

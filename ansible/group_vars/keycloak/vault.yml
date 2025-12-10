@@ -1,0 +1,4 @@
+# inventories/prd/group_vars/keycloak/vault.yml
+---
+keycloak_client_id: "terraform"
+keycloak_client_secret: "super-secret"
