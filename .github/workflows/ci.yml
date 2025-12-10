@@ -11,20 +11,21 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: [self-hosted, mac]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Lint (pre-commit inside wunder-devtools)
-        run: ./scripts/wunder-devtools-ee.sh sh -c "pip install -q pre-commit && pre-commit run --all-files"
+      - name: YAML lint (wunder-devtools)
+        run: ./scripts/wunder-devtools-ee.sh yamllint ansible
+      - name: Ansible lint (wunder-devtools)
+        run: ./scripts/wunder-devtools-ee.sh ansible-lint ansible/playbooks/keycloak.yml
 
   deploy-keycloak:
     name: Deploy Keycloak
-    runs-on: [self-hosted, mac]
+    runs-on: [self-hosted]
     needs: lint
     # Only run on real pushes to main (not on PRs, not on manual runs on other refs)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
