@@ -1,0 +1,7 @@
+---
+- name: Validate Keycloak connectivity
+  hosts: keycloak
+  gather_facts: false
+  tasks:
+    - name: Check connectivity
+      ansible.builtin.ping:
