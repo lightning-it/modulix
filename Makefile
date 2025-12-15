@@ -33,7 +33,7 @@ help:
 lint: lint-yaml ## Run all lint checks (YAML only)
 
 lint-yaml: ## YAML lint via wunder-devtools (ansible directories)
-	$(WUNDER_DEVTOOLS) yamllint ansible/playbooks/group_vars ansible/inventories ansible/playbooks
+	$(WUNDER_DEVTOOLS) yamllint ansible/group_vars ansible/inventories ansible/playbooks
 
 # ---------------------------------------------------------------------------
 # SSH Setup (for SSH-based roles, e.g. Satellite later)

@@ -3,17 +3,5 @@
   hosts: all
   connection: local
   gather_facts: false
-  pre_tasks:
-    - debug:
-        msg:
-          url: "{{ keycloak_config_url }}"
-          client_id: "{{ keycloak_config_client_id }}"
-          username: "{{ keycloak_config_username }}"
-          password: "{{ keycloak_config_password }}"
-          has_password: >
-            "{{ keycloak_config_password | default('') | length > 0 }}"
-          has_client_secret: >
-            "{{ keycloak_config_client_secret | default('') | length > 0 }}"
-
   roles:
     - lit.supplementary.keycloak_config

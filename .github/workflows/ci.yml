@@ -43,5 +43,5 @@ jobs:
           ANSIBLE_HOST_KEY_CHECKING: "True"
         run: |
           ./scripts/wunder-devtools-ee.sh ansible-playbook \
-            -i ansible/inventories/local/hosts.yml \
+            -i ansible/inventories/nightly/hosts.yml \
             ansible/playbooks/keycloak.yml
