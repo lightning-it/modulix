@@ -56,3 +56,8 @@ make ci
 
 You can add additional checks (e.g. Molecule, Terraform tests) to the `ci` target
 to mirror your GitHub Actions pipeline locally.
+
+## License
+
+This repository is licensed under the GNU General Public License v2.0 (GPL-2.0-only).
+See [LICENSE](LICENSE) for details.
