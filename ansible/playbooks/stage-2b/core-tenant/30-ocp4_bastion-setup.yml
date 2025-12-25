@@ -1,0 +1,9 @@
+---
+- name: Setup bastion host
+  hosts: bastion
+  gather_facts: False
+  roles:
+    - role: bastion_prepare
+  tags:
+    - bastion_prepare
+...

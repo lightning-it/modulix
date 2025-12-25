@@ -1,0 +1,24 @@
+---
+- name: Generate inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: 'Load custom group_vars'
+      ansible.builtin.include_vars:
+        dir: '../../group_vars'
+        extensions:
+          - 'yaml'
+          - 'yml'
+
+    - name: 'Load custom host_vars'
+      ansible.builtin.include_vars:
+        dir: '../../host_vars'
+        extensions:
+          - 'yaml'
+          - 'yml'
+
+    - name: Generate inventory.ini
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/{{ inventory_template | default('inventory.ini.j2') }}"
+        dest: "/tmp/inventory.ini"
+        mode: '0644'

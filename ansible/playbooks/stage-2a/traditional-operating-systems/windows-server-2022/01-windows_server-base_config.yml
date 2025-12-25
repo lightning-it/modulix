@@ -1,0 +1,66 @@
+---
+- name: Run PreCheck
+  hosts: localhost
+  gather_facts: False
+  pre_tasks:
+    - name: Verifying that a limit is set
+      fail:
+        msg: 'This playbook cannot be run with no limit'
+      run_once: true
+      when: ansible_limit is not defined
+    - debug:
+        msg: Limit is {{ ansible_limit }}, let's continue
+      run_once: true
+      when: ansible_limit is defined
+
+- name: Run initial setup / user management
+  hosts: all
+  gather_facts: False
+  pre_tasks:
+    - name: Check if initial setup is needed
+      shell: "hostname; id"
+      ignore_unreachable: True
+      check_mode: False
+      changed_when: False
+      failed_when: False
+      register: node_unreachable
+      vars:
+        ansible_winrm_port: 5986
+    - name: Check if host is ready, but use different winrm port
+      shell: "hostname; id"
+      ignore_unreachable: True
+      check_mode: False
+      changed_when: False
+      failed_when: False
+      register: node_unreachable_custom_winrm
+    - name: Gather facts when necessary
+      setup:
+      delegate_facts: True
+      vars:
+        ansible_user: "{{ windows_bootstrap_username }}"
+        ansible_password: "{{ windows_bootstrap_password }}"
+        ansible_winrm_port: 5986
+      when: (node_unreachable.unreachable is defined and node_unreachable.unreachable) and (node_unreachable_custom_winrm.unreachable is defined and node_unreachable_custom_winrm.unreachable)
+  roles:
+    - name: Execute initial user_management
+      role: user_management
+      gather_facts: True
+      vars:
+        ansible_user: "{{ windows_bootstrap_username }}"
+        ansible_password: "{{ windows_bootstrap_password }}"
+        ansible_winrm_port: 5986
+      when: (node_unreachable.unreachable is defined and node_unreachable.unreachable) and (node_unreachable_custom_winrm.unreachable is defined and node_unreachable_custom_winrm.unreachable)
+
+- name: Base setup
+  hosts: all
+  gather_facts: True
+  roles:
+    - name: Execute role user_management
+      role: user_management
+      tags:
+        - user_management
+    - name: Execute role os_windows_server_base
+      role: os_windows_server_base
+      tags:
+        - base_config
+...

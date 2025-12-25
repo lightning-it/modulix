@@ -1,0 +1,13 @@
+---
+- name: Setup OCP4 cluster
+  hosts: ocp
+  gather_facts: false
+  vars:
+    vmware_hosts: "{{ inventory_hostname }}"
+  roles:
+    - role: lit.foundation_services.vmware_vsphere
+      tags:
+        - vmware_vsphere
+    - role: lit.foundation_services.ocp_install
+      tags:
+        - ocp_install

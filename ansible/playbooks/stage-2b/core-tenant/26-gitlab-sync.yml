@@ -1,0 +1,11 @@
+---
+- name: Setup gitlab omnibus
+  hosts: gitlab_ee
+   
+  gather_facts: False
+  roles:
+    - name: Execute role gitlab_sync
+      role: gitlab_sync
+      tags:
+        - gitlab_sync
+...

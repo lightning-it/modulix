@@ -1,0 +1,47 @@
+---
+- name: Render requirements.yml for galaxy roles and collections
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    # - name: Test required values
+      # ansible.builtin.assert:
+        # that:
+          # - zone is defined
+          # - base_domain is defined
+          # - cluster_id is defined
+
+    - name: Render requirements.yml
+      ansible.builtin.template:
+        src: requirements.yml.j2
+        dest: ../../../requirements.yml
+        mode: "0444"
+      tags:
+        - always
+
+    - name: Install galaxy collections from requirements.yml
+      ansible.builtin.command:
+        cmd: >-
+          ansible-galaxy collection install -r requirements.yml --force
+          {% if galaxy_server is defined %}--server {{ galaxy_server }}{% endif %}
+          {% if galaxy_server_key is defined %}--api-key {{ galaxy_server_key }}{% endif %}
+      changed_when: true
+      register: _install_collections
+      args:
+        chdir: ../../..
+      tags:
+        - galaxy_collections
+
+    - name: Install galaxy roles
+      ansible.builtin.command:
+        cmd: ansible-galaxy role install -r requirements.yml -g
+      changed_when: true
+      register: _install_roles
+      args:
+        chdir: ../../..
+      tags:
+        - galaxy_roles
+
+    - name: Print warning and errors result of collection installation
+      ansible.builtin.debug:
+        var: _install_roles.stderr_lines
+      when: (_install_roles.stderr_lines | default([])) | length > 0

@@ -1,0 +1,12 @@
+---
+- name: Setup ESXi hosts
+  hosts: localhost
+  gather_facts: false
+  become: false
+  roles:
+    - name: Execute role manage_esxi
+      role: manage_esxi
+      vars:
+        mes_default_users: "{{ default_users }}"
+      tags:
+        - manage_esxi

@@ -1,0 +1,93 @@
+[localhost]
+127.0.0.1 ansible_connection=local
+
+[{{ patchday_group }}:children]
+{{ vcenter_group }}
+
+[{{ vcenter_group }}:children]
+bootstrap
+windows
+master
+app
+infra
+jumphost
+localhost
+
+{% if paas_winrm_host != "" %}
+[windows]
+{{ paas_winrm_host }}
+
+{% raw %}
+[windows:vars]
+ansible_user={{ paas_winrm_user }}
+ansible_password={{ paas_winrm_password }}
+ansible_connection=winrm
+ansible_port=5985
+ansible_winrm_transport=kerberos
+{% endraw %}
+{% endif %}
+
+[bootstrap]
+{{ cluster_id }}-bootstrap-01 ansible_user=core ansible_become=true ipaddress=dhcp
+
+[master]
+{% if custom_master_nodes is defined %}
+# custom nodes are in use
+{% for node in custom_master_nodes -%}
+{{ node }}
+{% endfor %}
+{% elif test_cluster is not defined or not test_cluster | bool %}
+# Normal Installation (3 Masters etc.)
+{{ cluster_id }}-master-[01:03] ansible_user=core ansible_become=true ipaddress=dhcp
+{% endif %}
+
+[infra]
+{% if custom_infra_nodes is defined %}
+# custom nodes are in use
+{% for node in custom_infra_nodes -%}
+{{ node }}
+{% endfor %}
+{% elif openshift_logging is defined and openshift_logging|bool %}
+{{ cluster_id }}-infra-[01:03] ansible_user=core ansible_become=true node_role=infra vmware_machine_cpus=8 machine_cpu_cores_per_socket=4 vmware_machine_memory=32768 ipaddress=dhcp
+{% endif %}
+
+[app]
+{% if custom_app_nodes is defined %}
+# custom nodes are in use
+{% for node in custom_app_nodes -%}
+{{ node }}
+{% endfor %}
+{% elif compute_node_count > 0 %}
+{{ cluster_id }}-app-[01:{{ "%02d"|format(compute_node_count) }}] ansible_user=core ansible_become=true node_role=app ipaddress=dhcp
+{% endif %}
+
+{% if test_cluster is defined and test_cluster | bool %}
+# Single-Node-Cluster
+[master]
+{{ cluster_id }}-single-node-0 ansible_user=core ansible_become=true vmware_machine_cpus=8 machine_cpu_cores_per_socket=4 vmware_machine_memory=32768 ipaddress=dhcp
+[infra]
+[app]
+{% endif %}
+
+[worker:children]
+infra
+app
+
+[jumphost]
+{{ cluster_id }}-jumphost-01 ansible_user=ubuntu ansible_become=true ipaddress="{{ openshift_machine_network | ansible.utils.ipmath(20) }}" ansible_host=jumphost.{{ cluster_id }}.{{ base_domain }}
+
+[app:vars]
+{% if vmware_datacenter is defined %}
+vmware_machine_cpus={{ compute_node_configurations[compute_node_size]['machine_cpus'] }}
+vmware_machine_cpu_cores_per_socket={{ compute_node_configurations[compute_node_size]['machine_cpu_cores_per_socket'] }}
+vmware_machine_memory={{ compute_node_configurations[compute_node_size]['machine_memory'] }}
+vmware_nested_virt={{ compute_node_configurations[compute_node_size]['nested_virt'] }}
+{% endif %}
+
+[all:vars]
+# single-node-cluster variables
+{% if test_cluster is defined and test_cluster | bool %}
+openshift_machine_network="192.168.224.0/21"
+openshift_service_network="172.28.0.0/16"
+openshift_cluster_network="10.240.0.0/14"
+{% endif %}

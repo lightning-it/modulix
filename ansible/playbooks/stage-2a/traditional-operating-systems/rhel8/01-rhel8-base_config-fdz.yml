@@ -1,0 +1,34 @@
+---
+- name: Run PreCheck
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Verifying that a limit is set
+      ansible.builtin.fail:
+        msg: 'This playbook cannot be run with no limit'
+      run_once: true
+      when: ansible_limit is not defined
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: Limit is {{ ansible_limit }}, let's continue
+      run_once: true
+      when: ansible_limit is defined
+
+- name: Base setup
+  hosts: all
+  gather_facts: true
+  roles:
+    - name: Execute role user_management_fdz
+      role: user_management_fdz
+      tags:
+        - user_management
+    - name: Execute role os_rhel_base-fdz
+      role: os_rhel_base_fdz
+      tags:
+        - base_config
+    - name: Install and configure Desktop Environment
+      role: os_rhel_desktop
+      tags:
+        - base_desktop
+      when: ord_enabled | default(false)
+...

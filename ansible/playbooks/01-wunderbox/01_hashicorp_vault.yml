@@ -1,0 +1,9 @@
+---
+- name: Configure HashiCorp Vault
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - name: Execute role Vault
+      role: vault
+      tags:
+        - vault
