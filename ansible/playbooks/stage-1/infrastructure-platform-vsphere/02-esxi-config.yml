@@ -1,11 +1,10 @@
 ---
 - name: Configure ESXi hosts via vCenter
-  hosts: vsphere
+  hosts: vsphere_esxi
   gather_facts: False
   become: False
   roles:
-    - name: Execute role manage_vcenter
-      role: manage_vcenter
+    - name: Execute role manage_esxi
+      role: manage_esxi
       tags:
-        - manage_vcenter
-...
+        - manage_esxi

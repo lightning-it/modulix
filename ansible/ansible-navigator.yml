@@ -1,0 +1,23 @@
+---
+ansible-navigator:
+  execution-environment:
+    enabled: true
+    container-engine: docker
+    container-options:
+      - "--volume=./roles:/runner/extra/roles:ro"
+    environment-variables:
+      pass:
+        - ANSIBLE_VAULT_PASSWORD_FILE
+      set:
+        HOME: /tmp
+        ANSIBLE_LOCAL_TEMP: /tmp
+        ANSIBLE_REMOTE_TEMP: /tmp
+        ANSIBLE_CONFIG: /runner/project/ansible.cfg
+    image: ghcr.io/lightning-it/wunder-devtools-ee:v1.1.7
+    pull:
+      policy: tag
+
+  mode: stdout
+
+  playbook-artifact:
+    enable: false

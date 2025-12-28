@@ -1,1 +1,3 @@
 infra/
+ansible-navigator.log
+ansible_collections/
