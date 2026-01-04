@@ -32,7 +32,7 @@ ls -la collections/ansible_collections/lit/foundational/roles/vmware_vsphere
 
 The bundled `ansible-navigator.yml` config:
 - Enables the execution environment via Docker
-- Uses `quay.io/l-it/ee-wunder-ansible-ubi9:v1.1.5`
+- Uses `quay.io/l-it/ee-wunder-ansible-ubi9:v1.2.0`
 - (Optional) mounts the Docker socket for roles that need it
 - Passes `ANSIBLE_CONFIG` and `ANSIBLE_VAULT_PASSWORD_FILE`
 - Disables playbook artifacts and uses stdout mode
