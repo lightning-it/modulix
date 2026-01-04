@@ -1,0 +1,40 @@
+---
+- name: Create VM(s) via vCenter (delegated per host)
+  hosts: all
+  connection: local
+  gather_facts: false
+  serial: 1  # optional: run vCenter calls sequentially
+
+  pre_tasks:
+    # ------------------------------------------------------------------
+    # Guardrails: force safe usage (single-host only)
+    # ------------------------------------------------------------------
+    - name: Require --limit
+      ansible.builtin.fail:
+        msg: "This playbook cannot be run with no --limit (single host required)."
+      when: ansible_limit is not defined
+      run_once: true
+
+    - name: Require a single host in --limit (no groups/patterns)
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is match('^[^,:&|!()]+$')
+        fail_msg: >
+          ansible_limit must be a single hostname (no groups/patterns).
+          Example:
+          --limit workstation01.prd.com.corp.l-it.io
+      when: ansible_limit is defined
+      run_once: true
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing with a single target."
+      when: ansible_limit is defined
+      run_once: true
+
+  roles:
+    # ------------------------------------------------------------------
+    # Role does the real validation (normalize.yml + resolve_credentials.yml + assert.yml)
+    # Keep the playbook thin and safe.
+    # ------------------------------------------------------------------
+    - role: lit.foundational.vmware_vsphere

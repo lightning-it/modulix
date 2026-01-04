@@ -1,3 +1,8 @@
 infra/
 ansible-navigator.log
 ansible_collections/
+
+# Ansible Collections Development
+collections-dev/ansible_collections/**
+!collections-dev/.gitkeep
+ansible/.vault-pass.txt

@@ -5,9 +5,9 @@
   become: false
 
   roles:
-    - role: vcenter_setup
+    - role: lit.supplementary.vcenter_setup
       vars:
-        mes_default_users: "{{ default_users }}"
+        manage_esxi_default_users: "{{ default_users }}"
       tags:
         - vcenter
         - setup

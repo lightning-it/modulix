@@ -5,13 +5,13 @@
   become: false
   roles:
     - name: Build custom esxi iso (optional)
-      role: manage_esxi
+      role: lit.supplementaryi.manage_esxi
       vars:
-        mes_build_iso: True
+        manage_esxi_build_iso: True
       tags:
         - never
         - create_iso
     - name: Install OS via iso mount
-      role: redfish
+      role: lit.supplementary.redfish
       tags:
         - redfish

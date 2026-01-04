@@ -13,9 +13,11 @@
       run_once: true
       when: ansible_limit is defined
 
-- name: Setup RHEL vm
+- name: Destroy host vm
   hosts: all
   gather_facts: False
   roles:
-    - role: vmware_vsphere
+    - role: lit.foundational.vmware_vsphere
+  vars:
+    vvs_vm_destroy: True
 ...
