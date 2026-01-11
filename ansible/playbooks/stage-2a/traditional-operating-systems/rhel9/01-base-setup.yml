@@ -173,7 +173,7 @@
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
         ansible_port: "{{ _probe_port_bootstrap }}"
-      tags: [bootstrap, users]
+      tags: [bootstrap]
 
     - name: Bootstrap - gather minimal facts (SELinux)
       ansible.builtin.setup:
@@ -184,7 +184,7 @@
       when:
         - _bootstrap_needed | bool
         - (_sshd_port_desired | int) != 22
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
     - name: Bootstrap - SELinux allow desired SSH port (ssh_port_t)
       community.general.seport:
@@ -197,7 +197,7 @@
         - (_sshd_port_desired | int) != 22
         - ansible_facts.selinux is defined
         - ansible_facts.selinux.status | default('disabled') == 'enabled'
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
     # Temporary bootstrap firewall opening for the desired SSH port.
     # Final firewall policy is applied later via group-specific playbooks/vars.
@@ -209,7 +209,7 @@
         - _bootstrap_needed | bool
         - _sshd_reconnect_after_change | bool
       become: true
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
     - name: Bootstrap - enable and start firewalld
       ansible.builtin.service:
@@ -220,9 +220,9 @@
         - _bootstrap_needed | bool
         - _sshd_reconnect_after_change | bool
       become: true
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
-    - name: Bootstrap - open desired SSH port in firewalld (temporary)
+    - name: Bootstrap - open desired SSH port in firewalld
       ansible.posix.firewalld:
         port: "{{ _sshd_port_desired | int }}/tcp"
         zone: "{{ _bootstrap_firewalld_zone }}"
@@ -233,7 +233,7 @@
         - _bootstrap_needed | bool
         - _sshd_reconnect_after_change | bool
       become: true
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
     - name: Bootstrap - configure sshd (set Port via sshd_config)
       ansible.builtin.include_role:
@@ -245,15 +245,13 @@
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
         ansible_port: "{{ _probe_port_bootstrap }}"
-        sshd_config:
-          Port: "{{ _sshd_port_desired | int }}"
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
     # IMPORTANT: flush sshd handlers while we are still connected via bootstrap port.
     # Otherwise the handler may run after the port change and try to connect on the old port.
     - name: Bootstrap - flush handlers before reconnect
       ansible.builtin.meta: flush_handlers
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
     - name: Reconnect after SSH port change
       block:
@@ -273,7 +271,7 @@
           ansible.builtin.wait_for_connection:
             timeout: 180
       when: _sshd_reconnect_after_change | bool
-      tags: [bootstrap, sshd]
+      tags: [bootstrap]
 
 
 # -----------------------------------------------------------------------------
@@ -305,7 +303,7 @@
         name: lit.foundational.net_vlan_autogen
       tags: [network]
 
-    - name: Network (optional)
+    - name: Network
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.network
         apply:
@@ -313,7 +311,7 @@
       when: (network_connections | default([], true) | length) > 0
       tags: [network]
 
-    - name: Sysctl (optional)
+    - name: Sysctl
       ansible.posix.sysctl:
         name: "{{ item.name }}"
         value: "{{ item.value }}"
@@ -323,7 +321,7 @@
       when: (sysctl_settings | default([], true) | length) > 0
       tags: [sysctl]
 
-    - name: Timesync (optional)
+    - name: Timesync
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.timesync
       when: (timesync_ntp_servers | default([])) | length > 0
@@ -335,7 +333,7 @@
       when: "'firewalls' not in group_names"
       tags: [firewalld]
 
-    - name: Base - SELinux allow desired SSH port (ssh_port_t)
+    - name: SSHD - SELinux allow desired SSH port
       community.general.seport:
         ports: "{{ _sshd_port_desired | int }}"
         proto: tcp
@@ -347,13 +345,19 @@
         - ansible_facts.selinux.status | default('disabled') == 'enabled'
       tags: [sshd]
 
-    - name: SSHD (ensure desired port)
+    - name: SSHD
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.sshd
-      vars:
-        sshd_config:
-          Port: "{{ _sshd_port_desired | int }}"
+        apply:
+          tags: [sshd]
       tags: [sshd]
+
+    - name: Hostname
+      ansible.builtin.include_role:
+        name: lit.rhel.hostname
+        apply:
+          tags: [hostname]
+      tags: [hostname]
 
     - name: Automatic updates
       ansible.builtin.include_role:
