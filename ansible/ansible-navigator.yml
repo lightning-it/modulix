@@ -2,20 +2,22 @@ ansible-navigator:
   execution-environment:
     enabled: true
     container-engine: docker
+    #image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.2.1
     image: ee-wunder-ansible-ubi9:local
     pull:
       policy: missing
     container-options:
+      - "--user=1000"
       - "--volume=/var/run/docker.sock:/var/run/docker.sock"
       - "--volume=.:/runner/project"
-      # DEV Anible Collections have to be under "../../ansible-collections"
-      - "--volume=../../ansible-collections:/runner/project/collections-dev/ansible_collections/lit"
+      - "--volume=./.ssh:/runner/project/.ssh"
       - "--workdir=/runner/project"
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
       set:
         HOME: /tmp
+        SSH_AUTH_SOCK: /runner/project/.ssh/auth-sock
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp
         ANSIBLE_REMOTE_TEMP: /tmp

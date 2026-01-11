@@ -58,7 +58,34 @@ Example (vSphere VM template provisioning):
 
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
+
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.com.corp.l-it.io
+```
+
+02 vSphere ESXi setup:
+
+```bash
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
+  -i inventories/corp/inventory.yml --limit vsphere_esxi
+```
+
+03 OS - RHEL 9 setup:
+
+```bash
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.com.corp.l-it.io
+```
+
+10 Firewall setup:
+
+```bash
+ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 ```
 
 ---

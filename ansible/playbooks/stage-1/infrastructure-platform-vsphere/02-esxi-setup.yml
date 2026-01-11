@@ -6,7 +6,5 @@
   roles:
     - name: Execute role manage_esxi
       role: lit.supplementary.manage_esxi
-      vars:
-        manage_esxi_default_users: "{{ default_users }}"
       tags:
         - manage_esxi

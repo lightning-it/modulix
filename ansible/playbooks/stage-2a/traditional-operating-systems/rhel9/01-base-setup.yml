@@ -1,0 +1,230 @@
+---
+# -----------------------------------------------------------------------------
+# Stage 2a: Traditional OS - Base Setup
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require --limit)
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Verify that a limit is set
+      ansible.builtin.fail:
+        msg: "This playbook cannot be run without --limit. Please use --limit <host-or-group>."
+      run_once: true
+      when: ansible_limit is not defined
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing."
+      run_once: true
+      when: ansible_limit is defined
+
+
+- name: Bootstrap (when normal SSH fails but bootstrap works)
+  hosts: all
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  vars:
+    linux_ssh_port: "{{ sshd_port | default(22) | int }}"
+    linux_bootstrap_ssh_port_effective: "{{ linux_bootstrap_ssh_port | default(22) | int }}"
+
+    # Bootstrap is considered "configured" if any of these are set.
+    _bootstrap_configured: >-
+      {{
+        (linux_bootstrap_user | default('') | length > 0)
+        or (linux_bootstrap_password | default('') | length > 0)
+        or (linux_bootstrap_ssh_port is defined)
+        or (lookup('env', 'ANSIBLE_BOOTSTRAP_USER') | default('') | length > 0)
+        or (lookup('env', 'ANSIBLE_BOOTSTRAP_PASSWORD') | default('') | length > 0)
+      }}
+
+    bootstrap_user_effective: >-
+      {{
+        linux_bootstrap_user
+          | default(lookup('env', 'ANSIBLE_BOOTSTRAP_USER'), true)
+          | default(lookup('env', 'ANSIBLE_USER'), true)
+          | default('root', true)
+      }}
+    bootstrap_password_effective: >-
+      {{
+        linux_bootstrap_password
+          | default(lookup('env', 'ANSIBLE_BOOTSTRAP_PASSWORD'), true)
+          | default(omit)
+      }}
+
+  pre_tasks:
+    - name: Check reachability on normal SSH port
+      ansible.builtin.ping:
+      ignore_unreachable: true
+      ignore_errors: true
+      register: ping_normal
+      vars:
+        ansible_port: "{{ linux_ssh_port }}"
+      tags: [always]
+
+    - name: Check reachability on bootstrap SSH port
+      ansible.builtin.ping:
+      ignore_unreachable: true
+      ignore_errors: true
+      register: ping_bootstrap
+      vars:
+        ansible_port: "{{ linux_bootstrap_ssh_port_effective }}"
+        ansible_user: "{{ bootstrap_user_effective }}"
+        ansible_password: "{{ bootstrap_password_effective }}"
+      when: _bootstrap_configured | bool
+      tags: [always]
+
+    - name: Derive reachability flags
+      ansible.builtin.set_fact:
+        _normal_ok: "{{ not (ping_normal is failed or (ping_normal.unreachable | default(false))) }}"
+        _bootstrap_ok: >-
+          {{
+            _bootstrap_configured | bool
+            and not (ping_bootstrap is failed or (ping_bootstrap.unreachable | default(false)))
+          }}
+      changed_when: false
+      tags: [always]
+
+    - name: Decide whether bootstrap is needed
+      ansible.builtin.set_fact:
+        _bootstrap_needed: "{{ (not _normal_ok) and _bootstrap_ok }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Show connection mode
+      ansible.builtin.debug:
+        msg: >-
+          Connection mode: {{
+            _bootstrap_needed
+              | ternary('BOOTSTRAP (using bootstrap creds/port)',
+                        'NORMAL (using inventory defaults)')
+          }}
+      tags: [always]
+
+    - name: Fail if host is unreachable and bootstrap is not configured
+      ansible.builtin.fail:
+        msg: >-
+          Host {{ inventory_hostname }} is unreachable on the normal path (port {{ linux_ssh_port }}),
+          and bootstrap is not configured. Set linux_bootstrap_* vars (or ANSIBLE_BOOTSTRAP_* env vars).
+      when:
+        - not _normal_ok
+        - not _bootstrap_configured | bool
+      tags: [always]
+
+    - name: Fail if host is unreachable on both paths (bootstrap configured)
+      ansible.builtin.fail:
+        msg: >-
+          Host {{ inventory_hostname }} is unreachable on both:
+          - normal port: {{ linux_ssh_port }}
+          - bootstrap port: {{ linux_bootstrap_ssh_port_effective }}
+      when:
+        - not _normal_ok
+        - _bootstrap_configured | bool
+        - not _bootstrap_ok
+      tags: [always]
+
+  tasks:
+    - name: Bootstrap - ensure users exist
+      ansible.builtin.include_role:
+        name: lit.rhel.users
+        apply:
+          become: true
+      when: _bootstrap_needed | bool
+      vars:
+        ansible_user: "{{ bootstrap_user_effective }}"
+        ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
+        ansible_port: "{{ linux_bootstrap_ssh_port_effective }}"
+      tags: [users, bootstrap]
+
+    - name: Bootstrap - configure sshd
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.sshd
+        apply:
+          become: true
+      when: _bootstrap_needed | bool
+      vars:
+        ansible_user: "{{ bootstrap_user_effective }}"
+        ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
+        ansible_port: "{{ linux_bootstrap_ssh_port_effective }}"
+        sshd_port: "{{ sshd_port | default(22) | int }}"
+      tags: [sshd, bootstrap]
+
+    - name: Reset SSH connection after bootstrap
+      ansible.builtin.meta: reset_connection
+      when: _bootstrap_needed | bool
+      tags: [always]
+
+    - name: Sanity check - verify normal connection works after bootstrap
+      ansible.builtin.ping:
+      when: _bootstrap_needed | bool
+      tags: [always]
+
+
+- name: Base setup
+  hosts: all
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+
+  tasks:
+    - name: Users
+      ansible.builtin.include_role:
+        name: lit.rhel.users
+      tags: [users]
+
+    - name: Baseline
+      ansible.builtin.include_role:
+        name: lit.rhel.baseline
+      tags: [baseline, base_config]
+
+    - name: VLAN trunk autogen
+      # If net_trunk_parent + net_vlan_configs are defined, generate network_connections automatically.
+      ansible.builtin.include_role:
+        name: lit.foundational.net_vlan_autogen
+      tags: [network]
+
+    - name: Network (optional)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.network
+      when: (network_connections | default([], true) | length) > 0
+      tags: [network]
+
+    - name: Sysctl (optional)
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: "{{ item.state | default('present') }}"
+        reload: "{{ item.reload | default(false) }}"
+      loop: "{{ sysctl_settings | default([], true) }}"
+      when:
+        - sysctl_settings is defined
+        - (sysctl_settings | length) > 0
+      tags: [sysctl]
+
+    - name: Timesync (optional)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.timesync
+      when: (timesync_ntp_servers | default([])) | length > 0
+      tags: [timesync, chronyd]
+
+    - name: Firewalld (non-firewall hosts only)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewalld
+      when: "'firewalls' not in group_names"
+      tags: [firewalld]
+
+    - name: SSHD
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.sshd
+      vars:
+        sshd_port: "{{ sshd_port | default(22) | int }}"
+      tags: [sshd]
+
+    - name: Automatic updates
+      ansible.builtin.include_role:
+        name: lit.rhel.automatic_updates
+      tags: [automatic_updates]
