@@ -195,6 +195,9 @@
     - name: Network (optional)
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.network
+        apply:
+          tags:
+            - network
       when: (network_connections | default([], true) | length) > 0
       tags: [network]
 
