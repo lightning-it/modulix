@@ -1,6 +1,6 @@
 ---
 # -----------------------------------------------------------------------------
-# Stage 2b: Core Tenant - Routed Firewall Host
+# Core Tenant - Routed Firewall Host
 #
 # Purpose:
 # - Apply firewall rules only to hosts in group "firewalls".
