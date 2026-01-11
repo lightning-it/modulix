@@ -1,8 +1,18 @@
 ---
 # -----------------------------------------------------------------------------
 # Traditional OS - RHEL9 - Base Setup
+#
+# Features:
+# - Require --limit (fail fast)
+# - Bootstrap path (optional): if desired SSH port is not reachable but bootstrap is
+# - SELinux: allow non-standard SSH port via community.general.seport
+# - Bootstrap firewall: open desired SSH port (temporary/simple; final policy elsewhere)
+# - Reconnect after SSH port change (wait_for + set ansible_port + wait_for_connection)
 # -----------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------
+# PreCheck: enforce --limit
+# -----------------------------------------------------------------------------
 - name: PreCheck (require --limit)
   hosts: all
   gather_facts: false
@@ -14,23 +24,37 @@
         msg: "This playbook cannot be run without --limit. Please use --limit <host-or-group>."
       run_once: true
       when: ansible_limit is not defined
+      tags: [always]
 
     - name: Show limit
       ansible.builtin.debug:
         msg: "Limit is {{ ansible_limit }}, continuing."
       run_once: true
       when: ansible_limit is defined
+      tags: [always]
 
 
-- name: Bootstrap (when normal SSH fails but bootstrap works)
+# -----------------------------------------------------------------------------
+# Bootstrap: only when desired SSH port is unreachable but bootstrap works
+# -----------------------------------------------------------------------------
+- name: Bootstrap (when desired SSH is unreachable but bootstrap works)
   hosts: all
   gather_facts: false
   become: false
   any_errors_fatal: true
 
   vars:
-    linux_ssh_port: "{{ sshd_port | default(22) | int }}"
-    linux_bootstrap_ssh_port_effective: "{{ linux_bootstrap_ssh_port | default(22) | int }}"
+    # Desired SSH port (final state)
+    _sshd_port_desired: "{{ sshd_port | default(22) | int }}"
+
+    # Normal probe port: ALWAYS the desired port (no ansible_port recursion).
+    _probe_port_normal: "{{ _sshd_port_desired }}"
+
+    # Bootstrap path port (factory/installer login)
+    _probe_port_bootstrap: "{{ linux_bootstrap_ssh_port | default(22) | int }}"
+
+    # Optional: which zone to open for the bootstrap port rule (temporary)
+    _bootstrap_firewalld_zone: "{{ bootstrap_firewalld_zone | default('public') }}"
 
     # Bootstrap is considered "configured" if any of these are set.
     _bootstrap_configured: >-
@@ -49,6 +73,7 @@
           | default(lookup('env', 'ANSIBLE_USER'), true)
           | default('root', true)
       }}
+
     bootstrap_password_effective: >-
       {{
         linux_bootstrap_password
@@ -57,14 +82,14 @@
       }}
 
   pre_tasks:
-    - name: Check reachability on normal SSH port
+    - name: Check reachability on desired SSH port (normal path)
       ansible.builtin.ping:
       ignore_unreachable: true
       ignore_errors: true
       register: ping_normal
       vars:
-        ansible_port: "{{ linux_ssh_port }}"
-      tags: [always]
+        ansible_port: "{{ _probe_port_normal }}"
+      tags: [bootstrap]
 
     - name: Check reachability on bootstrap SSH port
       ansible.builtin.ping:
@@ -72,11 +97,11 @@
       ignore_errors: true
       register: ping_bootstrap
       vars:
-        ansible_port: "{{ linux_bootstrap_ssh_port_effective }}"
+        ansible_port: "{{ _probe_port_bootstrap }}"
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective }}"
       when: _bootstrap_configured | bool
-      tags: [always]
+      tags: [bootstrap]
 
     - name: Derive reachability flags
       ansible.builtin.set_fact:
@@ -87,13 +112,23 @@
             and not (ping_bootstrap is failed or (ping_bootstrap.unreachable | default(false)))
           }}
       changed_when: false
-      tags: [always]
+      tags: [bootstrap]
 
     - name: Decide whether bootstrap is needed
       ansible.builtin.set_fact:
         _bootstrap_needed: "{{ (not _normal_ok) and _bootstrap_ok }}"
       changed_when: false
-      tags: [always]
+      tags: [bootstrap]
+
+    - name: Compute reconnect flag (bootstrap only; when desired port differs from bootstrap port)
+      ansible.builtin.set_fact:
+        _sshd_reconnect_after_change: >-
+          {{
+            _bootstrap_needed | bool
+            and (_sshd_port_desired | int) != (_probe_port_bootstrap | int)
+          }}
+      changed_when: false
+      tags: [bootstrap]
 
     - name: Show connection mode
       ansible.builtin.debug:
@@ -101,31 +136,31 @@
           Connection mode: {{
             _bootstrap_needed
               | ternary('BOOTSTRAP (using bootstrap creds/port)',
-                        'NORMAL (using inventory defaults)')
+                        'NORMAL (desired SSH port already reachable)')
           }}
-      tags: [always]
+      tags: [bootstrap]
 
     - name: Fail if host is unreachable and bootstrap is not configured
       ansible.builtin.fail:
         msg: >-
-          Host {{ inventory_hostname }} is unreachable on the normal path (port {{ linux_ssh_port }}),
+          Host {{ inventory_hostname }} is unreachable on desired SSH port ({{ _probe_port_normal }}),
           and bootstrap is not configured. Set linux_bootstrap_* vars (or ANSIBLE_BOOTSTRAP_* env vars).
       when:
         - not _normal_ok
         - not _bootstrap_configured | bool
-      tags: [always]
+      tags: [bootstrap]
 
     - name: Fail if host is unreachable on both paths (bootstrap configured)
       ansible.builtin.fail:
         msg: >-
           Host {{ inventory_hostname }} is unreachable on both:
-          - normal port: {{ linux_ssh_port }}
-          - bootstrap port: {{ linux_bootstrap_ssh_port_effective }}
+          - desired port: {{ _probe_port_normal }}
+          - bootstrap port: {{ _probe_port_bootstrap }}
       when:
         - not _normal_ok
         - _bootstrap_configured | bool
         - not _bootstrap_ok
-      tags: [always]
+      tags: [bootstrap]
 
   tasks:
     - name: Bootstrap - ensure users exist
@@ -137,10 +172,70 @@
       vars:
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
-        ansible_port: "{{ linux_bootstrap_ssh_port_effective }}"
-      tags: [users, bootstrap]
+        ansible_port: "{{ _probe_port_bootstrap }}"
+      tags: [bootstrap, users]
 
-    - name: Bootstrap - configure sshd
+    - name: Bootstrap - gather minimal facts (SELinux)
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - selinux
+      when:
+        - _bootstrap_needed | bool
+        - (_sshd_port_desired | int) != 22
+      tags: [bootstrap, sshd]
+
+    - name: Bootstrap - SELinux allow desired SSH port (ssh_port_t)
+      community.general.seport:
+        ports: "{{ _sshd_port_desired | int }}"
+        proto: tcp
+        setype: ssh_port_t
+        state: present
+      when:
+        - _bootstrap_needed | bool
+        - (_sshd_port_desired | int) != 22
+        - ansible_facts.selinux is defined
+        - ansible_facts.selinux.status | default('disabled') == 'enabled'
+      tags: [bootstrap, sshd]
+
+    # Temporary bootstrap firewall opening for the desired SSH port.
+    # Final firewall policy is applied later via group-specific playbooks/vars.
+    - name: Bootstrap - ensure firewalld is installed
+      ansible.builtin.package:
+        name: firewalld
+        state: present
+      when:
+        - _bootstrap_needed | bool
+        - _sshd_reconnect_after_change | bool
+      become: true
+      tags: [bootstrap, sshd]
+
+    - name: Bootstrap - enable and start firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: started
+        enabled: true
+      when:
+        - _bootstrap_needed | bool
+        - _sshd_reconnect_after_change | bool
+      become: true
+      tags: [bootstrap, sshd]
+
+    - name: Bootstrap - open desired SSH port in firewalld (temporary)
+      ansible.posix.firewalld:
+        port: "{{ _sshd_port_desired | int }}/tcp"
+        zone: "{{ _bootstrap_firewalld_zone }}"
+        permanent: true
+        immediate: true
+        state: enabled
+      when:
+        - _bootstrap_needed | bool
+        - _sshd_reconnect_after_change | bool
+      become: true
+      tags: [bootstrap, sshd]
+
+    - name: Bootstrap - configure sshd (set Port via sshd_config)
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.sshd
         apply:
@@ -149,26 +244,49 @@
       vars:
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
-        ansible_port: "{{ linux_bootstrap_ssh_port_effective }}"
-        sshd_port: "{{ sshd_port | default(22) | int }}"
-      tags: [sshd, bootstrap]
+        ansible_port: "{{ _probe_port_bootstrap }}"
+        sshd_config:
+          Port: "{{ _sshd_port_desired | int }}"
+      tags: [bootstrap, sshd]
 
-    - name: Reset SSH connection after bootstrap
-      ansible.builtin.meta: reset_connection
-      when: _bootstrap_needed | bool
-      tags: [always]
+    # IMPORTANT: flush sshd handlers while we are still connected via bootstrap port.
+    # Otherwise the handler may run after the port change and try to connect on the old port.
+    - name: Bootstrap - flush handlers before reconnect
+      ansible.builtin.meta: flush_handlers
+      tags: [bootstrap, sshd]
 
-    - name: Sanity check - verify normal connection works after bootstrap
-      ansible.builtin.ping:
-      when: _bootstrap_needed | bool
-      tags: [always]
+    - name: Reconnect after SSH port change
+      block:
+        - name: Wait for new SSH port (controller-side)
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host | default(inventory_hostname) }}"
+            port: "{{ _sshd_port_desired | int }}"
+            timeout: 180
+          delegate_to: localhost
+
+        - name: Switch Ansible to new port
+          ansible.builtin.set_fact:
+            ansible_port: "{{ _sshd_port_desired | int }}"
+          changed_when: false
+
+        - name: Wait for SSH connection on new port
+          ansible.builtin.wait_for_connection:
+            timeout: 180
+      when: _sshd_reconnect_after_change | bool
+      tags: [bootstrap, sshd]
 
 
+# -----------------------------------------------------------------------------
+# Base setup (inventory defaults)
+# -----------------------------------------------------------------------------
 - name: Base setup
   hosts: all
   gather_facts: true
   become: true
   any_errors_fatal: true
+
+  vars:
+    _sshd_port_desired: "{{ sshd_port | default(22) | int }}"
 
   tasks:
     - name: Users
@@ -187,17 +305,11 @@
         name: lit.foundational.net_vlan_autogen
       tags: [network]
 
-    - name: debug
-      ansible.builtin.debug:
-        var: network_connections
-      tags: [network]
-
     - name: Network (optional)
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.network
         apply:
-          tags:
-            - network
+          tags: [network]
       when: (network_connections | default([], true) | length) > 0
       tags: [network]
 
@@ -208,9 +320,7 @@
         state: "{{ item.state | default('present') }}"
         reload: "{{ item.reload | default(false) }}"
       loop: "{{ sysctl_settings | default([], true) }}"
-      when:
-        - sysctl_settings is defined
-        - (sysctl_settings | length) > 0
+      when: (sysctl_settings | default([], true) | length) > 0
       tags: [sysctl]
 
     - name: Timesync (optional)
@@ -225,11 +335,24 @@
       when: "'firewalls' not in group_names"
       tags: [firewalld]
 
-    - name: SSHD
+    - name: Base - SELinux allow desired SSH port (ssh_port_t)
+      community.general.seport:
+        ports: "{{ _sshd_port_desired | int }}"
+        proto: tcp
+        setype: ssh_port_t
+        state: present
+      when:
+        - (_sshd_port_desired | int) != 22
+        - ansible_facts.selinux is defined
+        - ansible_facts.selinux.status | default('disabled') == 'enabled'
+      tags: [sshd]
+
+    - name: SSHD (ensure desired port)
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.sshd
       vars:
-        sshd_port: "{{ sshd_port | default(22) | int }}"
+        sshd_config:
+          Port: "{{ _sshd_port_desired | int }}"
       tags: [sshd]
 
     - name: Automatic updates
