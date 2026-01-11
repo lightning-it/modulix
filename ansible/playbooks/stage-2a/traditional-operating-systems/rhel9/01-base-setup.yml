@@ -187,6 +187,11 @@
         name: lit.foundational.net_vlan_autogen
       tags: [network]
 
+    - name: debug
+      ansible.builtin.debug:
+        var: network_connections
+      tags: [network]
+
     - name: Network (optional)
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.network
