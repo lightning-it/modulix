@@ -41,6 +41,13 @@ The bundled `ansible-navigator.yml` config:
 
 ## Running playbooks
 
+01 baremetal - setup:
+
+```bash
+ansible-navigator run playbooks/stage-1/infrastructure-platform-baremetal/01-oob-virtualmedia-install.yml \
+  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
+```
+
 01 vSphere ESXi config:
 
 ```bash
@@ -48,7 +55,7 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/01-esxi-
   -i inventories/corp/inventory.yml --limit vsphere_esxi
 ```
 
-02 vSphere ESXi setup:
+01 vSphere ESXi setup:
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
   -i inventories/corp/inventory.yml --limit vsphere_esxi
@@ -62,6 +69,9 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-te
 
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.com.corp.l-it.io
+
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
 ```
 
 02 vSphere ESXi setup:
@@ -75,10 +85,16 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-
 
 ```bash
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
+
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.com.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
 ```
 
 10 Firewall setup:

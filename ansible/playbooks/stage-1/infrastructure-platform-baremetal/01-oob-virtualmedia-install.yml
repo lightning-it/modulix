@@ -1,9 +1,20 @@
 ---
 - name: Stage-1 baremetal install via Redfish virtual media
-  hosts: oob
+  hosts: baremetal
   gather_facts: false
   connection: local
+  become: false
 
   roles:
     - role: lit.foundational.oob_redfish_control
       tags: [redfish, virtual_media, boot]
+
+  post_tasks:
+    - name: Wait until OS listens on SSH (after install)
+      ansible.builtin.wait_for:
+        host: "{{ inventory_hostname }}"
+        port: 22
+        state: started
+        delay: 60
+        timeout: 7200
+      delegate_to: localhost
