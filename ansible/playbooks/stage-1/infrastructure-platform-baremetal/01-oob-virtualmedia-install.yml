@@ -1,0 +1,9 @@
+---
+- name: Stage-1 baremetal install via Redfish virtual media
+  hosts: oob
+  gather_facts: false
+  connection: local
+
+  roles:
+    - role: lit.foundational.oob_redfish_control
+      tags: [redfish, virtual_media, boot]
