@@ -1,6 +1,6 @@
 ---
 # vCenter
-manage_esxi_vcenter_hostname: vcenter.core.corp.l-it.io
+manage_esxi_vcenter_hostname: vcenter01-com.mgmt.corp.l-it.io
 manage_esxi_vcenter_username: administrator@vsphere.local
 manage_esxi_vcenter_password: TET&jekOB75e
 

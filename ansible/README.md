@@ -41,67 +41,99 @@ The bundled `ansible-navigator.yml` config:
 
 ## Running playbooks
 
-01 baremetal - setup:
+00 Gateway (baremetal+RHEL9) setup:
 
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-baremetal/01-oob-virtualmedia-install.yml \
   -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
+
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
+
+ansible-navigator run playbooks/stage-2b/01-gateway.yml \
+  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
 ```
 
-01 vSphere ESXi config:
+01 vSphere ESXi setup:
 
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/01-esxi-os_install.yml \
   -i inventories/corp/inventory.yml --limit vsphere_esxi
-```
 
-01 vSphere ESXi setup:
-```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
   -i inventories/corp/inventory.yml --limit vsphere_esxi
 ```
 
-Example (vSphere VM template provisioning):
-
+02 vSphere vCenter setup:
 ```bash
-ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
-
-ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.com.corp.l-it.io
-
-ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/FIXME \
+  -i inventories/corp/inventory.yml --limit vcenter-com.mgmt.corp.l-it.io
 ```
 
-02 vSphere ESXi setup:
+10 Firewall (VM+RHEL9) setup:
 
-```bash
-ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
-  -i inventories/corp/inventory.yml --limit vsphere_esxi
-```
-
-03 OS - RHEL 9 setup:
+10.1 DMZ
 
 ```bash
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
+  -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
 
+ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
+```
+
+10.2 COM
+
+```bash
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 
-ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.com.corp.l-it.io
-
-ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
-```
-
-10 Firewall setup:
-
-```bash
 ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
+```
+
+10.3 INT
+
+```bash
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
+```
+
+10.4 ISO
+
+```bash
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
+```
+
+20 Workstations(VM+RHEL9) setup:
+
+20.1 DMZ
+```bash
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
+```
+
+100 Wunderbox(VM+RHEL9) setup:
+
+```bash
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
 ```
 
 ---
