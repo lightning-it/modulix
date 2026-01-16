@@ -5,29 +5,6 @@ tooling dependencies.
 
 ---
 
-## Prerequisites: Ansible Collections
-
-Playbooks in this repository depend on additional Ansible Collections (e.g. `lit.foundational`).
-They must be installed into the local vendor directory **before** running playbooks:
-
-### Install / update required collections
-
-If you have `ansible-galaxy` locally:
-
-```bash
-ansible-galaxy collection install -r collections/requirements.yml -p ./collections --force
-```
-
-### Verify installed collections
-
-Example check for the vSphere role:
-
-```bash
-ls -la collections/ansible_collections/lit/foundational/roles/vmware_vsphere
-```
-
----
-
 ## ansible-navigator configuration
 
 The bundled `ansible-navigator.yml` config:
@@ -36,6 +13,21 @@ The bundled `ansible-navigator.yml` config:
 - (Optional) mounts the Docker socket for roles that need it
 - Passes `ANSIBLE_CONFIG` and `ANSIBLE_VAULT_PASSWORD_FILE`
 - Disables playbook artifacts and uses stdout mode
+
+---
+
+## Prerequisites: Ansible Collections
+
+Playbooks in this repository depend on additional Ansible Collections (e.g. `lit.foundational`).
+They must be installed into the local vendor directory **before** running playbooks:
+
+### Install / update required collections
+
+```bash
+ansible-navigator exec -- \
+  ansible-galaxy collection install -r /runner/project/collections/requirements.yml \
+  -p /runner/project/collections-dev --force
+```
 
 ---
 
@@ -115,6 +107,7 @@ ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
 20 Workstations(VM+RHEL9) setup:
 
 20.1 DMZ
+
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
