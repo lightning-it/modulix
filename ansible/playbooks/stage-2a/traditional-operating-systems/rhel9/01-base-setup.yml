@@ -346,6 +346,59 @@
       tags: [network]
 
     # -------------------------------------------------------------------------
+    # Cleanup: remove inactive NetworkManager profiles (optional)
+    # -------------------------------------------------------------------------
+    - name: Network - list connection profiles
+      ansible.builtin.command: nmcli -t -f NAME,UUID,DEVICE con show
+      register: network_nmcli_connections
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - build desired profile name list
+      ansible.builtin.set_fact:
+        network_cleanup_desired_names: >-
+          {{
+            (network_connections | default([]))
+            | select('mapping')
+            | map(attribute='name')
+            | select('string')
+            | list
+            + (network_cleanup_keep_profiles | default([]))
+          }}
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - build inactive profile list
+      ansible.builtin.set_fact:
+        network_nmcli_inactive_uuids: >-
+          {%- set ids = [] -%}
+          {%- for line in (network_nmcli_connections.stdout_lines | default([])) -%}
+          {%- set parts = line.split(':', 2) -%}
+          {%- if parts | length > 2 -%}
+          {%- set name = parts[0] -%}
+          {%- set uuid = parts[1] -%}
+          {%- set device = parts[2] -%}
+          {%- if (device == '' or device == '--') and (name not in network_cleanup_desired_names | default([])) -%}
+          {%- set _ = ids.append(uuid) -%}
+          {%- endif -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ ids }}
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - remove inactive profiles
+      ansible.builtin.command: nmcli con delete "{{ item }}"
+      loop: "{{ network_nmcli_inactive_uuids | default([]) }}"
+      when:
+        - network_cleanup_inactive_profiles | default(false) | bool
+        - (network_nmcli_inactive_uuids | default([]) | length) > 0
+      tags: [network]
+
+    # -------------------------------------------------------------------------
     # Bridge VLAN: ensure host participates in VLANs (self) + ports have VLAN membership
     # -------------------------------------------------------------------------
     - name: Bridge VLAN membership (self + ports)
