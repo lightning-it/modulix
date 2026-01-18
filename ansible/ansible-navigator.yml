@@ -2,7 +2,7 @@ ansible-navigator:
   execution-environment:
     enabled: true
     container-engine: docker
-    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.3.1
+    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.7.0
     pull:
       policy: missing
     container-options:

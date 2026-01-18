@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="ee-wunder-ansible-ubi9:v1.2.0"
+IMAGE="ee-wunder-ansible-ubi9:v1.7.0"
 
 DOCKER_ARGS=(
   -v "$PWD":/workspace

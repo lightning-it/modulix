@@ -119,14 +119,17 @@ ansible-navigator run playbooks/stage-2b/11-workstation.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
 ```
 
-100 Wunderbox(VM+RHEL9) setup:
+21 Wunderbox(VM+RHEL9) setup:
 
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.com.corp.l-it.io
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+
+ansible-navigator run playbooks/stage-2b/12-wunderbox.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
 ---
