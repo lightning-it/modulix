@@ -11,8 +11,8 @@
 #
 # Notes:
 # - Expect service roles:
-#     - lit.supplementary.vault   (or adjust to your actual role name)
-#     - lit.supplementary.nexus   (or adjust to your actual role name)
+#     - lit.supplementary.vault_validate / vault_deploy / vault_bootstrap / vault_config
+#     - lit.supplementary.nexus
 # -----------------------------------------------------------------------------
 
 - name: Configure wunderboxes
@@ -30,8 +30,17 @@
       tags: [firewall]
 
     # HashiCorp Vault (service)
-    - role: lit.supplementary.vault
-      tags: [vault]
+    - role: lit.supplementary.vault_deploy
+      tags: [vault, deploy]
+
+    - role: lit.supplementary.vault_validate
+      tags: [vault, postflight, validate]
+
+    - role: lit.supplementary.vault_bootstrap
+      tags: [vault, bootstrap]
+
+    - role: lit.supplementary.vault_config
+      tags: [vault, configure]
 
     # Sonatype Nexus Repository Manager (service)
     - role: lit.supplementary.nexus

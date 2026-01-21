@@ -57,6 +57,7 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-
 ```
 
 02 vSphere vCenter setup:
+
 ```bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/FIXME \
   -i inventories/corp/inventory.yml --limit vcenter-com.mgmt.corp.l-it.io
@@ -70,7 +71,7 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/FIXME \
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
 
-ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+ansible-navigator run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
 ```
 
@@ -80,7 +81,7 @@ ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 
-ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+ansible-navigator run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 ```
 
@@ -90,17 +91,20 @@ ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
 
-ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+ansible-navigator run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
 ```
 
 10.4 ISO
 
 ```bash
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
+
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
 
-ansible-navigator run playbooks/stage-2b/core-tenant/01-firewall.yml \
+ansible-navigator run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
 ```
 
