@@ -132,11 +132,52 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-te
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
-ansible-navigator run playbooks/stage-2b/12-wunderbox.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+# First: setup base configuration
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
+  -t repos,firewall
+
+# Second: Setup core services
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
+  -t nginx
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
+  -t dns
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
+  -t dhcp
+
+# Third: deploy/init/unseal/configure Vault
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
+  -t vault
+
+# Then: run Nexus with a token
+export VAULT_TOKEN=<VAULT-TOKEN>
+ansible-navigator run playbooks/stage-2b/11-workstation.yml \
+  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
+  -t nexus
+
 ```
 
 ---
+
+## Vault + Nexus notes
+
+The Vault bootstrap writes its init output to the target only. The repo must not store secrets.
+
+Recommended flow:
+- First run (`vault_bootstrap`): Vault init runs on the target; the init payload is kept in memory for unseal and
+  root token, and the encrypted init file is written to the target.
+- Subsequent runs: unseal/root token come from vaulted inventory vars (`vault_init.*`, e.g.
+  `group_vars/wunderboxes/vault-init.yml`). The playbooks do not read the encrypted init file on the target.
+- `vault_config` creates AppRole roles and stores credentials in Vault KV at:
+  - `stage-2c/<inventory_hostname>/nexus/approle-kv`
+  - `stage-2c/<inventory_hostname>/nexus/approle-pki`
+- `nexus` reads AppRole credentials from those KV paths at runtime. It needs `VAULT_TOKEN` with read access.
+
+Best practice: use a short‑lived, least‑privilege token for KV read + PKI issue, not a root token.
 
 ## Inventory and roles
 
@@ -150,6 +191,5 @@ ansible-navigator run playbooks/stage-2b/12-wunderbox.yml \
 
 - **Do not commit secrets.**
 - Use:
-  - Environment variables (e.g. `{{ lookup('env','VCENTER_USERNAME') }}`)
   - Ansible Vault (`ANSIBLE_VAULT_PASSWORD_FILE`)
   - SOPS or your preferred secret store

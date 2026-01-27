@@ -3,16 +3,26 @@
 # Wunderboxes - Core Services (no GUI)
 #
 # Purpose:
-# - Enable required repos (e.g. EPEL via lit.rhel.repos *if you choose to*)
+# - Enable required repos
 # - Apply wunderbox firewall policy (only if `firewall:` vars are provided)
 # - Install & configure core services on wunderboxes:
+#   - CoreDNS (internal DNS service provider)
+#   - Kea DHCP (internal DHCP provider)
+#   - NGINX (internal reverse proxy/gateway for service endpoints)
 #   - HashiCorp Vault
+#   - MinIO (S3 backend for Terraform/Terragrunt state + buckets)
 #   - Sonatype Nexus Repository Manager
+# - Apply Terraform-based Vault content using remote state in MinIO
 #
-# Notes:
-# - Expect service roles:
-#     - lit.supplementary.vault_validate / vault_deploy / vault_bootstrap / vault_config
-#     - lit.supplementary.nexus
+# Notes / Decisions:
+# - CoreDNS provides internal DNS for service endpoints (authoritative and/or forwarding).
+# - Kea provides internal DHCP (typically host networking + interface binding).
+# - NGINX is internal-only (no internet). Use it to publish stable internal FQDN endpoints.
+# - MinIO root credentials are GENERATED during minio_deploy (random) and written to Vault.
+# - minio_bootstrap creates `tfstate` bucket + `terraform` user/policy (not managed by Terraform),
+#   enables versioning, and stores terraform creds in Vault.
+# - vault_config contains Terraform-based Vault content ("vault-content apply") and therefore must run
+#   AFTER MinIO is ready (remote state backend available).
 # -----------------------------------------------------------------------------
 
 - name: Configure wunderboxes
@@ -20,28 +30,106 @@
   become: true
   gather_facts: true
 
-  roles:
-    - role: lit.rhel.repos
+  tasks:
+    - name: Enable required repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [repos]
       tags: [repos]
 
     # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
-    - role: fedora.linux_system_roles.firewall
+    - name: Apply firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [firewall]
       when: (firewall | default([], true) | length) > 0
       tags: [firewall]
 
+   # NGINX (service)
+    - name: Deploy Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_deploy
+        apply:
+          tags: [nginx, nginx_deploy]
+      tags: [nginx, nginx_deploy]
+
+    - name: Configure Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+        apply:
+          tags: [nginx, nginx_config]
+      tags: [nginx, nginx_config]
+
+    # CoreDNS (service) - internal DNS provider
+    - name: Deploy CoreDNS
+      ansible.builtin.include_role:
+        name: lit.supplementary.coredns_deploy
+        apply:
+          tags: [dns, coredns, coredns_deploy]
+      tags: [dns, coredns, coredns_deploy]
+
+    # Kea DHCP (service) - internal DHCP provider
+    # - Typically runs with host networking to receive broadcasts
+    # - Bind explicitly to the intended LAN/VLAN interface
+    - name: Deploy Kea
+      ansible.builtin.include_role:
+        name: lit.supplementary.kea_deploy
+        apply:
+          tags: [dhcp, kea, kea_deploy]
+      tags: [dhcp, kea, kea_deploy]
+
     # HashiCorp Vault (service)
-    - role: lit.supplementary.vault_deploy
-      tags: [vault, deploy]
+    - name: Deploy Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_deploy
+        apply:
+          tags: [vault, vault_deploy]
+      tags: [vault, vault_deploy]
 
-    - role: lit.supplementary.vault_validate
-      tags: [vault, postflight, validate]
+    - name: Validate Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_validate
+        apply:
+          tags: [vault, vault_validate]
+      tags: [vault, vault_validate]
 
-    - role: lit.supplementary.vault_bootstrap
-      tags: [vault, bootstrap]
+    - name: Bootstrap Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_bootstrap
+        apply:
+          tags: [vault, vault_bootstrap]
+      tags: [vault, vault_bootstrap]
 
-    - role: lit.supplementary.vault_config
-      tags: [vault, configure]
+    # MinIO (service)
+    - name: Deploy MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_deploy
+        apply:
+          tags: [minio, minio_deploy]
+      tags: [minio, minio_deploy]
+
+    # MinIO bootstrap
+    - name: Bootstrap MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_bootstrap
+        apply:
+          tags: [minio, minio_bootstrap]
+      tags: [minio, minio_bootstrap]
+
+    # Terraform-based Vault content ("vault-content apply")
+    - name: Configure Vault content
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_config
+        apply:
+          tags: [vault, vault_config]
+      tags: [vault, vault_config]
 
     # Sonatype Nexus Repository Manager (service)
-    - role: lit.supplementary.nexus
+    - name: Deploy Nexus
+      ansible.builtin.include_role:
+        name: lit.supplementary.nexus
+        apply:
+          tags: [nexus]
       tags: [nexus]

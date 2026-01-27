@@ -14,6 +14,7 @@ ansible-navigator:
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
+        - VAULT_TOKEN
       set:
         HOME: /tmp
         SSH_AUTH_SOCK: /runner/project/.ssh/auth-sock
