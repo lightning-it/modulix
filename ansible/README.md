@@ -132,33 +132,8 @@ ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-te
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
-# First: setup base configuration
-ansible-navigator run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
-  -t repos,firewall
-
-# Second: Setup core services
-ansible-navigator run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
-  -t nginx
-ansible-navigator run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
-  -t dns
-ansible-navigator run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
-  -t dhcp
-
-# Third: deploy/init/unseal/configure Vault
-ansible-navigator run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
-  -t vault
-
-# Then: run Nexus with a token
-export VAULT_TOKEN=<VAULT-TOKEN>
-ansible-navigator run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io \
-  -t nexus
-
+ansible-navigator run playbooks/stage-2b/12-wunderbox.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
 ---
