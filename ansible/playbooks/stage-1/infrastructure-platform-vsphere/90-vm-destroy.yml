@@ -13,11 +13,10 @@
       run_once: true
       when: ansible_limit is defined
 
-- name: Destroy host vm
+- name: Destroy virtual machine
   hosts: all
   gather_facts: False
   roles:
     - role: lit.foundational.vmware_vsphere
   vars:
-    vvs_vm_destroy: True
-...
+    vmware_vsphere_destroy: true

@@ -1,5 +1,6 @@
 ---
 collections:
+  - name: ansible.posix
   - name: community.vmware
   - name: community.hashi_vault
     version: ">=7.1.0"

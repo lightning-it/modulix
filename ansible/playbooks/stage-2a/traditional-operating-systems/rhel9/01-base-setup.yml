@@ -313,12 +313,13 @@
     # -------------------------------------------------------------------------
     # DNS: inject dns_servers into generated network_connections (NM provider)
     # -------------------------------------------------------------------------
-    - name: Network - inject DNS servers into uplink connection (wan)
+    - name: Network - inject DNS servers into uplink connection
       ansible.builtin.set_fact:
         network_connections: |-
           {%- set out = [] -%}
+          {%- set uplink_name = (net_vlan_autogen_wan_connection_name | default('wan')) -%}
           {%- for c in (network_connections | default([])) -%}
-          {%- if (c.name | default('')) == 'wan' -%}
+          {%- if (c.name | default('')) == uplink_name -%}
           {%- set ip = (c.ip | default({})) | combine({
                 'dns': (dns_servers | default([])),
                 'ipv4_ignore_auto_dns': true,

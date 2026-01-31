@@ -126,6 +126,9 @@ ansible-navigator run playbooks/stage-2b/11-workstation.yml \
 21 Wunderbox(VM+RHEL9) setup:
 
 ```bash
+ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
