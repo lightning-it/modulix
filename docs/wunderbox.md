@@ -23,7 +23,7 @@ Repo (public): https://github.com/lightning-it/modulix
 
 The bundled `ansible-navigator.yml` config:
 - Enables the execution environment via Docker
-- Uses `quay.io/l-it/ee-wunder-ansible-ubi9:v1.2.0`
+- Uses `quay.io/l-it/ee-wunder-ansible-ubi9:v1.7.0`
 - Mounts the Docker socket for roles that need it
 - Passes `ANSIBLE_CONFIG` and `ANSIBLE_VAULT_PASSWORD_FILE`
 - Disables playbook artifacts and uses stdout mode
