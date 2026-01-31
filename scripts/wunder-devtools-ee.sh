@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="quay.io/l-it/ee-wunder-devtools-ubi9:v1.2.5"
+IMAGE="quay.io/l-it/ee-wunder-devtools-ubi9:v1.2.6"
 
 DOCKER_ARGS=(
   -v "$PWD":/workspace
