@@ -148,7 +148,7 @@ Some typical ModuLix components (examples):
 - Standardized:
   - CI workflows (lint, Molecule, Terraform tests),
   - release pipelines (Semantic Release),
-  - devtools containers (like `wunder-devtools-ee`).
+  - devtools containers (like `container-ee-wunder-devtools-ubi9`).
 
 ### GitOps & Nightly
 

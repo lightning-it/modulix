@@ -1,7 +1,7 @@
 # Makefile for local CI-like workflows around ModuLix / Keycloak
 
 # Path to your devtools wrapper
-WUNDER_DEVTOOLS := ./scripts/wunder-devtools-ee.sh
+WUNDER_DEVTOOLS := ./scripts/container-ee-wunder-devtools-ubi9.sh
 
 # Ansible paths
 ANSIBLE_PLAYBOOK   := ansible/playbooks/keycloak.yml
