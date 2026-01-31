@@ -69,6 +69,60 @@
           tags: [dns, coredns, coredns_deploy]
       tags: [dns, coredns, coredns_deploy]
 
+    - name: Use local CoreDNS as DNS resolver (NetworkManager)
+      when:
+        - not coredns_deploy_skip_runtime | default(false) | bool
+        - coredns_deploy_host_ip | default('') | length > 0
+      tags: [dns, coredns]
+      block:
+        - name: Read active connection name for uplink iface
+          ansible.builtin.command: "nmcli -g GENERAL.CONNECTION device show {{ wunderbox_uplink_iface }}"
+          register: wunderbox_nm_conn
+          changed_when: false
+          failed_when: false
+
+        - name: Read current DNS settings for uplink connection
+          ansible.builtin.command: >-
+            nmcli -g ipv4.dns,ipv4.ignore-auto-dns connection show "{{ wunderbox_nm_conn.stdout | trim }}"
+          register: wunderbox_nm_dns_current
+          changed_when: false
+          failed_when: false
+          when: wunderbox_nm_conn.stdout | default('') | trim | length > 0
+
+        - name: Configure DNS on uplink connection (only if needed)
+          ansible.builtin.command: >-
+            nmcli connection modify "{{ wunderbox_nm_conn.stdout | trim }}"
+            ipv4.dns "{{ wunderbox_dns_servers | join(' ') }}"
+            ipv4.ignore-auto-dns yes
+          register: wunderbox_nm_dns_apply
+          changed_when: true
+          when:
+            - wunderbox_nm_conn.stdout | default('') | trim | length > 0
+            # nmcli -g ipv4.dns prints comma-separated servers; second field is yes/no -> "<dnslist>:<yes|no>"
+            - (wunderbox_nm_dns_current.stdout | default('')) != ((wunderbox_dns_servers | join(',')) ~ ':yes')
+
+        - name: Reapply connection to apply DNS (no bounce)
+          ansible.builtin.command: "nmcli device reapply {{ wunderbox_uplink_iface }}"
+          changed_when: false
+          failed_when: false
+          when: wunderbox_nm_dns_apply is defined and (wunderbox_nm_dns_apply is changed)
+
+      vars:
+        wunderbox_uplink_iface: >-
+          {{
+            (net_ifaces | default([]))
+            | selectattr('role', 'equalto', 'uplink')
+            | map(attribute='iface')
+            | list
+            | first
+          }}
+        wunderbox_dns_servers: >-
+          {{
+            [coredns_deploy_host_ip]
+            + (dns_servers | default([]))
+            | unique
+          }}
+
     # DHCP (service) - internal DHCP provider (system service, not container)
     # - Bind explicitly to the intended LAN/VLAN interface
     - name: Deploy DHCP
