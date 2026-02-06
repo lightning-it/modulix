@@ -1,0 +1,10 @@
+---
+- name: Checkout inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Git checkout inventory
+      ansible.builtin.git:
+        repo: 'https://{{ github_token }}@github.com/lightning-it/ansible-inventory-lit.git'
+        dest: inventories
+        version: "{{ g_inventory_version | default('main') }}"

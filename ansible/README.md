@@ -29,6 +29,11 @@ ansible-navigator exec -- \
   -p /runner/project/collections-dev --force
 ```
 
+### Initial inventory setup
+```bash
+ansible-navigator run init-inventory.yml -e g_inventory_version=<BRANCH> -e github_token=<PAT>
+```
+
 ---
 
 ## Running playbooks
