@@ -9,7 +9,6 @@ ansible-navigator:
       - "--user=1000"
       - "--volume=.:/runner/project"
       - "--workdir=/runner/project"
-      # - "--volume=/home/deg/.ssh:/runner/project/.ssh:ro"
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
