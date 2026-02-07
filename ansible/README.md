@@ -162,6 +162,10 @@ Recommended flow:
 
 Best practice: use a short‑lived, least‑privilege token for KV read + PKI issue, not a root token.
 
+```bash
+ansible-navigator run playbooks/stage-2b/12-wunderbox.yml -i inventories/corp/inventory.yml --limit wunderbox02.prd.dmz.corp.l-it.io -t vault
+```
+
 ## Inventory and roles
 
 - Inventory: `inventories/corp/inventory.yml`
