@@ -29,7 +29,10 @@
       ansible.builtin.command: "firewall-cmd --permanent --new-policy lan-to-wan"
       register: _fw_policy_create
       changed_when: _fw_policy_create.rc == 0
-      failed_when: _fw_policy_create.rc != 0 and ("ALREADY_ENABLED" not in (_fw_policy_create.stderr | default('')) and "NAME_CONFLICT" not in (_fw_policy_create.stderr | default('')))
+      failed_when:
+        - _fw_policy_create.rc != 0
+        - '"ALREADY_ENABLED" not in (_fw_policy_create.stderr | default(\"\"))'
+        - '"NAME_CONFLICT" not in (_fw_policy_create.stderr | default(\"\"))'
       when: net_wan_iface is defined
       tags: [firewall]
 

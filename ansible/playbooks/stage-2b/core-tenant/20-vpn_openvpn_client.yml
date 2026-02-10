@@ -4,10 +4,10 @@
   become: true
   gather_facts: true
   roles:
-  - role: openvpn
-    vars:
-      openvpn_relay_client: "{{ ovpn_openvpn_relay_client | default(false) }}"
-      openvpn_vpn_server: "{{ ovpn_vpn_server | default(groups['vpn_server'][0]) }}"
+    - role: openvpn
+      vars:
+        openvpn_relay_client: "{{ ovpn_openvpn_relay_client | default(false) }}"
+        openvpn_vpn_server: "{{ ovpn_vpn_server | default(groups['vpn_server'][0]) }}"
 
-      relay_client_config_name: "{{ ovpn_relay_client_config_name | default('') }}"
-      relay_client_relay_client_ccd: "{{ ovpn_relay_client_ccd | default('') }}"
+        relay_client_config_name: "{{ ovpn_relay_client_config_name | default('') }}"
+        relay_client_relay_client_ccd: "{{ ovpn_relay_client_ccd | default('') }}"

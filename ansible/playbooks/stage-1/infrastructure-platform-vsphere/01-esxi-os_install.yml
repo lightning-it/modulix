@@ -7,7 +7,7 @@
     - name: Build custom esxi iso (optional)
       role: lit.supplementary.manage_esxi
       vars:
-        manage_esxi_build_iso: True
+        manage_esxi_build_iso: true
       tags:
         - never
         - create_iso

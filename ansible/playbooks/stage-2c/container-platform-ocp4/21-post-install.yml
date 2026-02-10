@@ -1,3 +1,4 @@
+---
 - name: Setup gitops
   hosts: localhost
   gather_facts: false
@@ -13,3 +14,4 @@
         - gitops
       vars:
         gitops_operator_approve: "{{ approve_all | default(false) }}"
+- name: Setup gitops

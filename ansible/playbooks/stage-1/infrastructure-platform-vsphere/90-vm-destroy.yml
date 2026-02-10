@@ -1,7 +1,7 @@
 ---
 - name: Run PreCheck
   hosts: localhost
-  gather_facts: False
+  gather_facts: false
   pre_tasks:
     - name: Verifying that a limit is set
       fail:
@@ -15,7 +15,7 @@
 
 - name: Destroy virtual machine
   hosts: all
-  gather_facts: False
+  gather_facts: false
   roles:
     - role: lit.foundational.vmware_vsphere
   vars:

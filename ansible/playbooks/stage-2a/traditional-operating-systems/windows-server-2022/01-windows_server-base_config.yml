@@ -1,7 +1,7 @@
 ---
 - name: Run PreCheck
   hosts: localhost
-  gather_facts: False
+  gather_facts: false
   pre_tasks:
     - name: Verifying that a limit is set
       fail:
@@ -15,45 +15,53 @@
 
 - name: Run initial setup / user management
   hosts: all
-  gather_facts: False
+  gather_facts: false
   pre_tasks:
     - name: Check if initial setup is needed
       shell: "hostname; id"
-      ignore_unreachable: True
-      check_mode: False
-      changed_when: False
-      failed_when: False
+      ignore_unreachable: true
+      check_mode: false
+      changed_when: false
+      failed_when: false
       register: node_unreachable
       vars:
         ansible_winrm_port: 5986
     - name: Check if host is ready, but use different winrm port
       shell: "hostname; id"
-      ignore_unreachable: True
-      check_mode: False
-      changed_when: False
-      failed_when: False
+      ignore_unreachable: true
+      check_mode: false
+      changed_when: false
+      failed_when: false
       register: node_unreachable_custom_winrm
     - name: Gather facts when necessary
       setup:
-      delegate_facts: True
+      delegate_facts: true
       vars:
         ansible_user: "{{ windows_bootstrap_username }}"
         ansible_password: "{{ windows_bootstrap_password }}"
         ansible_winrm_port: 5986
-      when: (node_unreachable.unreachable is defined and node_unreachable.unreachable) and (node_unreachable_custom_winrm.unreachable is defined and node_unreachable_custom_winrm.unreachable)
+      when:
+        - node_unreachable.unreachable is defined
+        - node_unreachable.unreachable
+        - node_unreachable_custom_winrm.unreachable is defined
+        - node_unreachable_custom_winrm.unreachable
   roles:
     - name: Execute initial user_management
       role: user_management
-      gather_facts: True
+      gather_facts: true
       vars:
         ansible_user: "{{ windows_bootstrap_username }}"
         ansible_password: "{{ windows_bootstrap_password }}"
         ansible_winrm_port: 5986
-      when: (node_unreachable.unreachable is defined and node_unreachable.unreachable) and (node_unreachable_custom_winrm.unreachable is defined and node_unreachable_custom_winrm.unreachable)
+      when:
+        - node_unreachable.unreachable is defined
+        - node_unreachable.unreachable
+        - node_unreachable_custom_winrm.unreachable is defined
+        - node_unreachable_custom_winrm.unreachable
 
 - name: Base setup
   hosts: all
-  gather_facts: True
+  gather_facts: true
   roles:
     - name: Execute role user_management
       role: user_management

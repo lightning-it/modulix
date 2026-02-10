@@ -1,7 +1,7 @@
 ---
 - name: Setup ansible runner
   hosts: ansible_runner
-  gather_facts: False
+  gather_facts: false
   tasks:
     - name: Setup ansible runner
       ansible.builtin.debug:

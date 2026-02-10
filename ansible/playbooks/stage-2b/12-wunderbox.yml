@@ -35,7 +35,8 @@
 #
 # - NGINX:
 #   - Internal-only (no internet). Publishes stable internal FQDN endpoints on 443.
-#   - During provisioning, services may be reached on their native ports (e.g., Vault 8200) until nginx_config is applied.
+#   - During provisioning, services may be reached on their native ports (e.g., Vault 8200)
+#     until nginx_config is applied.
 #   - Tag convenience: nginx_deploy is also tagged with nginx_config so `-t nginx_config` ensures nginx is present.
 # -----------------------------------------------------------------------------
 
@@ -100,6 +101,14 @@
           tags: [vault, vault_validate]
       tags: [vault, vault_validate]
 
+    # Vault day-2 operations (default action is none; enables `-t vault_ops -e vault_ops_action=...`)
+    - name: Vault ops
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_ops
+        apply:
+          tags: [vault, vault_ops]
+      tags: [vault, vault_ops]
+
     # Terraform-based Vault content ("vault-content apply")
     # - May run before MinIO; state is LOCAL during bootstrap and later migrated by roles automatically.
     - name: Configure Vault content
@@ -116,6 +125,13 @@
         apply:
           tags: [minio, minio_deploy]
       tags: [minio, minio_deploy]
+
+    - name: Configure MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_config
+        apply:
+          tags: [minio, minio_config]
+      tags: [minio, minio_config]
 
     # MinIO bootstrap
     - name: Bootstrap MinIO
@@ -147,4 +163,3 @@
         apply:
           tags: [nginx, nginx_config]
       tags: [nginx, nginx_config]
-  
