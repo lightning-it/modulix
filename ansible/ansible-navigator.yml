@@ -17,7 +17,6 @@ ansible-navigator:
         - ANSIBLE_VAULT_PASSWORD_FILE
         - VAULT_TOKEN
       set:
-        HOME: /tmp
         SSH_AUTH_SOCK: /runner/project/.ssh/auth-sock
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp
