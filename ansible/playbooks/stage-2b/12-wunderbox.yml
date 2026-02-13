@@ -79,6 +79,21 @@
           tags: [dhcp, dhcp_deploy]
       tags: [dhcp, dhcp_deploy]
 
+    # NGINX (service)
+    - name: Deploy Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_deploy
+        apply:
+          tags: [nginx, nginx_deploy]
+      tags: [nginx, nginx_deploy]
+
+    - name: Configure Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+        apply:
+          tags: [nginx, nginx_config]
+      tags: [nginx, nginx_config]
+
     # HashiCorp Vault (service)
     - name: Deploy Vault
       ansible.builtin.include_role:
@@ -148,18 +163,3 @@
         apply:
           tags: [nexus]
       tags: [nexus]
-
-    # NGINX (service) - deploy + final config
-    - name: Deploy Nginx
-      ansible.builtin.include_role:
-        name: lit.supplementary.nginx_deploy
-        apply:
-          tags: [nginx, nginx_deploy, nginx_config]
-      tags: [nginx, nginx_deploy, nginx_config]
-
-    - name: Configure Nginx
-      ansible.builtin.include_role:
-        name: lit.supplementary.nginx_config
-        apply:
-          tags: [nginx, nginx_config]
-      tags: [nginx, nginx_config]
