@@ -149,7 +149,6 @@
           tags: [minio, minio_config]
       tags: [minio, minio_config]
 
-    # MinIO bootstrap
     - name: Bootstrap MinIO
       ansible.builtin.include_role:
         name: lit.supplementary.minio_bootstrap
