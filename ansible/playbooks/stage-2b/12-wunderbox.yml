@@ -88,13 +88,6 @@
           tags: [nginx, nginx_deploy]
       tags: [nginx, nginx_deploy]
 
-    - name: Configure Nginx
-      ansible.builtin.include_role:
-        name: lit.supplementary.nginx_config
-        apply:
-          tags: [nginx, nginx_config]
-      tags: [nginx, nginx_config]
-
     # HashiCorp Vault (service)
     - name: Deploy Vault
       ansible.builtin.include_role:
@@ -162,4 +155,23 @@
         name: lit.supplementary.nexus
         apply:
           tags: [nexus]
+      vars:
+        nexus_skip_initial_config: true
       tags: [nexus]
+
+    # Configure NGINX only after core backends (Vault/MinIO/Nexus) exist.
+    # This avoids early TLS fetch/auth failures and upstream resolution issues.
+    - name: Configure Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+        apply:
+          tags: [nginx, nginx_config]
+      tags: [nginx, nginx_config]
+
+    - name: Configure Nexus API
+      ansible.builtin.include_role:
+        name: lit.supplementary.nexus
+        tasks_from: initial_config
+        apply:
+          tags: [nexus, sonatype_nexus_config]
+      tags: [nexus, sonatype_nexus_config]
