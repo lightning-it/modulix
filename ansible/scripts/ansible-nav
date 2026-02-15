@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
+
+inventory_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES:-auto}"
+ssh_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_SSH:-auto}"
+
+find_container_api_socket() {
+  local uid
+  uid="$(id -u)"
+
+  if [[ -S "/var/run/docker.sock" ]]; then
+    echo "/var/run/docker.sock"
+    return 0
+  fi
+
+  if [[ -S "/run/docker.sock" ]]; then
+    echo "/run/docker.sock"
+    return 0
+  fi
+
+  if [[ -S "/run/user/${uid}/podman/podman.sock" ]]; then
+    echo "/run/user/${uid}/podman/podman.sock"
+    return 0
+  fi
+
+  return 1
+}
+
+find_inventory_source() {
+  local from_env="${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}"
+  local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory-lit/inventories"
+
+  if [[ -n "${from_env}" ]]; then
+    if [[ -d "${from_env}" ]]; then
+      echo "${from_env}"
+      return 0
+    fi
+    echo "Configured ANSIBLE_NAVIGATOR_INVENTORY_SOURCE does not exist: ${from_env}" >&2
+    return 1
+  fi
+
+  if [[ -d "${default_source}" ]]; then
+    echo "${default_source}"
+    return 0
+  fi
+
+  return 1
+}
+
+find_ssh_source() {
+  local from_env="${ANSIBLE_NAVIGATOR_SSH_SOURCE:-}"
+  local default_source="${HOME}/.ssh"
+
+  if [[ -n "${from_env}" ]]; then
+    if [[ -d "${from_env}" ]]; then
+      echo "${from_env}"
+      return 0
+    fi
+    echo "Configured ANSIBLE_NAVIGATOR_SSH_SOURCE does not exist: ${from_env}" >&2
+    return 1
+  fi
+
+  if [[ -d "${default_source}" ]]; then
+    echo "${default_source}"
+    return 0
+  fi
+
+  return 1
+}
+
+rewrite_inventory_spec_for_ee() {
+  local spec="$1"
+  local out=()
+  local part
+  IFS=',' read -r -a parts <<< "${spec}"
+
+  for part in "${parts[@]}"; do
+    case "${part}" in
+      inventories/*)
+        out+=("/runner/project/${part}")
+        ;;
+      ./inventories/*)
+        out+=("/runner/project/${part#./}")
+        ;;
+      *)
+        out+=("${part}")
+        ;;
+    esac
+  done
+
+  local joined=""
+  local i
+  for i in "${!out[@]}"; do
+    if [[ "${i}" -gt 0 ]]; then
+      joined+=","
+    fi
+    joined+="${out[$i]}"
+  done
+  echo "${joined}"
+}
+
+config_file="${ANSIBLE_NAVIGATOR_CONFIG:-${REPO_ROOT}/ansible-navigator.yml}"
+
+if [[ ! -f "${config_file}" ]]; then
+  echo "Missing config file: ${config_file}" >&2
+  exit 1
+fi
+
+extra_args=()
+inventory_mounted=false
+
+if [[ -n "${ANSIBLE_NAVIGATOR_ENGINE:-}" ]]; then
+  case "${ANSIBLE_NAVIGATOR_ENGINE}" in
+    auto|podman|docker)
+      extra_args+=("--ce=${ANSIBLE_NAVIGATOR_ENGINE}")
+      ;;
+    *)
+      echo "Invalid ANSIBLE_NAVIGATOR_ENGINE='${ANSIBLE_NAVIGATOR_ENGINE}' (use: auto|podman|docker)." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if container_api_socket="$(find_container_api_socket)"; then
+  extra_args+=("--eev=${container_api_socket}:/var/run/docker.sock")
+fi
+
+case "${inventory_mount_requested}" in
+  auto)
+    if inventory_source="$(find_inventory_source)"; then
+      extra_args+=("--eev=${inventory_source}:/runner/project/inventories:ro")
+      inventory_mounted=true
+    fi
+    ;;
+  true)
+    inventory_source="$(find_inventory_source)"
+    extra_args+=("--eev=${inventory_source}:/runner/project/inventories:ro")
+    inventory_mounted=true
+    ;;
+  false)
+    ;;
+  *)
+    echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES='${inventory_mount_requested}' (use: auto|true|false)." >&2
+    exit 1
+    ;;
+esac
+
+case "${ssh_mount_requested}" in
+  auto)
+    if ssh_source="$(find_ssh_source)"; then
+      extra_args+=("--eev=${ssh_source}:/runner/.ssh:ro")
+    fi
+    ;;
+  true)
+    ssh_source="$(find_ssh_source)"
+    extra_args+=("--eev=${ssh_source}:/runner/.ssh:ro")
+    ;;
+  false)
+    ;;
+  *)
+    echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_SSH='${ssh_mount_requested}' (use: auto|true|false)." >&2
+    exit 1
+    ;;
+esac
+
+export ANSIBLE_NAVIGATOR_CONFIG="${config_file}"
+
+final_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i|--inventory)
+      if [[ $# -lt 2 ]]; then
+        final_args+=("$1")
+        shift
+        continue
+      fi
+      inv_spec="$2"
+      if [[ "${inventory_mounted}" == true ]]; then
+        inv_spec="$(rewrite_inventory_spec_for_ee "${inv_spec}")"
+      fi
+      final_args+=("$1" "${inv_spec}")
+      shift 2
+      ;;
+    --inventory=*)
+      inv_spec="${1#--inventory=}"
+      if [[ "${inventory_mounted}" == true ]]; then
+        inv_spec="$(rewrite_inventory_spec_for_ee "${inv_spec}")"
+      fi
+      final_args+=("--inventory=${inv_spec}")
+      shift
+      ;;
+    -i*)
+      inv_spec="${1#-i}"
+      if [[ -n "${inv_spec}" ]]; then
+        if [[ "${inventory_mounted}" == true ]]; then
+          inv_spec="$(rewrite_inventory_spec_for_ee "${inv_spec}")"
+        fi
+        final_args+=("-i${inv_spec}")
+      else
+        final_args+=("$1")
+      fi
+      shift
+      ;;
+    *)
+      final_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+exec ansible-navigator "${extra_args[@]}" "${final_args[@]}"
