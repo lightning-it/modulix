@@ -1,0 +1,13 @@
+---
+- name: Setup VMware vCenter
+  hosts: localhost
+  gather_facts: false
+  become: false
+
+  roles:
+    - role: lit.supplementary.vcenter_setup
+      vars:
+        manage_esxi_default_users: "{{ default_users }}"
+      tags:
+        - vcenter
+        - setup

@@ -1,0 +1,11 @@
+---
+- name: Setup gitlab omnibus
+  hosts: gitlab_runner_omnibus
+
+  gather_facts: true
+  roles:
+    - name: Execute role gitlab_runner_omnibus
+      role: gitlab_runner_omnibus
+      tags:
+        - gitlab_runner_omnibus
+...

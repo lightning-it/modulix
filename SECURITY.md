@@ -1,47 +1,51 @@
 # Security Policy
 
-ModuLix is used to describe and orchestrate enterprise automation building blocks
-at a product and blueprint level.
-Because these definitions may influence how infrastructure is operated and
-secured, we take security-related issues seriously.
+ModuLix is used to describe and orchestrate infrastructure building blocks
+(e.g. RHEL, Satellite, OpenShift, Keycloak) at a product and blueprint level.
+Because these definitions can influence how infrastructure is deployed and
+operated, we treat security-relevant reports seriously.
 
-This document explains which versions of the **ModuLix repository itself** are
-supported with security updates, and how to report a vulnerability.
+This document describes which versions of this **ModuLix repository** are
+supported with security updates and how to report a vulnerability.
 
-> **Note:**  
-> The actual automation implementations (e.g. Ansible Collections, Terraform
-> modules) live in separate repositories. Those have their own lifecycle and
-> security handling policies.
+> **Note:** The actual automation implementations (e.g. Ansible Collections,
+> Terraform modules, container images) live in separate repositories and have
+> their own lifecycle and security handling. This policy only covers this
+> repository.
+
+---
 
 ## Supported Versions
 
-ModuLix follows semantic versioning (`MAJOR.MINOR.PATCH`). In practice:
+ModuLix follows semantic versioning (`MAJOR.MINOR.PATCH`). In practice for
+this repo:
 
-- **MAJOR** – breaking structural changes in how ModuLix is organized
-- **MINOR** – new components, blueprints, documentation and orchestration logic
+- **MAJOR** – breaking structural changes to how ModuLix is organized
+- **MINOR** – new products, blueprints, inventories, or orchestration logic
 - **PATCH** – bug fixes and security-related corrections
 
-Security fixes for this repository are only guaranteed for recent **minor**
-versions.
+We currently provide security fixes for:
 
-| Version        | Supported                        |
-| -------------- | -------------------------------- |
-| 0.3.x          | ✅ actively supported (security + bugfixes) |
-| 0.2.x          | ⚠️ best-effort, critical security issues only |
-| < 0.2          | ❌ no longer supported           |
+| Version range | Status                                |
+| ------------- | ------------------------------------- |
+| `main` branch | ✅ actively supported (security + bugfixes) |
+| latest tagged release (0.x) | ✅ best-effort security fixes         |
+| older tags / branches      | ❌ no guaranteed security updates     |
 
-> While ModuLix is still < 1.0.0, structure and content may evolve more
-> frequently. Once we reach 1.0.0, we will document a stricter support window.
+If you are consuming ModuLix content from an older tag or branch, we strongly
+recommend upgrading to the latest version from `main` or the most recent tag
+before requesting security fixes.
 
-If you are working with an older ModuLix version, we strongly recommend
-upgrading to the latest `0.3.x` (or higher) before requesting security fixes.
+---
 
 ## Reporting a Vulnerability
 
-If you believe you have found a security-relevant issue in:
+If you believe you have found a security-relevant issue in this repository,
+for example:
 
-- the way ModuLix describes components, blueprints or integration flows, or
-- documentation that could mislead users into deploying insecure configurations,
+- a blueprint or inventory that leads to insecure defaults,
+- documentation that encourages unsafe configuration,
+- or orchestration logic that accidentally weakens security controls,
 
 please **do not** open a public issue or pull request.
 
@@ -49,14 +53,15 @@ Instead:
 
 1. Prepare a short report including:
    - a description of the issue and potential impact,
-   - which file(s), page(s) or blueprint(s) are affected,
+   - which file(s), page(s), or blueprint(s) are affected,
    - steps to reproduce or understand the risk, if applicable,
-   - any relevant logs, configs or screenshots (redacted as needed).
+   - any relevant logs, configs, or screenshots (redacted as needed).
 
 2. Send your report to:
 
    - 📧 **security@l-it.io** (preferred), or  
-   - your existing Lightning IT contact with the subject `ModuLix Security Report`.
+   - your existing Lightning IT contact with the subject:  
+     `ModuLix Security Report`
 
 3. You will receive an acknowledgement within **3 business days**.  
    We will then:
@@ -67,31 +72,34 @@ Instead:
 If the vulnerability is confirmed, we will:
 
 - prepare and review a fix in a private branch,
-- ship a patch/minor release depending on impact,
-- mention the fix in the changelog and/or release notes,
-- credit you by name or pseudonym, if you wish.
+- ship a patch or minor release depending on impact,
+- reference the fix in the changelog and/or release notes,
+- optionally credit you by name or pseudonym if you wish.
 
 If the report is determined to be a false positive or out of scope, we will
 still reply with an explanation.
+
+---
 
 ## Scope
 
 This security policy covers:
 
-- the **content of this repository**:
+- the **content of this repository**, including:
   - ModuLix product inventory,
-  - blueprints and orchestration logic described here,
-  - documentation and example flows contained in this repo.
+  - environment inventories (e.g. nightly, demo),
+  - group variables and blueprints,
+  - orchestration playbooks and documentation in this repo.
 
 It does **not** cover:
 
-- implementation repositories such as:
-  - Ansible Collections,
+- automation implementation repositories such as:
+  - Ansible Collections (e.g. `lightning_it.supplementary`),
   - Terraform modules,
-  - container images or other code hosted in separate repos,
+  - devtools containers,
 - upstream products (RHEL, Satellite, OpenShift, Keycloak, Vault, GitLab, etc.),
   which have their own vendor security processes.
 
-Security or vulnerability reports related to implementation repositories
-should be filed via the security process of those specific repos
-(e.g. their own `SECURITY.md` or instructions).
+Security or vulnerability reports related to implementation repositories should
+be filed via the security process of those specific repositories (for example,
+their own `SECURITY.md` or instructions).

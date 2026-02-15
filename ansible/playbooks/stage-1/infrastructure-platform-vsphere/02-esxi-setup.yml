@@ -1,0 +1,10 @@
+---
+- name: Setup ESXi hosts
+  hosts: vsphere_esxi
+  gather_facts: false
+  become: false
+  roles:
+    - name: Execute role manage_esxi
+      role: lit.supplementary.manage_esxi
+      tags:
+        - manage_esxi

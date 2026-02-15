@@ -1,0 +1,68 @@
+---
+# -----------------------------------------------------------------------------
+# Core Tenant - Routed Firewall Host
+#
+# Purpose:
+# - Apply firewall rules only to hosts in group "firewalls".
+# -----------------------------------------------------------------------------
+
+- name: Configure firewall policy
+  hosts: firewalls
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: fedora.linux_system_roles.firewall
+      tags: [firewall]
+
+  tasks:
+    # Only for firewalls with a WAN interface (DMZ), i.e. "Egress firewall"
+    - name: Ensure lan->wan forwarding is enabled (zone-level)
+      ansible.builtin.command: "firewall-cmd --zone=lan --add-forward --permanent"
+      register: _fw_lan_forward
+      changed_when: _fw_lan_forward.rc == 0
+      failed_when: _fw_lan_forward.rc != 0 and ("ALREADY_ENABLED" not in (_fw_lan_forward.stderr | default('')))
+      when: net_wan_iface is defined
+      tags: [firewall]
+
+    - name: Ensure lan-to-wan policy exists
+      ansible.builtin.command: "firewall-cmd --permanent --new-policy lan-to-wan"
+      register: _fw_policy_create
+      changed_when: _fw_policy_create.rc == 0
+      failed_when:
+        - _fw_policy_create.rc != 0
+        - '"ALREADY_ENABLED" not in (_fw_policy_create.stderr | default(\"\"))'
+        - '"NAME_CONFLICT" not in (_fw_policy_create.stderr | default(\"\"))'
+      when: net_wan_iface is defined
+      tags: [firewall]
+
+    - name: Ensure lan-to-wan policy has ingress zone lan
+      ansible.builtin.command: "firewall-cmd --permanent --policy lan-to-wan --add-ingress-zone lan"
+      register: _fw_policy_ingress
+      changed_when: _fw_policy_ingress.rc == 0
+      failed_when: _fw_policy_ingress.rc != 0 and ("ALREADY_ENABLED" not in (_fw_policy_ingress.stderr | default('')))
+      when: net_wan_iface is defined
+      tags: [firewall]
+
+    - name: Ensure lan-to-wan policy has egress zone wan
+      ansible.builtin.command: "firewall-cmd --permanent --policy lan-to-wan --add-egress-zone wan"
+      register: _fw_policy_egress
+      changed_when: _fw_policy_egress.rc == 0
+      failed_when: _fw_policy_egress.rc != 0 and ("ALREADY_ENABLED" not in (_fw_policy_egress.stderr | default('')))
+      when: net_wan_iface is defined
+      tags: [firewall]
+
+    - name: Ensure lan-to-wan policy target is ACCEPT
+      ansible.builtin.command: "firewall-cmd --permanent --policy lan-to-wan --set-target ACCEPT"
+      register: _fw_policy_target
+      changed_when: _fw_policy_target.rc == 0
+      failed_when: _fw_policy_target.rc != 0
+      when: net_wan_iface is defined
+      tags: [firewall]
+
+    - name: Reload firewalld (apply policy)
+      ansible.builtin.command: "firewall-cmd --reload"
+      register: _fw_reload
+      changed_when: false
+      when: net_wan_iface is defined
+      tags: [firewall]

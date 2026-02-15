@@ -1,0 +1,10 @@
+---
+- name: Setup dnsmasq
+  hosts: dsmq
+  gather_facts: false
+  roles:
+    - name: Setup dnsmasq
+      role: dnsmasq
+      tags:
+        - dnsmasq
+...

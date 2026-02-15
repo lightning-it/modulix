@@ -1,0 +1,22 @@
+---
+- name: Run PreCheck
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Verifying that a limit is set
+      fail:
+        msg: 'This playbook cannot be run with no limit'
+      run_once: true
+      when: ansible_limit is not defined
+    - debug:
+        msg: Limit is {{ ansible_limit }}, let's continue
+      run_once: true
+      when: ansible_limit is defined
+
+- name: Destroy virtual machine
+  hosts: all
+  gather_facts: false
+  roles:
+    - role: lit.foundational.vmware_vsphere
+  vars:
+    vmware_vsphere_destroy: true

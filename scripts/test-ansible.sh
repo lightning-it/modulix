@@ -17,8 +17,8 @@ echo "Linting YAML under ansible/..."
 yamllint ansible
 
 inventory_files=(
-  ansible/inventories/local/hosts.yml
-  ansible/inventories/poc/hosts.yml
+  ansible/inventories/nightly/hosts.yml
+  ansible/inventories/demo/hosts.yml
 )
 
 for inv in "${inventory_files[@]}"; do

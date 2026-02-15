@@ -1,0 +1,177 @@
+---
+# -----------------------------------------------------------------------------
+# Wunderboxes - Core Services (no GUI)
+#
+# Purpose:
+# - Enable required repos
+# - Apply wunderbox firewall policy
+# - Install & configure core services on wunderboxes:
+#   - CoreDNS (internal DNS service provider)
+#   - DHCP (internal DHCP provider, system service)
+#   - HashiCorp Vault (secrets & bootstrap control-plane)
+#   - MinIO (S3 backend for Terraform/Terragrunt state + buckets)
+#   - Sonatype Nexus Repository Manager
+#   - NGINX (internal reverse proxy/gateway for stable service endpoints)
+#
+# Notes / Decisions:
+# - CoreDNS provides internal DNS for service endpoints (authoritative and/or forwarding).
+# - DHCP is NOT container-based here: it runs as a system service (bind to specific interface).
+#
+# - NGINX:
+#   - Internal-only (no internet). Publishes stable internal FQDN endpoints on 443.
+#   - During provisioning, services may be reached on their native ports (e.g., Vault 8200)
+#     until nginx_config is applied.
+#   - Tag convenience: nginx_deploy is also tagged with nginx_config so `-t nginx_config` ensures nginx is present.
+#
+# - Vault:
+#   - vault_bootstrap initializes/unseals Vault (first run) and writes an encrypted init-file.
+#   - vault_validate is executed AFTER bootstrap (so health/permissions checks are meaningful).
+#   - vault_config may run BEFORE MinIO; during bootstrap it uses LOCAL state under /srv/vault/bootstrap.
+#
+# - MinIO:
+#   - Root credentials are GENERATED during minio_deploy (random) and stored in Vault.
+#   - minio_bootstrap creates `tfstate` bucket + `terraform` user/policy (not managed by Terraform),
+#     enables versioning, and stores terraform creds in Vault.
+#   - State migration is handled INSIDE the roles:
+#       * vault_config: if backend is ready, it migrates its local state and deletes local tfstate files.
+#         Otherwise it marks /srv/vault/bootstrap as pending migration.
+#       * minio_bootstrap: once MinIO backend is ready, it migrates any pending local state dirs and
+#         deletes local tfstate files on success.
+#   - Therefore, the playbook contains NO explicit tfstate migration logic.
+#
+# -----------------------------------------------------------------------------
+
+- name: Configure wunderboxes
+  hosts: wunderboxes
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Enable required repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [repos]
+      tags: [repos]
+
+    # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
+    - name: Apply firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [firewall]
+      when: (firewall | default([], true) | length) > 0
+      tags: [firewall]
+
+    # CoreDNS (service) - internal DNS provider
+    - name: Deploy CoreDNS
+      ansible.builtin.include_role:
+        name: lit.supplementary.coredns_deploy
+        apply:
+          tags: [dns, coredns, coredns_deploy]
+      tags: [dns, coredns, coredns_deploy]
+
+    # DHCP (service) - internal DHCP provider (system service, not container)
+    # - Bind explicitly to the intended LAN/VLAN interface
+    - name: Deploy DHCP
+      ansible.builtin.include_role:
+        name: lit.supplementary.dhcp_deploy
+        apply:
+          tags: [dhcp, dhcp_deploy]
+      tags: [dhcp, dhcp_deploy]
+
+    # NGINX (service)
+    - name: Deploy Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_deploy
+        apply:
+          tags: [nginx, nginx_deploy]
+      tags: [nginx, nginx_deploy]
+
+    # HashiCorp Vault (service)
+    - name: Deploy Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_deploy
+        apply:
+          tags: [vault, vault_deploy]
+      tags: [vault, vault_deploy]
+
+    - name: Bootstrap Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_bootstrap
+        apply:
+          tags: [vault, vault_bootstrap]
+      tags: [vault, vault_bootstrap]
+
+    - name: Validate Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_validate
+        apply:
+          tags: [vault, vault_validate]
+      tags: [vault, vault_validate]
+
+    # Vault day-2 operations (default action is none; enables `-t vault_ops -e vault_ops_action=...`)
+    - name: Vault ops
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_ops
+        apply:
+          tags: [vault, vault_ops]
+      tags: [vault, vault_ops]
+
+    # Terraform-based Vault content ("vault-content apply")
+    # - May run before MinIO; state is LOCAL during bootstrap and later migrated by roles automatically.
+    - name: Configure Vault content
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_config
+        apply:
+          tags: [vault, vault_config]
+      tags: [vault, vault_config]
+
+    # MinIO (service)
+    - name: Deploy MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_deploy
+        apply:
+          tags: [minio, minio_deploy]
+      tags: [minio, minio_deploy]
+
+    - name: Configure MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_config
+        apply:
+          tags: [minio, minio_config]
+      tags: [minio, minio_config]
+
+    - name: Bootstrap MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_bootstrap
+        apply:
+          tags: [minio, minio_bootstrap]
+      tags: [minio, minio_bootstrap]
+
+    # Sonatype Nexus Repository Manager (service)
+    - name: Deploy Nexus
+      ansible.builtin.include_role:
+        name: lit.supplementary.nexus
+        apply:
+          tags: [nexus]
+      vars:
+        nexus_skip_initial_config: true
+      tags: [nexus]
+
+    # Configure NGINX only after core backends (Vault/MinIO/Nexus) exist.
+    # This avoids early TLS fetch/auth failures and upstream resolution issues.
+    - name: Configure Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+        apply:
+          tags: [nginx, nginx_config]
+      tags: [nginx, nginx_config]
+
+    - name: Configure Nexus API
+      ansible.builtin.include_role:
+        name: lit.supplementary.nexus
+        tasks_from: initial_config
+        apply:
+          tags: [nexus, sonatype_nexus_config]
+      tags: [nexus, sonatype_nexus_config]
