@@ -5,9 +5,82 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
-inventory_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES:-auto}"
-ssh_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_SSH:-auto}"
-ssh_agent_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT:-auto}"
+engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-${ANSIBLE_NAVIGATOR_ENGINE:-auto}}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-${ANSIBLE_NAVIGATOR_IMAGE:-localhost/ee-wunder-toolbox-ubi9:latest}}"
+pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
+nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
+nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
+nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
+nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
+
+inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-${ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES:-auto}}"
+ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-${ANSIBLE_NAVIGATOR_MOUNT_SSH:-auto}}"
+ssh_agent_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT:-${ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT:-auto}}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/ansible-nav run <playbook.yml> [ansible-navigator run args...]
+  ./scripts/ansible-nav exec -- <command> [args...]
+
+Environment:
+  ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: localhost/ee-wunder-toolbox-ubi9:local)
+  ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
+  ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
+  ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
+  ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
+  ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+
+Compatibility aliases are still supported:
+  ANSIBLE_NAVIGATOR_ENGINE
+  ANSIBLE_NAVIGATOR_IMAGE
+  ANSIBLE_NAVIGATOR_MOUNT_*
+EOF
+}
+
+validate_tristate() {
+  local name="$1"
+  local value="$2"
+  case "${value}" in
+    auto|true|false) ;;
+    *)
+      echo "Invalid ${name}='${value}' (use: auto|true|false)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+detect_container_engine() {
+  local requested="$1"
+
+  case "${requested}" in
+    auto)
+      if command -v podman >/dev/null 2>&1; then
+        echo "podman"
+        return 0
+      fi
+      if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+        return 0
+      fi
+      echo "Neither podman nor docker is installed." >&2
+      return 1
+      ;;
+    podman|docker)
+      if ! command -v "${requested}" >/dev/null 2>&1; then
+        echo "Requested container engine '${requested}' is not installed." >&2
+        return 1
+      fi
+      echo "${requested}"
+      return 0
+      ;;
+    *)
+      echo "Invalid ANSIBLE_TOOLBOX_ENGINE='${requested}' (use: auto|podman|docker)." >&2
+      return 1
+      ;;
+  esac
+}
 
 find_container_api_socket() {
   local uid
@@ -32,7 +105,7 @@ find_container_api_socket() {
 }
 
 find_inventory_source() {
-  local from_env="${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}"
+  local from_env="${ANSIBLE_TOOLBOX_INVENTORY_SOURCE:-${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}}"
   local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory-lit/inventories"
 
   if [[ -n "${from_env}" ]]; then
@@ -53,7 +126,7 @@ find_inventory_source() {
 }
 
 find_ssh_source() {
-  local from_env="${ANSIBLE_NAVIGATOR_SSH_SOURCE:-}"
+  local from_env="${ANSIBLE_TOOLBOX_SSH_SOURCE:-${ANSIBLE_NAVIGATOR_SSH_SOURCE:-}}"
   local default_source="${HOME}/.ssh"
 
   if [[ -n "${from_env}" ]]; then
@@ -71,6 +144,57 @@ find_ssh_source() {
   fi
 
   return 1
+}
+
+ensure_image_present() {
+  local engine="$1"
+  local image_ref="$2"
+  local policy="$3"
+
+  case "${policy}" in
+    always)
+      "${engine}" pull "${image_ref}"
+      ;;
+    missing)
+      if ! "${engine}" image inspect "${image_ref}" >/dev/null 2>&1; then
+        "${engine}" pull "${image_ref}"
+      fi
+      ;;
+    never)
+      ;;
+    *)
+      echo "Invalid ANSIBLE_TOOLBOX_PULL_POLICY='${policy}' (use: missing|always|never)." >&2
+      return 1
+      ;;
+  esac
+}
+
+rewrite_host_path_for_container() {
+  local original="$1"
+  local abs=""
+
+  if [[ -z "${original}" ]]; then
+    echo "${original}"
+    return 0
+  fi
+
+  if [[ "${original}" == /runner/project/* ]]; then
+    echo "${original}"
+    return 0
+  fi
+
+  if [[ "${original}" == /* ]]; then
+    abs="${original}"
+  else
+    abs="$(readlink -f -- "${REPO_ROOT}/${original}" 2>/dev/null || true)"
+  fi
+
+  if [[ -n "${abs}" && "${abs}" == "${REPO_ROOT}"* ]]; then
+    echo "/runner/project${abs#${REPO_ROOT}}"
+    return 0
+  fi
+
+  echo "${original}"
 }
 
 find_ssh_agent_socket() {
@@ -95,7 +219,7 @@ find_ssh_agent_socket() {
   return 1
 }
 
-rewrite_inventory_spec_for_ee() {
+rewrite_inventory_spec_for_container() {
   local spec="$1"
   local out=()
   local part
@@ -108,6 +232,9 @@ rewrite_inventory_spec_for_ee() {
         ;;
       ./inventories/*)
         out+=("/runner/project/${part#./}")
+        ;;
+      "${REPO_ROOT}"/inventories/*)
+        out+=("/runner/project/inventories/${part#${REPO_ROOT}/inventories/}")
         ;;
       *)
         out+=("${part}")
@@ -126,137 +253,215 @@ rewrite_inventory_spec_for_ee() {
   echo "${joined}"
 }
 
-config_file="${ANSIBLE_NAVIGATOR_CONFIG:-${REPO_ROOT}/ansible-navigator.yml}"
+rewrite_inventory_args() {
+  local -n args_ref="$1"
+  local out=()
+  local i=0
+  local current
 
-if [[ ! -f "${config_file}" ]]; then
-  echo "Missing config file: ${config_file}" >&2
-  exit 1
-fi
+  while (( i < ${#args_ref[@]} )); do
+    current="${args_ref[$i]}"
+    case "${current}" in
+      -i|--inventory)
+        if (( i + 1 < ${#args_ref[@]} )); then
+          out+=("${current}" "$(rewrite_inventory_spec_for_container "${args_ref[$((i + 1))]}")")
+          ((i+=2))
+          continue
+        fi
+        out+=("${current}")
+        ;;
+      --inventory=*)
+        out+=("--inventory=$(rewrite_inventory_spec_for_container "${current#--inventory=}")")
+        ;;
+      -i*)
+        if [[ "${current}" == "-i" ]]; then
+          out+=("${current}")
+        else
+          out+=("-i$(rewrite_inventory_spec_for_container "${current#-i}")")
+        fi
+        ;;
+      *)
+        out+=("${current}")
+        ;;
+    esac
+    ((i+=1))
+  done
 
-extra_args=()
-inventory_mounted=false
-ssh_agent_mounted=false
+  args_ref=("${out[@]}")
+}
 
-if [[ -n "${ANSIBLE_NAVIGATOR_ENGINE:-}" ]]; then
-  case "${ANSIBLE_NAVIGATOR_ENGINE}" in
-    auto|podman|docker)
-      extra_args+=("--ce=${ANSIBLE_NAVIGATOR_ENGINE}")
-      ;;
-    *)
-      echo "Invalid ANSIBLE_NAVIGATOR_ENGINE='${ANSIBLE_NAVIGATOR_ENGINE}' (use: auto|podman|docker)." >&2
-      exit 1
+validate_tristate "ANSIBLE_TOOLBOX_MOUNT_INVENTORIES" "${inventory_mount_requested}"
+validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH" "${ssh_mount_requested}"
+validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT" "${ssh_agent_mount_requested}"
+
+case "${nav_mode}" in
+  stdout|interactive) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_MODE='${nav_mode}' (use: stdout|interactive)." >&2
+    exit 1
+    ;;
+esac
+
+case "${nav_ee_enabled}" in
+  true|false) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
+    exit 1
+    ;;
+esac
+
+if [[ $# -ge 1 ]]; then
+  case "$1" in
+    -h|--help|help)
+      usage
+      exit 0
       ;;
   esac
 fi
 
+engine="$(detect_container_engine "${engine_requested}")"
+
+container_args=("${engine}" run --rm)
+if [[ -t 0 && -t 1 ]]; then
+  container_args+=(-it)
+fi
+
+if [[ "${engine}" == "podman" ]]; then
+  container_args+=(--userns=keep-id --security-opt label=disable)
+fi
+
+container_args+=(--user "$(id -u):$(id -g)")
+container_args+=(-v "${REPO_ROOT}:/runner/project" -w /runner/project)
+
+inventory_mounted=false
+ssh_agent_mounted=false
+
 if container_api_socket="$(find_container_api_socket)"; then
-  extra_args+=("--eev=${container_api_socket}:/var/run/docker.sock")
+  container_args+=(-v "${container_api_socket}:/var/run/docker.sock")
+  container_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
 fi
 
 case "${inventory_mount_requested}" in
   auto)
     if inventory_source="$(find_inventory_source)"; then
-      extra_args+=("--eev=${inventory_source}:/runner/project/inventories:ro")
+      container_args+=(-v "${inventory_source}:/runner/project/inventories:ro")
       inventory_mounted=true
     fi
     ;;
   true)
     inventory_source="$(find_inventory_source)"
-    extra_args+=("--eev=${inventory_source}:/runner/project/inventories:ro")
+    container_args+=(-v "${inventory_source}:/runner/project/inventories:ro")
     inventory_mounted=true
     ;;
   false)
-    ;;
-  *)
-    echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES='${inventory_mount_requested}' (use: auto|true|false)." >&2
-    exit 1
     ;;
 esac
 
 case "${ssh_mount_requested}" in
   auto)
     if ssh_source="$(find_ssh_source)"; then
-      extra_args+=("--eev=${ssh_source}:/runner/.ssh:ro")
+      container_args+=(-v "${ssh_source}:/runner/.ssh:ro")
     fi
     ;;
   true)
     ssh_source="$(find_ssh_source)"
-    extra_args+=("--eev=${ssh_source}:/runner/.ssh:ro")
+    container_args+=(-v "${ssh_source}:/runner/.ssh:ro")
     ;;
   false)
-    ;;
-  *)
-    echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_SSH='${ssh_mount_requested}' (use: auto|true|false)." >&2
-    exit 1
     ;;
 esac
 
 case "${ssh_agent_mount_requested}" in
   auto)
     if ssh_agent_socket="$(find_ssh_agent_socket)"; then
-      extra_args+=("--eev=${ssh_agent_socket}:/runner/ssh-agent.sock")
+      container_args+=(-v "${ssh_agent_socket}:/runner/ssh-agent.sock")
       ssh_agent_mounted=true
     fi
     ;;
   true)
     ssh_agent_socket="$(find_ssh_agent_socket)"
-    extra_args+=("--eev=${ssh_agent_socket}:/runner/ssh-agent.sock")
+    container_args+=(-v "${ssh_agent_socket}:/runner/ssh-agent.sock")
     ssh_agent_mounted=true
     ;;
   false)
     ;;
+esac
+
+container_args+=(
+  -e "HOME=/runner"
+  -e "XDG_CACHE_HOME=${nav_cache_dir}"
+  -e "ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
+  -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
+  -e "ANSIBLE_LOCAL_TEMP=/tmp"
+  -e "ANSIBLE_REMOTE_TEMP=/tmp"
+  -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+)
+
+if [[ -n "${VAULT_TOKEN:-}" ]]; then
+  container_args+=(-e "VAULT_TOKEN=${VAULT_TOKEN}")
+fi
+
+if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
+  vault_pass_file_in_container="$(rewrite_host_path_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}")"
+  container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
+fi
+
+for var_name in ANSIBLE_USER ANSIBLE_BOOTSTRAP_USER ANSIBLE_BOOTSTRAP_PASSWORD ANSIBLE_BOOTSTRAP_SSH_PORT; do
+  if [[ -n "${!var_name:-}" ]]; then
+    container_args+=(-e "${var_name}=${!var_name}")
+  fi
+done
+
+if [[ "${ssh_agent_mounted}" == true ]]; then
+  container_args+=(-e "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
+fi
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+subcommand="$1"
+shift
+
+in_container_cmd=()
+case "${subcommand}" in
+  run)
+    if [[ $# -lt 1 ]]; then
+      echo "Missing playbook path for 'run'." >&2
+      usage
+      exit 1
+    fi
+    run_args=("$@")
+    if [[ "${inventory_mounted}" == true ]]; then
+      rewrite_inventory_args run_args
+    fi
+    in_container_cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
+    if [[ "${nav_ee_enabled}" == "false" ]]; then
+      in_container_cmd+=(--ee false)
+    fi
+    in_container_cmd+=(run "${run_args[@]}")
+    ;;
+  exec)
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+    if [[ $# -eq 0 ]]; then
+      in_container_cmd=(/bin/bash)
+    else
+      in_container_cmd=("$@")
+    fi
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
   *)
-    echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT='${ssh_agent_mount_requested}' (use: auto|true|false)." >&2
+    echo "Unsupported subcommand '${subcommand}'. Use 'run' or 'exec'." >&2
+    usage
     exit 1
     ;;
 esac
 
-export ANSIBLE_NAVIGATOR_CONFIG="${config_file}"
-if [[ "${ssh_agent_mounted}" == true ]]; then
-  export SSH_AUTH_SOCK="/runner/ssh-agent.sock"
-fi
-
-final_args=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -i|--inventory)
-      if [[ $# -lt 2 ]]; then
-        final_args+=("$1")
-        shift
-        continue
-      fi
-      inv_spec="$2"
-      if [[ "${inventory_mounted}" == true ]]; then
-        inv_spec="$(rewrite_inventory_spec_for_ee "${inv_spec}")"
-      fi
-      final_args+=("$1" "${inv_spec}")
-      shift 2
-      ;;
-    --inventory=*)
-      inv_spec="${1#--inventory=}"
-      if [[ "${inventory_mounted}" == true ]]; then
-        inv_spec="$(rewrite_inventory_spec_for_ee "${inv_spec}")"
-      fi
-      final_args+=("--inventory=${inv_spec}")
-      shift
-      ;;
-    -i*)
-      inv_spec="${1#-i}"
-      if [[ -n "${inv_spec}" ]]; then
-        if [[ "${inventory_mounted}" == true ]]; then
-          inv_spec="$(rewrite_inventory_spec_for_ee "${inv_spec}")"
-        fi
-        final_args+=("-i${inv_spec}")
-      else
-        final_args+=("$1")
-      fi
-      shift
-      ;;
-    *)
-      final_args+=("$1")
-      shift
-      ;;
-  esac
-done
-
-exec ansible-navigator "${extra_args[@]}" "${final_args[@]}"
+ensure_image_present "${engine}" "${image}" "${pull_policy}"
+exec "${container_args[@]}" "${image}" "${in_container_cmd[@]}"
