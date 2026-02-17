@@ -18,6 +18,7 @@ ansible-navigator:
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp
         ANSIBLE_REMOTE_TEMP: /tmp
+        SSH_AUTH_SOCK: /runner/ssh-agent.sock
         ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
   mode: stdout
   playbook-artifact:

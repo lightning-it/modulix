@@ -7,6 +7,7 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 inventory_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES:-auto}"
 ssh_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_SSH:-auto}"
+ssh_agent_mount_requested="${ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT:-auto}"
 
 find_container_api_socket() {
   local uid
@@ -66,6 +67,28 @@ find_ssh_source() {
 
   if [[ -d "${default_source}" ]]; then
     echo "${default_source}"
+    return 0
+  fi
+
+  return 1
+}
+
+find_ssh_agent_socket() {
+  local from_env="${SSH_AUTH_SOCK:-}"
+  local resolved=""
+
+  if [[ -z "${from_env}" ]]; then
+    return 1
+  fi
+
+  resolved="$(readlink -f -- "${from_env}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && -S "${resolved}" ]]; then
+    echo "${resolved}"
+    return 0
+  fi
+
+  if [[ -S "${from_env}" ]]; then
+    echo "${from_env}"
     return 0
   fi
 
@@ -163,6 +186,24 @@ case "${ssh_mount_requested}" in
     ;;
   *)
     echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_SSH='${ssh_mount_requested}' (use: auto|true|false)." >&2
+    exit 1
+    ;;
+esac
+
+case "${ssh_agent_mount_requested}" in
+  auto)
+    if ssh_agent_socket="$(find_ssh_agent_socket)"; then
+      extra_args+=("--eev=${ssh_agent_socket}:/runner/ssh-agent.sock")
+    fi
+    ;;
+  true)
+    ssh_agent_socket="$(find_ssh_agent_socket)"
+    extra_args+=("--eev=${ssh_agent_socket}:/runner/ssh-agent.sock")
+    ;;
+  false)
+    ;;
+  *)
+    echo "Invalid ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT='${ssh_agent_mount_requested}' (use: auto|true|false)." >&2
     exit 1
     ;;
 esac
