@@ -135,6 +135,7 @@ fi
 
 extra_args=()
 inventory_mounted=false
+ssh_agent_mounted=false
 
 if [[ -n "${ANSIBLE_NAVIGATOR_ENGINE:-}" ]]; then
   case "${ANSIBLE_NAVIGATOR_ENGINE}" in
@@ -194,11 +195,13 @@ case "${ssh_agent_mount_requested}" in
   auto)
     if ssh_agent_socket="$(find_ssh_agent_socket)"; then
       extra_args+=("--eev=${ssh_agent_socket}:/runner/ssh-agent.sock")
+      ssh_agent_mounted=true
     fi
     ;;
   true)
     ssh_agent_socket="$(find_ssh_agent_socket)"
     extra_args+=("--eev=${ssh_agent_socket}:/runner/ssh-agent.sock")
+    ssh_agent_mounted=true
     ;;
   false)
     ;;
@@ -209,6 +212,9 @@ case "${ssh_agent_mount_requested}" in
 esac
 
 export ANSIBLE_NAVIGATOR_CONFIG="${config_file}"
+if [[ "${ssh_agent_mounted}" == true ]]; then
+  export SSH_AUTH_SOCK="/runner/ssh-agent.sock"
+fi
 
 final_args=()
 while [[ $# -gt 0 ]]; do

@@ -220,6 +220,8 @@ Wrapper behavior (`scripts/ansible-nav`):
 - External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
 - When inventory mount is active, `-i inventories/...` is automatically rewritten to `/runner/project/inventories/...` for execution environment compatibility.
 - Host SSH directory is auto-mounted from `~/.ssh` to `/runner/.ssh` so inventory paths like `/runner/.ssh/id_ed25519` work inside the execution environment.
+- Host `SSH_AUTH_SOCK` is auto-mounted for SSH agent forwarding (at the same socket path, plus `/runner/ssh-agent.sock` fallback).
+- For Podman, wrapper enables `--userns=keep-id`, `--user=$(id -u):$(id -g)`, and `--security-opt=label=disable` so forwarded SSH agent sockets are usable in the execution environment.
 
 Inventory mount controls:
 - `ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES=auto|true|false` (default: `auto`)
@@ -228,6 +230,8 @@ Inventory mount controls:
 SSH mount controls:
 - `ANSIBLE_NAVIGATOR_MOUNT_SSH=auto|true|false` (default: `auto`)
 - `ANSIBLE_NAVIGATOR_SSH_SOURCE=/path/to/.ssh`
+- `ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT=auto|true|false` (default: `auto`)
+- `ANSIBLE_NAVIGATOR_PODMAN_KEEP_ID=auto|true|false` (default: `auto`)
 
 ### Vault + Nexus notes
 
