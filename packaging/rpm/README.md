@@ -108,14 +108,7 @@ Notes:
 
 ### CLI setup (matches COPR docs flow)
 
-You can configure the SCM package from CLI:
-
-```bash
-COPR_OWNER=<copr-owner> COPR_PROJECT=modulix COPR_PACKAGE=modulix-scripts \
-  packaging/rpm/configure-copr-scm.sh
-```
-
-From containerized devtools environment (Podman):
+Preferred: run from containerized devtools (no `copr-cli` needed on host):
 
 ```bash
 podman run --rm -it \
@@ -129,6 +122,13 @@ podman run --rm -it \
   bash /workspace/packaging/rpm/configure-copr-scm.sh
 ```
 
+Host alternative (requires `copr-cli` installed on host):
+
+```bash
+COPR_OWNER=<copr-owner> COPR_PROJECT=modulix COPR_PACKAGE=modulix-scripts \
+  packaging/rpm/configure-copr-scm.sh
+```
+
 This executes `copr-cli add-package-scm` (or `edit-package-scm`) with:
 - `--method make_srpm`
 - `--webhook-rebuild on`
@@ -138,4 +138,20 @@ Optional webhook secret rotation:
 
 ```bash
 COPR_OWNER=<copr-owner> packaging/rpm/configure-copr-scm.sh --rotate-webhook-secret
+```
+
+### Disable webhook rebuild (when publishing only from GitHub tag workflow)
+
+Use this when your release policy is tag-driven GitHub Actions publish (`v*` tags):
+
+```bash
+podman run --rm -it \
+  --userns keep-id \
+  -v "$PWD":/workspace:Z -w /workspace \
+  -v "$HOME/.config/copr:/home/wunder/.config/copr:ro,Z" \
+  -e COPR_OWNER=<copr-owner> \
+  -e COPR_PROJECT=modulix \
+  -e COPR_PACKAGE=modulix-scripts \
+  localhost/ee-wunder-devtools-ubi9:local \
+  bash -lc 'bash /workspace/packaging/rpm/configure-copr-scm.sh --webhook-rebuild off'
 ```
