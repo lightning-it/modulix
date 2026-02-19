@@ -58,6 +58,11 @@ Workflow: `.github/workflows/rpm-srpm-ci.yml`
 - On tag push matching `v*`:
   - Builds SRPM and uploads it as a workflow artifact.
   - Publishes the SRPM to COPR (requires `COPR_CONFIG` secret).
+<<<<<<< Updated upstream
+=======
+  - RPM version is derived from the tag (`v1.2.3` -> `1.2.3`).
+- `semantic-release` workflow on `main` can generate these `v*` tags automatically from commit messages.
+>>>>>>> Stashed changes
 - On manual `workflow_dispatch`:
   - Builds SRPM with optional overrides:
     - `version`
