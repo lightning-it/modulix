@@ -82,6 +82,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          version=""
           input_version="${{ github.event.inputs.version || '' }}"
           if [[ -n "${input_version}" ]]; then
             version="${input_version}"
