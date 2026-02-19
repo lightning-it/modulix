@@ -27,19 +27,19 @@ packaging/rpm/build-srpm.sh --version 0.1.0 --release 1
 
 Output:
 
-- `packaging/rpm/dist/modulix-scripts-<version>-<release>.src.rpm`
+- `packaging/rpm/dist/modulix-scripts-<version>-<release>.<dist>.src.rpm`
 
 ## Publish to COPR
 
 ```bash
-COPR_OWNER=lightning-it packaging/rpm/publish-copr.sh --create-project
+COPR_OWNER=<copr-owner> packaging/rpm/publish-copr.sh --create-project
 ```
 
 or with explicit arguments:
 
 ```bash
 packaging/rpm/publish-copr.sh \
-  --owner lightning-it \
+  --owner <copr-owner> \
   --project modulix \
   --srpm packaging/rpm/dist/modulix-scripts-0.1.0-1.<dist>.src.rpm
 ```
@@ -53,11 +53,10 @@ Workflow: `.github/workflows/rpm-srpm-ci.yml`
 
 - On pull requests touching RPM packaging files:
   - Builds SRPM and uploads it as a workflow artifact.
-- On push to `main`:
-  - Builds SRPM and uploads it as a workflow artifact.
 - On tag push matching `v*`:
   - Builds SRPM and uploads it as a workflow artifact.
   - Publishes the SRPM to COPR (requires `COPR_CONFIG` secret).
+  - RPM version is derived from the tag (`v1.2.3` -> `1.2.3`).
 - On manual `workflow_dispatch`:
   - Builds SRPM with optional overrides:
     - `version`
@@ -67,9 +66,7 @@ Workflow: `.github/workflows/rpm-srpm-ci.yml`
     - `output_dir`
     - `srpm_glob`
     - `artifact_prefix`
-    - `publish_to_copr`
-    - `copr_owner`
-    - `copr_project`
+  - Does not publish to COPR.
 
 Build script contract for workflow:
 - The workflow invokes the configured `build_script` with:
@@ -84,9 +81,11 @@ Repository settings for COPR publish job:
 - Optional repository variables:
   - `COPR_OWNER`
   - `COPR_PROJECT`
-  (manual workflow inputs override repository variables)
 
-## COPR publish via GitHub Webhook (recommended)
+## COPR publish via GitHub Webhook (optional)
+
+If you publish through GitHub Actions tag workflow above, the COPR webhook is optional.
+Do not enable both mechanisms unless you intentionally want duplicate builds.
 
 Use COPR SCM integration with GitHub webhook as documented:
 https://docs.pagure.org/copr.copr/user_documentation.html#github-webhooks
@@ -109,10 +108,25 @@ Notes:
 
 ### CLI setup (matches COPR docs flow)
 
-You can configure the SCM package from CLI:
+Preferred: run from containerized devtools (no `copr-cli` needed on host):
 
 ```bash
-COPR_OWNER=lightning-it packaging/rpm/configure-copr-scm.sh
+podman run --rm -it \
+  --userns keep-id \
+  -v "$PWD":/workspace:Z -w /workspace \
+  -v "$HOME/.config/copr:/home/wunder/.config/copr:ro,Z" \
+  -e COPR_OWNER=<copr-owner> \
+  -e COPR_PROJECT=modulix \
+  -e COPR_PACKAGE=modulix-scripts \
+  localhost/ee-wunder-devtools-ubi9:local \
+  bash /workspace/packaging/rpm/configure-copr-scm.sh
+```
+
+Host alternative (requires `copr-cli` installed on host):
+
+```bash
+COPR_OWNER=<copr-owner> COPR_PROJECT=modulix COPR_PACKAGE=modulix-scripts \
+  packaging/rpm/configure-copr-scm.sh
 ```
 
 This executes `copr-cli add-package-scm` (or `edit-package-scm`) with:
@@ -123,5 +137,21 @@ This executes `copr-cli add-package-scm` (or `edit-package-scm`) with:
 Optional webhook secret rotation:
 
 ```bash
-COPR_OWNER=lightning-it packaging/rpm/configure-copr-scm.sh --rotate-webhook-secret
+COPR_OWNER=<copr-owner> packaging/rpm/configure-copr-scm.sh --rotate-webhook-secret
+```
+
+### Disable webhook rebuild (when publishing only from GitHub tag workflow)
+
+Use this when your release policy is tag-driven GitHub Actions publish (`v*` tags):
+
+```bash
+podman run --rm -it \
+  --userns keep-id \
+  -v "$PWD":/workspace:Z -w /workspace \
+  -v "$HOME/.config/copr:/home/wunder/.config/copr:ro,Z" \
+  -e COPR_OWNER=<copr-owner> \
+  -e COPR_PROJECT=modulix \
+  -e COPR_PACKAGE=modulix-scripts \
+  localhost/ee-wunder-devtools-ubi9:local \
+  bash -lc 'bash /workspace/packaging/rpm/configure-copr-scm.sh --webhook-rebuild off'
 ```
