@@ -154,7 +154,7 @@ jobs:
           echo "SRPM_FILE=$(basename "${srpm}")" >> "${GITHUB_ENV}"
 
       - name: Upload SRPM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.RPM_ARTIFACT_NAME }}
           path: ${{ env.SRPM_PATH }}
