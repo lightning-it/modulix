@@ -6,3 +6,6 @@ ansible_collections/
 collections-dev/ansible_collections/**
 !collections-dev/.gitkeep
 ansible/.vault-pass.txt
+
+# AAP containerized installer archive (if stored in the repository for deployment).
+ansible/aap-containerized-setup.tar.gz

@@ -60,23 +60,18 @@
     _bootstrap_configured: >-
       {{
         (bootstrap_user_effective | default('') | length > 0)
-        and (
-          (linux_bootstrap_password | default('') | length > 0)
-          or (lookup('env', 'ANSIBLE_BOOTSTRAP_PASSWORD') | default('') | length > 0)
-        )
+        and (linux_bootstrap_password | default('') | length > 0)
       }}
 
     bootstrap_user_effective: >-
       {{
         linux_bootstrap_user
-          | default(lookup('env', 'ANSIBLE_BOOTSTRAP_USER'), true)
           | default('root', true)
       }}
 
     bootstrap_password_effective: >-
       {{
         linux_bootstrap_password
-          | default(lookup('env', 'ANSIBLE_BOOTSTRAP_PASSWORD'), true)
           | default(omit)
       }}
 
@@ -145,7 +140,7 @@
       ansible.builtin.fail:
         msg: >-
           Host {{ inventory_hostname }} is unreachable on desired SSH port ({{ _probe_port_normal }}),
-          and bootstrap is not configured. Set linux_bootstrap_* vars (or ANSIBLE_BOOTSTRAP_* env vars).
+          and bootstrap is not configured. Set linux_bootstrap_* vars in inventory.
       when:
         - not _normal_ok
         - not _bootstrap_configured | bool
@@ -235,16 +230,22 @@
           when: rhsm_method | default('none') != 'none'
           tags: [bootstrap]
 
-        - name: Bootstrap - configure sshd (set Port via sshd_config)
+        - name: Bootstrap - configure sshd for bootstrap-to-target port transition
           ansible.builtin.include_role:
             name: fedora.linux_system_roles.sshd
             apply:
               become: true
+          when: _sshd_reconnect_after_change | bool
+          vars:
+            # During bootstrap we only need port transition, not package management.
+            # Package updates can restart sshd unexpectedly and break bootstrap auth.
+            sshd_packages: []
           tags: [bootstrap]
 
         # IMPORTANT: flush sshd handlers while we are still connected via bootstrap port.
         - name: Bootstrap - flush handlers before reconnect
           ansible.builtin.meta: flush_handlers
+          when: _sshd_reconnect_after_change | bool
           tags: [bootstrap]
 
     - name: Reconnect after SSH port change
@@ -265,6 +266,17 @@
           ansible.builtin.wait_for_connection:
             timeout: 180
       when: _sshd_reconnect_after_change | bool
+      tags: [bootstrap]
+
+    - name: Reset SSH connection before base setup
+      ansible.builtin.meta: reset_connection
+      tags: [bootstrap]
+
+    - name: Wait for stable SSH before base setup
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ bootstrap_wait_for_connection_timeout | default(300) }}"
+        sleep: 5
+      when: _normal_ok | bool or _bootstrap_needed | bool
       tags: [bootstrap]
 
 # -----------------------------------------------------------------------------
@@ -409,6 +421,18 @@
         - network_state is defined
         - (bridge_vlan_ids | default([]) | length) > 0
         - (bridge_vlan_ports | default([]) | length) > 0
+      tags: [network]
+
+    # Network profile changes can invalidate persistent SSH control sockets.
+    # Reset and re-check connectivity before continuing with package roles.
+    - name: Refresh SSH connection after network changes
+      ansible.builtin.meta: reset_connection
+      tags: [network]
+
+    - name: Wait for host connectivity after network changes
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ network_reconnect_timeout | default(300) }}"
+        sleep: 5
       tags: [network]
 
     # -------------------------------------------------------------------------

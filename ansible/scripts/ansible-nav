@@ -5,17 +5,17 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
-engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-${ANSIBLE_NAVIGATOR_ENGINE:-auto}}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-${ANSIBLE_NAVIGATOR_IMAGE:-localhost/ee-wunder-toolbox-ubi9:latest}}"
+engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 
-inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-${ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES:-auto}}"
-ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-${ANSIBLE_NAVIGATOR_MOUNT_SSH:-auto}}"
-ssh_agent_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT:-${ANSIBLE_NAVIGATOR_MOUNT_SSH_AGENT:-auto}}"
+inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-auto}"
+ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-auto}"
+ssh_agent_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT:-auto}"
 
 usage() {
   cat <<'EOF'
@@ -32,9 +32,6 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
 
-Compatibility aliases are still supported:
-  ANSIBLE_NAVIGATOR_ENGINE
-  ANSIBLE_NAVIGATOR_IMAGE
   ANSIBLE_NAVIGATOR_MOUNT_*
 EOF
 }
@@ -405,12 +402,6 @@ if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   vault_pass_file_in_container="$(rewrite_host_path_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}")"
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
-
-for var_name in ANSIBLE_USER ANSIBLE_BOOTSTRAP_USER ANSIBLE_BOOTSTRAP_PASSWORD ANSIBLE_BOOTSTRAP_SSH_PORT; do
-  if [[ -n "${!var_name:-}" ]]; then
-    container_args+=(-e "${var_name}=${!var_name}")
-  fi
-done
 
 if [[ "${ssh_agent_mounted}" == true ]]; then
   container_args+=(-e "SSH_AUTH_SOCK=/runner/ssh-agent.sock")

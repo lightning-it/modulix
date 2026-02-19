@@ -1,0 +1,62 @@
+---
+# -----------------------------------------------------------------------------
+# Ansible Automation Platform (AAP) hosts
+#
+# Purpose:
+# - Enable required repos
+# - Apply host firewall policy when provided
+# - Install AAP packages
+# - Manage AAP configuration
+# - Expose day-2 operations (restart/status/upgrade)
+# -----------------------------------------------------------------------------
+
+- name: Configure AAP hosts
+  hosts: aaps
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Enable required repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [repos]
+      tags: [repos]
+
+    # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
+    - name: Apply firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [firewall]
+      when: (firewall | default([], true) | length) > 0
+      tags: [firewall]
+
+    - name: Prepare AAP shared context
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap
+        apply:
+          tags: [aap]
+      tags: [aap]
+
+    - name: Deploy AAP
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_deploy
+        apply:
+          tags: [aap, aap_deploy]
+      tags: [aap, aap_deploy]
+
+    - name: Configure AAP
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_config
+        apply:
+          tags: [aap, aap_config]
+      tags: [aap, aap_config]
+
+    # Day-2 operations (default action is none; enables `-t aap_ops -e aap_ops_action=...`)
+    - name: AAP ops
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_ops
+        apply:
+          tags: [aap, aap_ops]
+      tags: [aap, aap_ops]

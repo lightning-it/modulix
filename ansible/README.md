@@ -200,6 +200,29 @@ This script only builds and installs local `ansible-collection-*` repos.
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
+22 AAP (VM+RHEL9) setup:
+
+```bash
+./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+
+./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+
+./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+
+./scripts/ansible-nav run playbooks/stage-2b/13-aap.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+```
+
+22.1 AAP rebuild (single pipeline playbook):
+
+```bash
+./scripts/ansible-nav run playbooks/services/02-wunderbox-rebuild.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+```
+
 ---
 
 ## Knowledge Base
