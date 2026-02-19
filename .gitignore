@@ -9,3 +9,7 @@ ansible/.vault-pass.txt
 
 # AAP containerized installer archive (if stored in the repository for deployment).
 ansible/aap-containerized-setup.tar.gz
+
+# RPM packaging outputs
+packaging/rpm/.rpmbuild/
+packaging/rpm/dist/
