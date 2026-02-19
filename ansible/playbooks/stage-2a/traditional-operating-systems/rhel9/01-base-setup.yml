@@ -284,12 +284,28 @@
 # -----------------------------------------------------------------------------
 - name: Base setup
   hosts: all
-  gather_facts: true
+  gather_facts: false
   become: true
   any_errors_fatal: true
 
   vars:
     _sshd_port_desired: "{{ sshd_port | default(22) | int }}"
+
+  pre_tasks:
+    - name: Base setup - reset SSH connection
+      ansible.builtin.meta: reset_connection
+
+    - name: Base setup - wait for stable SSH
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ base_setup_wait_for_connection_timeout | default(300) }}"
+        sleep: 5
+      register: base_setup_wait_result
+      retries: "{{ base_setup_wait_retries | default(6) }}"
+      delay: "{{ base_setup_wait_delay | default(10) }}"
+      until: base_setup_wait_result is succeeded
+
+    - name: Base setup - gather facts after SSH stabilization
+      ansible.builtin.setup:
 
   tasks:
     - name: Users
