@@ -219,7 +219,7 @@ This script only builds and installs local `ansible-collection-*` repos.
 22.1 AAP rebuild (single pipeline playbook):
 
 ```bash
-./scripts/ansible-nav run playbooks/services/02-wunderbox-rebuild.yml \
+./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 ```
 
