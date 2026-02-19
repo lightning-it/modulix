@@ -66,9 +66,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install build tooling
         run: dnf -y install git rpm-build gzip
+
+      - name: Refresh checkout with git metadata
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve RPM settings
         shell: bash
@@ -81,8 +88,10 @@ jobs:
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-            version="${version#v}"
+            if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              version="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+              version="${version#v}"
+            fi
           fi
           if [[ -z "${version}" ]]; then
             version="0.1.0"

@@ -9,6 +9,11 @@ RPMBUILD_TOPDIR="${SCRIPT_DIR}/.rpmbuild"
 
 version="${MODULIX_RPM_VERSION:-}"
 release="${MODULIX_RPM_RELEASE:-1}"
+has_git_repo=false
+
+if command -v git >/dev/null 2>&1 && git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  has_git_repo=true
+fi
 
 usage() {
   cat <<'EOF'
@@ -62,8 +67,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${version}" ]]; then
-  tag="$(git -C "${REPO_ROOT}" describe --tags --abbrev=0 2>/dev/null || true)"
-  version="${tag#v}"
+  if [[ "${has_git_repo}" == true ]]; then
+    tag="$(git -C "${REPO_ROOT}" describe --tags --abbrev=0 2>/dev/null || true)"
+    version="${tag#v}"
+  elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+    version="${GITHUB_REF_NAME#v}"
+  fi
 fi
 if [[ -z "${version}" ]]; then
   version="0.1.0"
@@ -85,7 +94,7 @@ if [[ -z "${package_name}" ]]; then
   exit 1
 fi
 
-for cmd in git rpmbuild gzip; do
+for cmd in rpmbuild gzip tar; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo "Missing required command: ${cmd}" >&2
     exit 1
@@ -96,7 +105,18 @@ mkdir -p "${RPMBUILD_TOPDIR}/SOURCES" "${RPMBUILD_TOPDIR}/SPECS" "${RPMBUILD_TOP
 cp -f "${SPEC_FILE}" "${RPMBUILD_TOPDIR}/SPECS/${spec_basename}"
 
 source_tar="${RPMBUILD_TOPDIR}/SOURCES/modulix-${version}.tar.gz"
-git -C "${REPO_ROOT}" archive --format=tar --prefix="modulix-${version}/" HEAD | gzip -n > "${source_tar}"
+if [[ "${has_git_repo}" == true ]]; then
+  git -C "${REPO_ROOT}" archive --format=tar --prefix="modulix-${version}/" HEAD | gzip -n > "${source_tar}"
+else
+  tar -C "${REPO_ROOT}" \
+    --exclude-vcs \
+    --exclude='./packaging/rpm/.rpmbuild' \
+    --exclude='./packaging/rpm/dist' \
+    --transform "s,^\.$,modulix-${version}," \
+    --transform "s,^\./,modulix-${version}/," \
+    -czf "${source_tar}" \
+    .
+fi
 
 rpmbuild -bs "${RPMBUILD_TOPDIR}/SPECS/${spec_basename}" \
   --define "_topdir ${RPMBUILD_TOPDIR}" \
