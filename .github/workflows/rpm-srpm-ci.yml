@@ -32,21 +32,7 @@ name: RPM SRPM CI
         description: Uploaded artifact name prefix
         required: false
         default: "srpm"
-      publish_to_copr:
-        description: Publish the built SRPM to COPR
-        required: false
-        default: "false"
-      copr_owner:
-        description: COPR owner (used only when publish_to_copr is true)
-        required: false
-        default: ""
-      copr_project:
-        description: COPR project (used only when publish_to_copr is true)
-        required: false
-        default: ""
   push:
-    branches:
-      - main
     tags:
       - "v*"
   pull_request:
@@ -65,7 +51,7 @@ jobs:
       image: quay.io/fedora/fedora:41
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -73,7 +59,7 @@ jobs:
         run: dnf -y install git rpm-build gzip
 
       - name: Refresh checkout with git metadata
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -84,10 +70,10 @@ jobs:
 
           version=""
           input_version="${{ github.event.inputs.version || '' }}"
-          if [[ -n "${input_version}" ]]; then
-            version="${input_version}"
-          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             version="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${input_version}" ]]; then
+            version="${input_version}"
           else
             if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
               version="$(git describe --tags --abbrev=0 2>/dev/null || true)"
@@ -154,21 +140,17 @@ jobs:
           echo "SRPM_FILE=$(basename "${srpm}")" >> "${GITHUB_ENV}"
 
       - name: Upload SRPM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.RPM_ARTIFACT_NAME }}
           path: ${{ env.SRPM_PATH }}
           if-no-files-found: error
 
       - name: Publish SRPM to COPR
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_copr == 'true') ||
-          startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG || '' }}
-          COPR_OWNER_INPUT: ${{ github.event.inputs.copr_owner || '' }}
-          COPR_PROJECT_INPUT: ${{ github.event.inputs.copr_project || '' }}
           COPR_OWNER_VAR: ${{ vars.COPR_OWNER || '' }}
           COPR_PROJECT_VAR: ${{ vars.COPR_PROJECT || '' }}
         run: |
@@ -178,19 +160,13 @@ jobs:
             exit 1
           fi
 
-          copr_owner="${COPR_OWNER_INPUT}"
+          copr_owner="${COPR_OWNER_VAR}"
           if [[ -z "${copr_owner}" ]]; then
-            copr_owner="${COPR_OWNER_VAR}"
-          fi
-          if [[ -z "${copr_owner}" ]]; then
-            echo "Missing COPR owner. Set workflow input copr_owner or repository variable COPR_OWNER." >&2
+            echo "Missing COPR owner. Set repository variable COPR_OWNER." >&2
             exit 1
           fi
 
-          copr_project="${COPR_PROJECT_INPUT}"
-          if [[ -z "${copr_project}" ]]; then
-            copr_project="${COPR_PROJECT_VAR}"
-          fi
+          copr_project="${COPR_PROJECT_VAR}"
           if [[ -z "${copr_project}" ]]; then
             copr_project="${GITHUB_REPOSITORY##*/}"
           fi
