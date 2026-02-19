@@ -7,6 +7,38 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 SOURCE_ROOT="${SOURCE_ROOT:-${SOURCE_ROOT_DEFAULT}}"
 TARGET_PATH="${TARGET_PATH:-${REPO_ROOT}/collections-dev}"
+ANSIBLE_NAV="${REPO_ROOT}/scripts/ansible-nav"
+
+build_dir=""
+staging_dir=""
+repo_root_abs=""
+
+cleanup() {
+  if [[ -n "${build_dir}" && -d "${build_dir}" ]]; then
+    rm -rf "${build_dir}"
+  fi
+  if [[ -n "${staging_dir}" && -d "${staging_dir}" ]]; then
+    rm -rf "${staging_dir}"
+  fi
+}
+
+host_path_to_runner() {
+  local path="$1"
+  local abs=""
+
+  abs="$(readlink -f -- "${path}" 2>/dev/null || true)"
+  if [[ -z "${abs}" ]]; then
+    echo "Unable to resolve path: ${path}" >&2
+    return 1
+  fi
+
+  if [[ "${abs}" != "${repo_root_abs}"* ]]; then
+    echo "Path must be under ${REPO_ROOT} when ansible-galaxy fallback is active: ${abs}" >&2
+    return 1
+  fi
+
+  echo "/runner/project${abs#${repo_root_abs}}"
+}
 
 usage() {
   cat <<'EOF'
@@ -31,11 +63,6 @@ Environment overrides:
   SOURCE_ROOT, TARGET_PATH
 EOF
 }
-
-if ! command -v ansible-galaxy >/dev/null 2>&1; then
-  echo "ansible-galaxy not found in PATH" >&2
-  exit 1
-fi
 
 declare -a requested=()
 while [[ $# -gt 0 ]]; do
@@ -99,9 +126,37 @@ if [[ ${#collection_dirs[@]} -eq 0 ]]; then
   exit 1
 fi
 
+repo_root_abs="$(readlink -f -- "${REPO_ROOT}")"
+
+declare -a galaxy_exec=()
+use_nav_fallback=false
+if command -v ansible-galaxy >/dev/null 2>&1; then
+  galaxy_exec=(ansible-galaxy)
+else
+  if [[ ! -x "${ANSIBLE_NAV}" ]]; then
+    echo "ansible-galaxy not found in PATH and ${ANSIBLE_NAV} is unavailable" >&2
+    exit 1
+  fi
+  use_nav_fallback=true
+  galaxy_exec=("${ANSIBLE_NAV}" exec -- env ANSIBLE_HOME=/tmp/.ansible ansible-galaxy)
+  echo "ansible-galaxy not found in PATH, using ${ANSIBLE_NAV} fallback"
+fi
+
 mkdir -p "${TARGET_PATH}"
-build_dir="$(mktemp -d "${TMPDIR:-/tmp}/local-collections.XXXXXX")"
-trap 'rm -rf "${build_dir}"' EXIT
+if [[ "${use_nav_fallback}" == true ]]; then
+  target_abs="$(readlink -f -- "${TARGET_PATH}")"
+  if [[ "${target_abs}" != "${repo_root_abs}"* ]]; then
+    echo "--target-path must be under ${REPO_ROOT} when using ${ANSIBLE_NAV} fallback" >&2
+    echo "Current target path: ${target_abs}" >&2
+    exit 1
+  fi
+  mkdir -p "${REPO_ROOT}/.tmp"
+  build_dir="$(mktemp -d "${REPO_ROOT}/.tmp/local-collections.build.XXXXXX")"
+  staging_dir="$(mktemp -d "${REPO_ROOT}/.tmp/local-collections.stage.XXXXXX")"
+else
+  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/local-collections.XXXXXX")"
+fi
+trap cleanup EXIT
 
 declare -a artifacts=()
 for dir in "${collection_dirs[@]}"; do
@@ -115,7 +170,17 @@ for dir in "${collection_dirs[@]}"; do
   version="$(awk -F': *' '$1=="version"{print $2; exit}' "${dir}/galaxy.yml")"
 
   echo "Building ${namespace}.${name} (${version}) from ${dir}"
-  ansible-galaxy collection build --force --output-path "${build_dir}" "${dir}" >/dev/null
+  build_source="${dir}"
+  if [[ "${use_nav_fallback}" == true ]]; then
+    build_source="${staging_dir}/${namespace}-${name}-${version}"
+    cp -a "${dir}" "${build_source}"
+    build_source="$(host_path_to_runner "${build_source}")"
+    build_output="$(host_path_to_runner "${build_dir}")"
+  else
+    build_output="${build_dir}"
+  fi
+
+  "${galaxy_exec[@]}" collection build --force --output-path "${build_output}" "${build_source}" >/dev/null
 
   artifact="${build_dir}/${namespace}-${name}-${version}.tar.gz"
   if [[ ! -f "${artifact}" ]]; then
@@ -125,9 +190,21 @@ for dir in "${collection_dirs[@]}"; do
   artifacts+=("${artifact}")
 done
 
-install_cmd=(ansible-galaxy collection install --force --offline --no-deps --collections-path "${TARGET_PATH}")
+if [[ "${use_nav_fallback}" == true ]]; then
+  install_target="$(host_path_to_runner "${TARGET_PATH}")"
+else
+  install_target="${TARGET_PATH}"
+fi
+
+install_cmd=("${galaxy_exec[@]}" collection install --force --offline --no-deps --collections-path "${install_target}")
 echo "Installing local artifacts only (offline, no deps)"
-install_cmd+=("${artifacts[@]}")
+if [[ "${use_nav_fallback}" == true ]]; then
+  for artifact in "${artifacts[@]}"; do
+    install_cmd+=("$(host_path_to_runner "${artifact}")")
+  done
+else
+  install_cmd+=("${artifacts[@]}")
+fi
 
 "${install_cmd[@]}"
 

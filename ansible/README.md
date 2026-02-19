@@ -1,6 +1,7 @@
 # Ansible automation
 
-This repo uses **ansible-navigator** with the **Wunder ansible execution environment** to avoid local tooling dependencies.
+This repo uses `scripts/ansible-nav` as a container wrapper that runs
+`ansible-navigator` and related commands in the toolbox image, so **ansible-navigator is not required** on the host.
 
 ---
 
@@ -54,8 +55,8 @@ Default usage:
 Force engine when needed:
 
 ```bash
-ANSIBLE_NAVIGATOR_ENGINE=podman ./scripts/ansible-nav run ...
-ANSIBLE_NAVIGATOR_ENGINE=docker ./scripts/ansible-nav run ...
+ANSIBLE_TOOLBOX_ENGINE=podman ./scripts/ansible-nav run ...
+ANSIBLE_TOOLBOX_ENGINE=docker ./scripts/ansible-nav run ...
 ```
 
 ### Install collections
@@ -199,35 +200,64 @@ This script only builds and installs local `ansible-collection-*` repos.
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
+22 AAP (VM+RHEL9) setup:
+
+```bash
+./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+
+./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+
+./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+
+./scripts/ansible-nav run playbooks/stage-2b/13-aap.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+```
+
+22.1 AAP rebuild (single pipeline playbook):
+
+```bash
+./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+```
+
 ---
 
 ## Knowledge Base
 
-### ansible-navigator configuration details
+### Runtime wrapper details
 
-This repo uses one runtime config:
-- `ansible-navigator.yml` (`container-engine: auto`)
-
-Config behavior:
-- Enables the execution environment.
-- Uses `quay.io/l-it/ee-wunder-ansible-ubi9:v1.7.0`.
-- Mounts project path into the execution environment.
-- Passes `ANSIBLE_CONFIG` and `ANSIBLE_VAULT_PASSWORD_FILE`.
-- Disables playbook artifacts and uses stdout mode.
+`scripts/ansible-nav` runs the toolbox image directly via Podman or Docker and executes `ansible-navigator` inside the container.
+Default image:
+- `localhost/ee-wunder-toolbox-ubi9:local`
 
 Wrapper behavior (`scripts/ansible-nav`):
 - When a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the execution environment.
 - External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
 - When inventory mount is active, `-i inventories/...` is automatically rewritten to `/runner/project/inventories/...` for execution environment compatibility.
 - Host SSH directory is auto-mounted from `~/.ssh` to `/runner/.ssh` so inventory paths like `/runner/.ssh/id_ed25519` work inside the execution environment.
+- Host `SSH_AUTH_SOCK` is auto-mounted to `/runner/ssh-agent.sock` and exported in-container.
+- Runs with host UID/GID and sets `HOME=/runner`.
 
 Inventory mount controls:
-- `ANSIBLE_NAVIGATOR_MOUNT_INVENTORIES=auto|true|false` (default: `auto`)
-- `ANSIBLE_NAVIGATOR_INVENTORY_SOURCE=/path/to/inventories`
+- `ANSIBLE_TOOLBOX_MOUNT_INVENTORIES=auto|true|false` (default: `auto`)
+- `ANSIBLE_TOOLBOX_INVENTORY_SOURCE=/path/to/inventories`
 
 SSH mount controls:
-- `ANSIBLE_NAVIGATOR_MOUNT_SSH=auto|true|false` (default: `auto`)
-- `ANSIBLE_NAVIGATOR_SSH_SOURCE=/path/to/.ssh`
+- `ANSIBLE_TOOLBOX_MOUNT_SSH=auto|true|false` (default: `auto`)
+- `ANSIBLE_TOOLBOX_SSH_SOURCE=/path/to/.ssh`
+- `ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT=auto|true|false` (default: `auto`)
+
+Image/engine controls:
+- `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker` (default: `auto`)
+- `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `localhost/ee-wunder-toolbox-ubi9:local`)
+- `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `missing`)
+- `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive` (default: `stdout`)
+- `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false` (default: `false`)
+- `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)
+- `ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=/tmp/.cache/ansible-navigator/collection_doc_cache.db`
 
 ### Vault + Nexus notes
 

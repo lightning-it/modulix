@@ -10,4 +10,4 @@ dns_servers:
   - 192.0.2.53
   - 198.51.100.53
 
-ansible_user: "{{ lookup('env', 'ANSIBLE_USER') | default('CHANGEME', true) }}"
+ansible_user: CHANGEME

@@ -7,7 +7,6 @@ ansible-navigator:
     pull:
       policy: missing
     container-options:
-      - "--user=1000"
       - "--volume=.:/runner/project"
       - "--workdir=/runner/project"
     environment-variables:
