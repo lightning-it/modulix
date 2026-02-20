@@ -102,7 +102,16 @@ for cmd in rpmbuild gzip tar; do
 done
 
 mkdir -p "${RPMBUILD_TOPDIR}/SOURCES" "${RPMBUILD_TOPDIR}/SPECS" "${RPMBUILD_TOPDIR}/SRPMS" "${OUTPUT_DIR}"
-cp -f "${SPEC_FILE}" "${RPMBUILD_TOPDIR}/SPECS/${spec_basename}"
+spec_out="${RPMBUILD_TOPDIR}/SPECS/${spec_basename}"
+cp -f "${SPEC_FILE}" "${spec_out}"
+
+# Embed concrete version/release into the spec stored in the SRPM.
+# COPR rebuilds SRPMs without custom --define flags, so macro fallbacks in the
+# original spec can otherwise point to a different source tarball name.
+sed -i \
+  -e "s|^%global[[:space:]]\\+modulix_version.*$|%global modulix_version ${version}|" \
+  -e "s|^%global[[:space:]]\\+modulix_release.*$|%global modulix_release ${release}|" \
+  "${spec_out}"
 
 source_tar="${RPMBUILD_TOPDIR}/SOURCES/modulix-${version}.tar.gz"
 if [[ "${has_git_repo}" == true ]]; then
@@ -118,10 +127,8 @@ else
     .
 fi
 
-rpmbuild -bs "${RPMBUILD_TOPDIR}/SPECS/${spec_basename}" \
-  --define "_topdir ${RPMBUILD_TOPDIR}" \
-  --define "_modulix_version ${version}" \
-  --define "_modulix_release ${release}"
+rpmbuild -bs "${spec_out}" \
+  --define "_topdir ${RPMBUILD_TOPDIR}"
 
 srpm_pattern="${package_name}-${version}-${release}*.src.rpm"
 srpm="$(find "${RPMBUILD_TOPDIR}/SRPMS" -maxdepth 1 -type f -name "${srpm_pattern}" | sort | head -n 1)"
