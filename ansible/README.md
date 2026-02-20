@@ -255,7 +255,7 @@ This script only builds and installs local `ansible-collection-*` repos.
 
 `scripts/ansible-nav` runs the toolbox image directly via Podman or Docker and executes `ansible-navigator` inside the container.
 Default image:
-- `localhost/ee-wunder-toolbox-ubi9:local`
+- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0`
 
 In-container usage:
 - `ansible-nav-local` executes `ansible-navigator` directly.
@@ -280,8 +280,8 @@ SSH mount controls:
 
 Image/engine controls:
 - `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker` (default: `auto`)
-- `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `localhost/ee-wunder-toolbox-ubi9:local`)
-- `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `never`)
+- `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0`)
+- `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `missing`)
 - `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive` (default: `stdout`)
 - `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false` (default: `false`)
 - `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)

@@ -6,8 +6,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-localhost/ee-wunder-toolbox-ubi9:local}"
-pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-never}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0}"
+pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
@@ -25,8 +25,8 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: localhost/ee-wunder-toolbox-ubi9:local)
-  ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: never)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0)
+  ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
