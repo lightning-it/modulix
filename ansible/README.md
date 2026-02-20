@@ -40,6 +40,36 @@ run this after base dependencies are already installed.
 
 For full workflows and all variants, see `How-To`.
 
+### 4) Image-only execution (no git clone of modulix repo)
+
+If you only have the toolbox image and mount your local Ansible workspace, use
+`ansible-nav-local` directly inside the container:
+
+```bash
+test -S "${SSH_AUTH_SOCK:-}" || { echo "No ssh-agent socket in SSH_AUTH_SOCK"; exit 1; }
+ssh-add -l >/dev/null || { echo "No keys loaded in ssh-agent"; exit 1; }
+
+podman run --rm -it \
+  --userns keep-id \
+  --user "$(id -u):$(id -g)" \
+  --security-opt label=disable \
+  -v "$PWD":/runner/project:Z \
+  -v "$HOME/sources/ansible-inventory-lit/inventories:/runner/project/inventories:ro,Z" \
+  -w /runner/project \
+  -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
+  -v "$SSH_AUTH_SOCK:/runner/ssh-agent.sock:Z" \
+  -e HOME=/runner \
+  -e SSH_AUTH_SOCK=/runner/ssh-agent.sock \
+  -e ANSIBLE_CONFIG=/runner/project/ansible.cfg \
+  -e ANSIBLE_NAVIGATOR_LOG_FILE=/tmp/ansible-navigator.log \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0 \
+  ansible-nav-local run playbooks/stage-2b/13-aap.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+```
+
+If your project already contains the inventory file, you can omit the
+`ansible-inventory-lit` volume mount.
+
 ---
 
 ## How-To
@@ -258,6 +288,7 @@ Image/engine controls:
 - `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false` (default: `false`)
 - `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)
 - `ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=/tmp/.cache/ansible-navigator/collection_doc_cache.db`
+- `ANSIBLE_TOOLBOX_NAV_LOG_FILE=/tmp/ansible-navigator.log` (default: `/tmp/ansible-navigator.log`)
 
 ### Vault + Nexus notes
 
