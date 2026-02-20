@@ -62,9 +62,8 @@ podman run --rm -it \
   -e SSH_AUTH_SOCK=/runner/ssh-agent.sock \
   -e ANSIBLE_CONFIG=/runner/project/ansible.cfg \
   -e ANSIBLE_NAVIGATOR_LOG_FILE=/tmp/ansible-navigator.log \
-  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0 \
-  ansible-nav-local run playbooks/stage-2b/13-aap.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.3.0 \
+  /bin/bash
 ```
 
 If your project already contains the inventory file, you can omit the
@@ -115,35 +114,35 @@ Only selected local collections:
 
 This script only builds and installs local `ansible-collection-*` repos.
 
-### Run playbooks
+### Run playbooks inside of container
 
 00 Gateway (baremetal+RHEL9) setup:
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-baremetal/01-oob-virtualmedia-install.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-baremetal/01-oob-virtualmedia-install.yml \
   -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/01-gateway.yml \
+ansible-nav-local run playbooks/stage-2b/01-gateway.yml \
   -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
 ```
 
 01 vSphere ESXi setup:
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/01-esxi-os_install.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/01-esxi-os_install.yml \
   -i inventories/corp/inventory.yml --limit vsphere_esxi
 
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
   -i inventories/corp/inventory.yml --limit vsphere_esxi
 ```
 
 02 vSphere vCenter setup:
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/FIXME \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/FIXME \
   -i inventories/corp/inventory.yml --limit vcenter-com.mgmt.corp.l-it.io
 ```
 
@@ -152,43 +151,43 @@ This script only builds and installs local `ansible-collection-*` repos.
 10.1 DMZ
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
+ansible-nav-local run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
 ```
 
 10.2 COM
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
+ansible-nav-local run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
 ```
 
 10.3 INT
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
+ansible-nav-local run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
 ```
 
 10.4 ISO
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
+ansible-nav-local run playbooks/stage-2b/10-firewall.yml \
   -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
 ```
 
@@ -197,59 +196,59 @@ This script only builds and installs local `ansible-collection-*` repos.
 20.1 DMZ
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/11-workstation.yml \
+ansible-nav-local run playbooks/stage-2b/11-workstation.yml \
   -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
 ```
 
 21 Wunderbox (VM+RHEL9) setup:
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/12-wunderbox.yml \
+ansible-nav-local run playbooks/stage-2b/12-wunderbox.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
 21.1 Wunderbox rebuild (single pipeline playbook):
 
 ```bash
-./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
+ansible-nav-local run playbooks/services/01-wunderbox-rebuild.yml \
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
 22 AAP (VM+RHEL9) setup:
 
 ```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
+ansible-nav-local run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
+ansible-nav-local run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 
-./scripts/ansible-nav run playbooks/stage-2b/13-aap.yml \
+ansible-nav-local run playbooks/stage-2b/13-aap.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 ```
 
 22.1 AAP rebuild (single pipeline playbook):
 
 ```bash
-./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml \
+ansible-nav-local run playbooks/services/02-aap-rebuild.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 ```
 
