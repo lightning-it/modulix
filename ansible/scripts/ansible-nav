@@ -6,8 +6,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0}"
-pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-localhost/ee-wunder-toolbox-ubi9:local}"
+pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-never}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
@@ -26,7 +26,7 @@ Usage:
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
   ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: localhost/ee-wunder-toolbox-ubi9:local)
-  ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
+  ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: never)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
@@ -48,6 +48,10 @@ validate_tristate() {
   esac
 }
 
+running_inside_container() {
+  [[ -f "/run/.containerenv" || -f "/.dockerenv" ]]
+}
+
 detect_container_engine() {
   local requested="$1"
 
@@ -59,6 +63,12 @@ detect_container_engine() {
       fi
       if command -v docker >/dev/null 2>&1; then
         echo "docker"
+        return 0
+      fi
+      # When invoked from inside the toolbox image, there is typically no
+      # container engine available. Fall back to local in-container execution.
+      if running_inside_container && [[ -x "${SCRIPT_DIR}/ansible-nav-local" ]]; then
+        echo "local"
         return 0
       fi
       echo "Neither podman nor docker is installed." >&2
@@ -317,6 +327,10 @@ if [[ $# -ge 1 ]]; then
 fi
 
 engine="$(detect_container_engine "${engine_requested}")"
+
+if [[ "${engine}" == "local" ]]; then
+  exec "${SCRIPT_DIR}/ansible-nav-local" "$@"
+fi
 
 container_args=("${engine}" run --rm)
 if [[ -t 0 && -t 1 ]]; then

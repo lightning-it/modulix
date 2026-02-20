@@ -3,6 +3,11 @@
 This repo uses `scripts/ansible-nav` as a container wrapper that runs
 `ansible-navigator` and related commands in the toolbox image, so **ansible-navigator is not required** on the host.
 
+Execution modes:
+
+- `ansible-nav`: host wrapper (starts toolbox container via Podman/Docker).
+- `ansible-nav-local`: in-container runner (executes `ansible-navigator` directly, no nested container runtime).
+
 ---
 
 ## Quick Start
@@ -39,6 +44,25 @@ run this after base dependencies are already installed.
 ```
 
 For full workflows and all variants, see `How-To`.
+
+### 4) Image-only execution (no git clone of modulix repo)
+
+If you only have the toolbox image and mount your local Ansible workspace, use
+`ansible-nav-local` directly inside the container:
+
+```bash
+podman run --rm -it \
+  --userns keep-id \
+  --security-opt label=disable \
+  -v "$PWD":/runner/project:Z \
+  -w /runner/project \
+  -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
+  -e HOME=/runner \
+  -e ANSIBLE_CONFIG=/runner/project/ansible.cfg \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0 \
+  ansible-nav-local run playbooks/stage-2b/13-aap.yml \
+  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+```
 
 ---
 
@@ -233,6 +257,10 @@ This script only builds and installs local `ansible-collection-*` repos.
 Default image:
 - `localhost/ee-wunder-toolbox-ubi9:local`
 
+In-container usage:
+- `ansible-nav-local` executes `ansible-navigator` directly.
+- `ansible-nav` auto-falls back to `ansible-nav-local` when run inside a container without Podman/Docker.
+
 Wrapper behavior (`scripts/ansible-nav`):
 - When a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the execution environment.
 - External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
@@ -253,7 +281,7 @@ SSH mount controls:
 Image/engine controls:
 - `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker` (default: `auto`)
 - `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `localhost/ee-wunder-toolbox-ubi9:local`)
-- `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `missing`)
+- `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `never`)
 - `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive` (default: `stdout`)
 - `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false` (default: `false`)
 - `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)
