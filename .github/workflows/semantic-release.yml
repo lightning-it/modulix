@@ -53,16 +53,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run semantic-release
-        run: |
-          npx --yes \
-            --package semantic-release@24 \
-            --package @semantic-release/commit-analyzer@13 \
-            --package @semantic-release/release-notes-generator@14 \
-            --package @semantic-release/github@11 \
-            semantic-release
+        run: npx semantic-release
 
   release-dry-run:
     name: Release Dry Run
@@ -83,13 +81,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run semantic-release dry-run
-        run: |
-          npx --yes \
-            --package semantic-release@24 \
-            --package @semantic-release/commit-analyzer@13 \
-            --package @semantic-release/release-notes-generator@14 \
-            --package @semantic-release/github@11 \
-            semantic-release --dry-run --no-ci
+        run: npx semantic-release --dry-run --no-ci
