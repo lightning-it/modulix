@@ -4,7 +4,7 @@ set -euo pipefail
 owner="${COPR_OWNER:-}"
 project="${COPR_PROJECT:-modulix}"
 package="${COPR_PACKAGE:-modulix-scripts}"
-clone_url="${COPR_CLONE_URL:-https://github.com/lightning-it/modulix.git}"
+clone_url="${COPR_CLONE_URL:-https://github.com/lightning-it/modulix-automation.git}"
 commitish="${COPR_COMMIT:-main}"
 subdir="${COPR_SUBDIR:-.}"
 spec_path="${COPR_SPEC:-packaging/rpm/modulix-scripts.spec}"
@@ -26,7 +26,7 @@ Options:
   --owner <name>          COPR owner (required if COPR_OWNER is unset)
   --project <name>        COPR project (default: modulix)
   --package <name>        COPR package name (default: modulix-scripts)
-  --clone-url <url>       SCM clone URL (default: https://github.com/lightning-it/modulix.git)
+  --clone-url <url>       SCM clone URL (default: https://github.com/lightning-it/modulix-automation.git)
   --commit <ref>          Git branch/tag/sha to build (default: main)
   --subdir <path>         Subdirectory in repository (default: .)
   --spec <path>           Spec path relative to subdir (default: packaging/rpm/modulix-scripts.spec)

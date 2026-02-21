@@ -6,7 +6,7 @@ Version:        %{modulix_version}
 Release:        %{modulix_release}%{?dist}
 Summary:        ModuLix helper scripts for toolbox workflows
 License:        GPL-2.0-only
-URL:            https://github.com/lightning-it/modulix
+URL:            https://github.com/lightning-it/modulix-automation
 Source0:        modulix-%{version}.tar.gz
 BuildArch:      noarch
 

@@ -1,5 +1,6 @@
 {
   "branches": ["main"],
+  "repositoryUrl": "https://github.com/lightning-it/modulix-automation.git",
   "tagFormat": "v${version}",
   "preset": "conventionalcommits",
   "plugins": [
