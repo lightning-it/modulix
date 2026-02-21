@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
+nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-true}"
+nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
+nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ansible-nav-local run <playbook.yml> [ansible-navigator run args...]
+  ansible-nav-local exec -- <command> [args...]
+
+Environment:
+  ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
+  ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: true)
+  ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
+  ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+EOF
+}
+
+case "${nav_mode}" in
+  stdout|interactive) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_MODE='${nav_mode}' (use: stdout|interactive)." >&2
+    exit 1
+    ;;
+esac
+
+case "${nav_ee_enabled}" in
+  true|false) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
+    exit 1
+    ;;
+esac
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  usage
+  exit 0
+fi
+
+default_ansible_config="${REPO_ROOT}/ansible.cfg"
+if [[ -f "/runner/project/ansible.cfg" ]]; then
+  default_ansible_config="/runner/project/ansible.cfg"
+fi
+
+export HOME="${HOME:-/runner}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
+export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
+export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
+export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
+export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
+export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections}"
+
+subcommand="$1"
+shift
+
+case "${subcommand}" in
+  run)
+    if [[ $# -lt 1 ]]; then
+      echo "Missing playbook path for 'run'." >&2
+      usage
+      exit 1
+    fi
+    cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
+    if [[ "${nav_ee_enabled}" == "false" ]]; then
+      cmd+=(--ee false)
+    fi
+    cmd+=(run "$@")
+    exec "${cmd[@]}"
+    ;;
+  exec)
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+    if [[ $# -eq 0 ]]; then
+      exec /bin/bash
+    fi
+    exec "$@"
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unsupported subcommand '${subcommand}'. Use 'run' or 'exec'." >&2
+    usage
+    exit 1
+    ;;
+esac

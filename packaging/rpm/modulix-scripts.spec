@@ -37,6 +37,7 @@ cp -a ansible/scripts %{buildroot}/opt/modulix/ansible/
 # Ensure script payload is executable.
 find %{buildroot}/opt/modulix -type f -name '*.sh' -exec chmod 0755 {} \;
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/ansible-nav
+chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/ansible-nav-local
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/install-local-collections
 
 install -d %{buildroot}%{_bindir}
@@ -44,6 +45,11 @@ install -d %{buildroot}%{_bindir}
 cat > %{buildroot}%{_bindir}/ansible-nav <<'EOF'
 #!/usr/bin/env bash
 exec /opt/modulix/ansible/scripts/ansible-nav "$@"
+EOF
+
+cat > %{buildroot}%{_bindir}/ansible-nav-local <<'EOF'
+#!/usr/bin/env bash
+exec /opt/modulix/ansible/scripts/ansible-nav-local "$@"
 EOF
 
 cat > %{buildroot}%{_bindir}/install-local-collections <<'EOF'
@@ -68,6 +74,7 @@ EOF
 
 chmod 0755 \
   %{buildroot}%{_bindir}/ansible-nav \
+  %{buildroot}%{_bindir}/ansible-nav-local \
   %{buildroot}%{_bindir}/install-local-collections \
   %{buildroot}%{_bindir}/test-ansible.sh \
   %{buildroot}%{_bindir}/wunder-devtools-ee.sh \
@@ -77,6 +84,7 @@ chmod 0755 \
 %license LICENSE
 %doc README.md scripts/README.md
 %{_bindir}/ansible-nav
+%{_bindir}/ansible-nav-local
 %{_bindir}/install-local-collections
 %{_bindir}/test-ansible.sh
 %{_bindir}/wunder-devtools-ee.sh
