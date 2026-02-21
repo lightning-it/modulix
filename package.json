@@ -5,12 +5,12 @@
   "description": "ModuLix enterprise automation repository.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lightning-it/modulix.git"
+    "url": "https://github.com/lightning-it/modulix-automation.git"
   },
   "bugs": {
-    "url": "https://github.com/lightning-it/modulix/issues"
+    "url": "https://github.com/lightning-it/modulix-automation/issues"
   },
-  "homepage": "https://github.com/lightning-it/modulix#readme",
+  "homepage": "https://github.com/lightning-it/modulix-automation#readme",
   "license": "GPL-2.0-only",
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
