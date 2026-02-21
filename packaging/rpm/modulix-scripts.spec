@@ -36,7 +36,6 @@ cp -a ansible/scripts %{buildroot}/opt/modulix/ansible/
 
 # Ensure script payload is executable.
 find %{buildroot}/opt/modulix -type f -name '*.sh' -exec chmod 0755 {} \;
-chmod 0755 %{buildroot}/opt/modulix/scripts/git/pre-commit-devtools
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/ansible-nav
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/install-local-collections
 
@@ -62,11 +61,6 @@ cat > %{buildroot}%{_bindir}/wunder-devtools-ee.sh <<'EOF'
 exec /opt/modulix/scripts/wunder-devtools-ee.sh "$@"
 EOF
 
-cat > %{buildroot}%{_bindir}/pre-commit-devtools <<'EOF'
-#!/usr/bin/env bash
-exec /opt/modulix/scripts/git/pre-commit-devtools "$@"
-EOF
-
 cat > %{buildroot}%{_bindir}/clone-all.sh <<'EOF'
 #!/usr/bin/env bash
 exec /opt/modulix/scripts/github/clone-all.sh "$@"
@@ -77,7 +71,6 @@ chmod 0755 \
   %{buildroot}%{_bindir}/install-local-collections \
   %{buildroot}%{_bindir}/test-ansible.sh \
   %{buildroot}%{_bindir}/wunder-devtools-ee.sh \
-  %{buildroot}%{_bindir}/pre-commit-devtools \
   %{buildroot}%{_bindir}/clone-all.sh
 
 %files
@@ -87,7 +80,6 @@ chmod 0755 \
 %{_bindir}/install-local-collections
 %{_bindir}/test-ansible.sh
 %{_bindir}/wunder-devtools-ee.sh
-%{_bindir}/pre-commit-devtools
 %{_bindir}/clone-all.sh
 /opt/modulix
 

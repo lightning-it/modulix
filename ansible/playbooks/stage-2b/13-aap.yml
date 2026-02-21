@@ -6,8 +6,8 @@
 # - Enable required repos
 # - Apply host firewall policy when provided
 # - Install AAP packages
-# - Manage AAP configuration
-# - Expose day-2 operations (restart/status/upgrade)
+# - Apply AAP configuration-as-code objects
+# - Expose day-2 operations (restart/status/upgrade/sync_hub_password)
 # -----------------------------------------------------------------------------
 
 - name: Configure AAP hosts
@@ -46,12 +46,12 @@
           tags: [aap, aap_deploy]
       tags: [aap, aap_deploy]
 
-    - name: Configure AAP
+    - name: AAP configuration-as-code
       ansible.builtin.include_role:
-        name: lit.supplementary.aap_config
+        name: lit.supplementary.aap_cac
         apply:
-          tags: [aap, aap_config]
-      tags: [aap, aap_config]
+          tags: [aap, aap_cac]
+      tags: [aap, aap_cac]
 
     # Day-2 operations (default action is none; enables `-t aap_ops -e aap_ops_action=...`)
     - name: AAP ops
