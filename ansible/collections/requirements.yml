@@ -3,6 +3,7 @@ collections:
   - name: ansible.posix
     version: "2.1.0"
   - name: community.vmware
+    version: "6.2.0"
   - name: community.hashi_vault
     version: ">=7.1.0"
   - name: fedora.linux_system_roles
