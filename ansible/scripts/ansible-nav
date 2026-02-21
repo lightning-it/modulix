@@ -46,6 +46,10 @@ validate_tristate() {
   esac
 }
 
+running_inside_container() {
+  [[ -f "/run/.containerenv" || -f "/.dockerenv" ]]
+}
+
 detect_container_engine() {
   local requested="$1"
 
@@ -57,6 +61,12 @@ detect_container_engine() {
       fi
       if command -v docker >/dev/null 2>&1; then
         echo "docker"
+        return 0
+      fi
+      # When invoked from inside the toolbox image, there is typically no
+      # container engine available. Fall back to local in-container execution.
+      if running_inside_container && [[ -x "${SCRIPT_DIR}/ansible-nav-local" ]]; then
+        echo "local"
         return 0
       fi
       echo "Neither podman nor docker is installed." >&2
@@ -307,6 +317,10 @@ if [[ $# -ge 1 ]]; then
 fi
 
 engine="$(detect_container_engine "${engine_requested}")"
+
+if [[ "${engine}" == "local" ]]; then
+  exec "${SCRIPT_DIR}/ansible-nav-local" "$@"
+fi
 
 container_args=("${engine}" run --rm)
 if [[ -t 0 && -t 1 ]]; then

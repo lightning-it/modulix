@@ -10,6 +10,7 @@ This directory contains RPM packaging assets for publishing ModuLix scripts as
   - `/opt/modulix/ansible/scripts`
 - Wrapper commands under `/usr/bin`:
   - `ansible-nav`
+  - `ansible-nav-local`
   - `install-local-collections`
   - `test-ansible.sh`
   - `wunder-devtools-ee.sh`
