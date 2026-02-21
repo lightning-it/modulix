@@ -1,43 +1,36 @@
-# ModuLix – Enterprise Automation
+# ModuLix Automation
 
-This repository contains the **ModuLix** product inventory and orchestration for automated rollout
-enterprise infrastructure components using **Ansible Collections**.
+ModuLix automation is the delivery source-of-truth for customer automation baselines.
+It is delivered as the `modulix-scripts` RPM.
 
-Most day-to-day work happens in the Ansible workspace:
+## Delivery model
 
-➡️ **See:** [`ansible/README.md`](ansible/README.md)
+- Delivery artifact: `modulix-scripts` RPM
+- Default runtime: toolbox wrapper + EE (`scripts/ansible-nav`)
+- Runtime payload: Ansible and collection set provided by the configured EE image
+- Optional runtime: host-native execution (supported with prerequisites)
 
-## Local workflows (high level)
+Canonical release-coupled docs in this repo:
 
-- **Bootstrap Ansible collections:** see `ansible/README.md` (recommended before any run)
-- **Lint / Molecule / CI-like runs:** via the Wunder devtools execution environment and `Makefile` targets
+- Runtime contract: `docs/runtime-contract.md`
+- Support matrix: `docs/support-matrix.md`
+- Packaging/build: `packaging/rpm/README.md`
 
-## RPM packaging for toolbox
+## Quick start (default)
 
-ModuLix scripts can be shipped as an RPM (`modulix-scripts`) for container/toolbox
-consumption. Packaging assets and COPR helper scripts are in:
+```bash
+cd ansible
+./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
+  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+```
 
-- `packaging/rpm/modulix-scripts.spec`
-- `packaging/rpm/build-srpm.sh`
-- `packaging/rpm/configure-copr-scm.sh`
-- `packaging/rpm/publish-copr.sh`
-- `packaging/rpm/README.md`
-- `.github/workflows/rpm-srpm-ci.yml`
-- `.github/workflows/semantic-release.yml`
-- `.releaserc.json`
-- `.copr/Makefile`
+## Full operator documentation
 
-## Release process
+Curated operator guides, architecture, runbooks and troubleshooting live in:
 
-- Commits to `main` are evaluated by semantic-release using Conventional Commits.
-- Expected commit prefixes:
-  - `fix:` -> patch release (`vX.Y.Z`)
-  - `feat:` -> minor release (`vX.Y.Z`)
-  - `feat!:` / `fix!:` or `BREAKING CHANGE:` -> major release (`vX.Y.Z`)
-- Commits like `docs:`, `chore:`, or `refactor:` without breaking change usually do not create a release tag.
-- Release tags must follow `v<semver>` format (for example `v1.4.2`).
-- When a `v*` tag is created (by semantic-release or manually), `RPM SRPM CI` publishes `modulix-scripts` to COPR using version `<semver>` (for example `1.4.2`).
+- `https://github.com/lightning-it/lcp-docs/tree/main/ModuLix`
 
-## License
+## Security statement
 
-GPL-2.0-only. See [LICENSE](LICENSE).
+- No secrets in repository.
+- Provide secrets via runtime inputs (for example `ANSIBLE_VAULT_PASSWORD_FILE`, `VAULT_TOKEN`, ssh-agent).

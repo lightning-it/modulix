@@ -2,5 +2,21 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track toolbox image version references in release-coupled docs",
+      "managerFilePatterns": [
+        "/^docs\\/runtime-contract\\.md$/",
+        "/^docs\\/support-matrix\\.md$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\\s`]+)"
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
   ]
 }
