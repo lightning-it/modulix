@@ -284,7 +284,6 @@ Image/engine controls:
 - `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `localhost/ee-wunder-toolbox-ubi9:local`)
 - `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `missing`)
 - `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive` (default: `stdout`)
-- `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false` (default: `true`)
 - `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)
 - `ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=/tmp/.cache/ansible-navigator/collection_doc_cache.db`
 - `ANSIBLE_TOOLBOX_NAV_LOG_FILE=/tmp/ansible-navigator.log` (default: `/tmp/ansible-navigator.log`)

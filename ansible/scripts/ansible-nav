@@ -9,7 +9,6 @@ engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
-nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-true}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 
@@ -28,7 +27,6 @@ Environment:
   ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: localhost/ee-wunder-toolbox-ubi9:local)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
-  ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: true)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
 
@@ -299,14 +297,6 @@ case "${nav_mode}" in
     ;;
 esac
 
-case "${nav_ee_enabled}" in
-  true|false) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
-    exit 1
-    ;;
-esac
-
 if [[ $# -ge 1 ]]; then
   case "$1" in
     -h|--help|help)
@@ -427,10 +417,7 @@ case "${subcommand}" in
     if [[ "${inventory_mounted}" == true ]]; then
       rewrite_inventory_args run_args
     fi
-    in_container_cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
-    if [[ "${nav_ee_enabled}" == "false" ]]; then
-      in_container_cmd+=(--ee false)
-    fi
+    in_container_cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}" --ee true)
     in_container_cmd+=(run "${run_args[@]}")
     ;;
   exec)

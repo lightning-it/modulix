@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
-nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-true}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 
@@ -17,7 +16,6 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
-  ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: true)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
 EOF
@@ -27,14 +25,6 @@ case "${nav_mode}" in
   stdout|interactive) ;;
   *)
     echo "Invalid ANSIBLE_TOOLBOX_NAV_MODE='${nav_mode}' (use: stdout|interactive)." >&2
-    exit 1
-    ;;
-esac
-
-case "${nav_ee_enabled}" in
-  true|false) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
     exit 1
     ;;
 esac
@@ -72,10 +62,7 @@ case "${subcommand}" in
       usage
       exit 1
     fi
-    cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
-    if [[ "${nav_ee_enabled}" == "false" ]]; then
-      cmd+=(--ee false)
-    fi
+    cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}" --ee true)
     cmd+=(run "$@")
     exec "${cmd[@]}"
     ;;
