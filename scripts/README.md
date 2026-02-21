@@ -7,7 +7,6 @@ Helper scripts for day-to-day automation in this repository.
 ```text
 scripts/
   github/clone-all.sh
-  git/pre-commit-devtools
   wunder-devtools-ee.sh
   test-ansible.sh
 ansible/scripts/
@@ -19,7 +18,7 @@ ansible/scripts/
 
 - `git`
 - `gh` (GitHub CLI) for `scripts/github/clone-all.sh`
-- `podman` or `docker` for containerized devtools wrappers
+- `podman` or `docker` for containerized helper workflows
 
 ## Quick usage
 
@@ -33,12 +32,27 @@ Clone all repositories from a GitHub owner:
 Run pre-commit inside the devtools container:
 
 ```bash
-# Build local image (from sibling repository)
-podman build --format docker -t localhost/ee-wunder-devtools-ubi9:local ../container-ee-wunder-devtools-ubi9
+mkdir -p "$HOME/.cache/pre-commit"
+systemctl --user enable --now podman.socket
+SOCK="/run/user/$(id -u)/podman/podman.sock"
+REPO="$PWD"
 
-# Run from this repository root
-./scripts/git/pre-commit-devtools
-./scripts/git/pre-commit-devtools run --files README.md
+podman run --rm \
+  --userns keep-id \
+  --user "$(id -u):$(id -g)" \
+  --security-opt label=disable \
+  -v "$REPO":"$REPO":z \
+  -v "$HOME/.cache":"$HOME/.cache":z \
+  -v "$SOCK":"$SOCK" \
+  -w "$REPO" \
+  -e XDG_CACHE_HOME="$HOME/.cache" \
+  -e PRE_COMMIT_HOME="$HOME/.cache/pre-commit" \
+  -e DOCKER_HOST="unix://$SOCK" \
+  -e GIT_CONFIG_COUNT=1 \
+  -e GIT_CONFIG_KEY_0=safe.directory \
+  -e GIT_CONFIG_VALUE_0="$REPO" \
+  quay.io/l-it/ee-wunder-devtools-ubi9:latest \
+  pre-commit run --all-files
 ```
 
 Run basic ansible sanity checks:
@@ -48,21 +62,4 @@ Run basic ansible sanity checks:
 ```
 
 Behavior note:
-- If no Docker/Podman API socket is available, docker-based pre-commit hooks are skipped automatically.
-- Set `DEVTOOLS_SKIP_DOCKER_HOOKS=false` to enforce those hooks.
-
-### Podman socket for docker-based hooks
-
-Some hooks execute `docker ...` commands. With rootless Podman:
-
-```bash
-systemctl --user enable --now podman.socket
-systemctl --user status podman.socket
-ls -l /run/user/$UID/podman/podman.sock
-```
-
-Then run:
-
-```bash
-DEVTOOLS_SKIP_DOCKER_HOOKS=false ./scripts/git/pre-commit-devtools
-```
+- Docker-based hooks require access to a container API socket in the runtime where `pre-commit` executes.

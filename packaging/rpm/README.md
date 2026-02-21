@@ -14,7 +14,6 @@ This directory contains RPM packaging assets for publishing ModuLix scripts as
   - `install-local-collections`
   - `test-ansible.sh`
   - `wunder-devtools-ee.sh`
-  - `pre-commit-devtools`
   - `clone-all.sh`
 
 Wrappers are used instead of raw symlinks so scripts that rely on
