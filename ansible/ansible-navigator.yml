@@ -3,7 +3,7 @@ ansible-navigator:
   execution-environment:
     enabled: true
     container-engine: auto
-    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.7.0
+    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.2
     pull:
       policy: missing
     container-options:
