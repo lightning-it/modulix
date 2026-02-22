@@ -6,7 +6,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.4.0}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
@@ -24,7 +24,7 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.9.3)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
@@ -431,8 +431,17 @@ case "${subcommand}" in
     if [[ "${inventory_mounted}" == true ]]; then
       rewrite_inventory_args run_args
     fi
-    in_container_cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}" --ee true)
-    in_container_cmd+=(run "${run_args[@]}")
+    # Default execution inside the toolbox should not require a nested
+    # container engine. Delegate to ansible-nav-local (which runs with --ee false).
+    in_container_cmd=(
+      env
+      "ANSIBLE_TOOLBOX_NAV_MODE=${nav_mode}"
+      "ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
+      "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=false"
+      /runner/project/scripts/ansible-nav-local
+      run
+      "${run_args[@]}"
+    )
     ;;
   exec)
     if [[ "${1:-}" == "--" ]]; then

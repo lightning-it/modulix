@@ -17,6 +17,19 @@
       "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track ansible-nav default toolbox image",
+      "managerFilePatterns": [
+        "/^ansible\\/scripts\\/ansible-nav$/"
+      ],
+      "matchStrings": [
+        "image=\"\\$\\{ANSIBLE_TOOLBOX_IMAGE:-quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\"}]+)\\}\""
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
     }
   ]
 }
