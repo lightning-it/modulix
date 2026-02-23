@@ -25,11 +25,11 @@ This matrix defines supported execution modes for ModuLix automation.
 
 ## Collection source
 
-- Base collections: auto-bootstrapped from `ansible/collections/requirements.yml`
-  into `ansible/collections` when missing/changed (default behavior).
-- RH-certified/AAP profile: use
-  `ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=/runner/project/collections/requirements-rh.yml`
-  (requires Automation Hub access).
+- Base collections: bootstrap is enabled by default (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
+- Default profile: `ansible/collections/requirements.yml`.
+- RH-certified/AAP profile is selected automatically when
+  `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`
+  is present.
 - Local overlays for development: `ansible/scripts/install-local-collections`
   into `ansible/collections-dev`.
 - Effective search precedence: `collections-dev` -> `collections` -> EE/system paths.
