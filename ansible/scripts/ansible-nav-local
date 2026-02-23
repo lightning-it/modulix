@@ -13,7 +13,7 @@ default_collections_requirements="${REPO_ROOT}/collections/requirements.yml"
 default_collections_requirements_rh="${REPO_ROOT}/collections/requirements-rh.yml"
 collections_requirements="${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}"
 collections_install_path="${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH:-${REPO_ROOT}/collections}"
-collections_stamp_file="${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-${collections_install_path}/.requirements.sha256}"
+collections_stamp_file="${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-}"
 automation_hub_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL:-https://console.redhat.com/api/automation-hub/content/published/}"
 automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 
@@ -31,7 +31,7 @@ Environment:
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: true)
   ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
   ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
-  ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ./collections/.requirements.sha256)
+  ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
   RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, required for certified collections)
 EOF
 }
@@ -200,6 +200,9 @@ export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
 export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
 export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
 mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}"
+if [[ -z "${collections_stamp_file}" ]]; then
+  collections_stamp_file="${ANSIBLE_HOME}/collections.requirements.sha256"
+fi
 
 subcommand="$1"
 shift

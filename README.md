@@ -24,6 +24,23 @@ cd ansible
   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
+## Development
+
+When developing local Ansible collections from sibling repos (for example
+`ansible-collection-supplementary`, `ansible-collection-foundational`), install
+them as local overlays before running playbooks:
+
+```bash
+cd ansible
+./scripts/install-local-collections
+```
+
+What this does:
+
+- Builds local `ansible-collection-*` sources into tarballs.
+- Installs them into `ansible/collections-dev`.
+- Ensures local overlays take precedence over `ansible/collections` during runs.
+
 ## Full operator documentation
 
 Curated operator guides, architecture, runbooks and troubleshooting live in:
