@@ -36,8 +36,8 @@
       ansible.builtin.include_role:
         name: lit.supplementary.aap
         apply:
-          tags: [aap]
-      tags: [aap]
+          tags: [aap, aap_deploy, aap_cac, aap_ops]
+      tags: [aap, aap_deploy, aap_cac, aap_ops]
 
     - name: Deploy AAP
       ansible.builtin.include_role:
