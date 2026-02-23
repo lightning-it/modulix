@@ -13,16 +13,13 @@ This document defines the canonical execution contract for ModuLix automation re
 
 - Runs inside toolbox container image:
   - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0`
-- Host container engine can be `podman` or `docker` (`ANSIBLE_TOOLBOX_ENGINE`).
-- `run` always executes in nested mode:
-  - toolbox container runs `ansible-nav-local`
-  - `ansible-nav-local` runs `ansible-navigator` with execution environment enabled
-  - inner execution environment container engine is fixed to `podman`
-  - toolbox run-mode starts privileged as root to enable nested podman
-- Playbook runtime image:
-  - default `ANSIBLE_TOOLBOX_RUN_EE_IMAGE=quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3`
-- Base collections come from the configured run EE image and local workspace overlays.
-- For AAP runs, RH extension collections can be prepared at runtime before playbook execution.
+- `ansible-navigator run` is always executed with `--ee true`.
+- Collections are resolved from `ANSIBLE_COLLECTIONS_PATH` with local project overlays first.
+- `ansible/scripts/ansible-nav-local run` bootstraps collections by default
+  (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
+- Default requirements profile: `ansible/collections/requirements.yml`.
+- If `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`
+  exists, that RH profile is selected automatically.
 
 ## Runtime options
 
