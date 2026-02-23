@@ -21,14 +21,16 @@ This matrix defines supported execution modes for ModuLix automation.
 
 | Component | Value |
 |---|---|
-| Default wrapper image | `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0` |
-| Default run EE image | `quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3` |
-| `run` execution style | Wrapper container + in-container `ansible-nav-local` + nested ansible EE |
-| Inner run container engine | `podman` (fixed) |
-| `run` toolbox mode | Privileged root toolbox runtime for nested podman |
+| Default toolbox image | `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.4.0` |
+| Execution style | `ansible-navigator run --ee true` |
 
 ## Collection source
 
-- Base collections: provided by configured EE image.
-- Local overlays for development only: `ansible/scripts/install-local-collections`.
-- RH extension overlays (Automation Hub): `ansible/collections/requirements-rh.yml`.
+- Base collections: bootstrap is enabled by default (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
+- Default profile: `ansible/collections/requirements.yml`.
+- RH-certified/AAP profile is selected automatically when
+  `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`
+  is present.
+- Local overlays for development: `ansible/scripts/install-local-collections`
+  into `ansible/collections-dev`.
+- Effective search precedence: `collections-dev` -> `collections` -> EE/system paths.
