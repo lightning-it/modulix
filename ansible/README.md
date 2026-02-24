@@ -75,6 +75,7 @@ RPM baseline mode (`/opt/modulix/ansible` in image):
 ```bash
 INVENTORY_DIR=/path/to/inventories
 VAULT_PASS_FILE=/path/to/.vault-pass.txt
+RUN_EE_IMAGE=localhost/ee-wunder-ansible-ubi9-certified:local-modulix-rpmtest
 
 podman run --rm -it \
   --privileged \
@@ -86,6 +87,8 @@ podman run --rm -it \
   -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
+  -e ANSIBLE_TOOLBOX_NAV_EE_IMAGE="$RUN_EE_IMAGE" \
+  -e ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never \
   -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false \
   -e ANSIBLE_VAULT_PASSWORD_FILE=/opt/modulix/ansible/.vault-pass.txt \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0 \
@@ -97,6 +100,35 @@ podman run --rm -it \
 `ansible-nav-local` defaults to `--ee false`. EE image/engine defaults come from
 `ansible-navigator.yml`. `ANSIBLE_CONFIG` defaults to the active workspace
 `ansible.cfg`.
+
+`ANSIBLE_TOOLBOX_NAV_EE_IMAGE` is an explicit run-EE override for in-container
+mode. Use a published image tag in standard operations. Use a local tag only when
+that image is available to the nested container engine (for example preloaded
+with `podman load` inside the toolbox runtime).
+Switch between public and certified runtime by changing `RUN_EE_IMAGE` (or
+`ANSIBLE_TOOLBOX_NAV_EE_IMAGE`) only. Use
+`.../ee-wunder-ansible-ubi9-certified:<tag>` when your execution requires
+certified collections not present in the public Galaxy-only image. For registry
+hosted certified images, authenticate first (for example `podman login <registry>`).
+For local image tags (`localhost/...`) in container-in mode, set
+`ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never` and preload the image into the nested
+runtime before `ansible-nav-local run`.
+
+Local preload pattern (offline/local validation):
+
+```bash
+podman save -o /tmp/run-ee.tar "$RUN_EE_IMAGE"
+
+podman run --rm -it \
+  --privileged \
+  --security-opt label=disable \
+  --user 0:0 \
+  -w /opt/modulix/ansible \
+  -v /tmp/run-ee.tar:/tmp/run-ee.tar:ro,Z \
+  ... \
+  localhost/ee-wunder-toolbox-ubi9:local-modulix-rpmtest \
+  bash -lc 'podman load -i /tmp/run-ee.tar && ansible-nav-local run <playbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>'
+```
 
 In RPM baseline mode (`/opt/modulix/ansible`), collection bootstrap defaults to
 `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false` (offline-safe). Collections are expected
@@ -229,6 +261,13 @@ Wrapper behavior (`scripts/ansible-nav`):
 - `ANSIBLE_CONFIG` defaults to `ansible.cfg` in the active runtime workspace.
 - For RH collection profile resolution, provide `RH_AUTOMATION_HUB_TOKEN`.
 - Full runtime variable reference: `../docs/runtime-contract.md`.
+
+#### Run EE image variants
+
+| Variant | Technical scope | Build requirement | Access model | Operational guidance |
+|---|---|---|---|---|
+| `ee-wunder-ansible-ubi9` | Public Galaxy-only runtime image with public/community and non-gated platform collections | None | Public pull | Default option for standard connected environments |
+| `ee-wunder-ansible-ubi9-certified` | Runtime image with Automation Hub certified collections baked in at build time | CI must provide `RH_AUTOMATION_HUB_TOKEN` | Credential-gated image pull (registry authentication required) | Use for controlled/offline enterprise environments where required certified collections must already exist in the runtime image |
 
 ### Inventory and roles
 
