@@ -7,4 +7,3 @@ ansible-playbook -i hosts playbooks/stage-2c/container-platform-ocp4/prepare-ee.
 ansible-playbook -i hosts playbooks/stage-2c/container-platform-ocp4/20-ocp-install.yml
 ansible-playbook -i hosts playbooks/stage-2c/container-platform-ocp4/21-post-install.yml
 ```
- 
