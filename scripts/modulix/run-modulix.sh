@@ -145,6 +145,7 @@ run_toolbox() {
 
   local tty=()
   [[ "$interactive" == true ]] && tty=( -it )
+  local ee_volume_mounts="${ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_VOLUME_MOUNTS:-/opt/modulix:/opt/modulix:Z}"
 
   local envs=(
     -e HOME=/runner/project
@@ -154,6 +155,7 @@ run_toolbox() {
     -e "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=$RUN_SKIP_CERT_CHECK"
     -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false
     -e "ANSIBLE_VAULT_PASSWORD_FILE=$RUNNER_VAULT_PASS_FILE"
+    -e "ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_VOLUME_MOUNTS=$ee_volume_mounts"
   )
   if [[ "$RUN_SKIP_AUTH" != "true" ]]; then
     envs+=( -e "REGISTRY_AUTH_FILE=$RUNNER_AUTHFILE" )

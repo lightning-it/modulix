@@ -307,6 +307,11 @@ case "${subcommand}" in
     fi
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
     cmd+=(--ce "${nav_container_engine}")
+    # In RPM/runtime mode, playbooks live under /opt/modulix. Mirror that path
+    # into the nested EE so imported playbooks resolve correctly.
+    if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
+      cmd+=(--eev "/opt/modulix:/opt/modulix:Z")
+    fi
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
     fi
