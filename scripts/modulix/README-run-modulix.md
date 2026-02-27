@@ -21,6 +21,13 @@ export RUN_SKIP_CERT_CHECK=false
 [[ -s "$VAULT_PASS_FILE" ]] || { echo "ERROR: missing or empty Vault password file: $VAULT_PASS_FILE" >&2; false; }
 ```
 
+If your mirror allows anonymous pulls but uses an untrusted/private CA, set both:
+
+```bash
+export RUN_SKIP_AUTH=true
+export RUN_SKIP_CERT_CHECK=true
+```
+
 ```bash
 # required for SSH: forward your running ssh-agent
 test -n "$SSH_AUTH_SOCK"

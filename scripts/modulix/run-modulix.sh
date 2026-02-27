@@ -133,6 +133,25 @@ pull_image() {
   podman pull "${pull_args[@]}" "$image" >/dev/null
 }
 
+pre_pull_run_ee_inside_toolbox() {
+  local image="$1"
+  local pull_cmd=( podman pull )
+
+  if [[ "$image" == localhost/* ]]; then
+    return
+  fi
+
+  if [[ "$RUN_SKIP_AUTH" != "true" ]]; then
+    pull_cmd+=( --authfile "$RUNNER_AUTHFILE" )
+  fi
+  if [[ "$RUN_SKIP_CERT_CHECK" == "true" ]]; then
+    pull_cmd+=( --tls-verify=false )
+  fi
+  pull_cmd+=( "$image" )
+
+  run_toolbox false "${pull_cmd[@]}" >/dev/null
+}
+
 run_toolbox() {
   local interactive="$1"
   shift
@@ -287,6 +306,9 @@ run_services() {
   ensure_authfile_for_remote "$RUN_TOOLBOX_IMAGE"
   pull_image "$RUN_EE_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
+  if [[ "$RUN_SKIP_AUTH" == "true" || "$RUN_SKIP_CERT_CHECK" == "true" ]]; then
+    pre_pull_run_ee_inside_toolbox "$RUN_EE_IMAGE"
+  fi
 
   run_toolbox true ansible-nav-local run "$playbook" "${run_args[@]}"
 }
