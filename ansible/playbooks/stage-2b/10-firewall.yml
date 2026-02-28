@@ -10,59 +10,74 @@
   hosts: firewalls
   become: true
   gather_facts: true
+  vars:
+    # Inventory override structure:
+    # firewall_policy_rules:
+    #   zone_forwards:
+    #     - zone: lan
+    #       enabled: true
+    #   policies:
+    #     policy-name:
+    #       enabled: true
+    #       ingress_zones: [lan]
+    #       egress_zones: [wan]
+    #       target: ACCEPT
+    #       rich_rules:
+    #         - rule family=ipv4 source address=10.34.20.0/24 destination address=10.10.30.10 port port=443 protocol=tcp accept
+    firewall_policy_defaults:
+      zone_forwards:
+        - zone: lan
+          enabled: "{{ net_wan_iface is defined }}"
+      policies:
+        lan-to-wan:
+          enabled: "{{ net_wan_iface is defined }}"
+          ingress_zones:
+            - lan
+          egress_zones:
+            - wan
+          target: ACCEPT
+          rich_rules: []
 
   roles:
     - role: fedora.linux_system_roles.firewall
       tags: [firewall]
 
   tasks:
-    # Only for firewalls with a WAN interface (DMZ), i.e. "Egress firewall"
-    - name: Ensure lan->wan forwarding is enabled (zone-level)
-      ansible.builtin.command: "firewall-cmd --zone=lan --add-forward --permanent"
-      register: _fw_lan_forward
-      changed_when: _fw_lan_forward.rc == 0
-      failed_when: _fw_lan_forward.rc != 0 and ("ALREADY_ENABLED" not in (_fw_lan_forward.stderr | default('')))
-      when: net_wan_iface is defined
+    - name: Build effective firewalld policy dictionary
+      ansible.builtin.set_fact:
+        _firewall_policy_rules: >-
+          {{ firewall_policy_defaults | combine(firewall_policy_rules | default({}), recursive=True) }}
+      changed_when: false
       tags: [firewall]
 
-    - name: Ensure lan-to-wan policy exists
-      ansible.builtin.command: "firewall-cmd --permanent --new-policy lan-to-wan"
-      register: _fw_policy_create
-      changed_when: _fw_policy_create.rc == 0
-      failed_when: >
-        _fw_policy_create.rc != 0 and
-        "ALREADY_ENABLED" not in (_fw_policy_create.stderr | default('')) and
-        "NAME_CONFLICT" not in (_fw_policy_create.stderr | default(''))
-      when: net_wan_iface is defined
+    - name: Ensure zone forwarding state
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--zone={{ item.zone }}"
+          - "{{ '--add-forward' if (item.enabled | default(true) | bool) else '--remove-forward' }}"
+          - --permanent
+      register: _fw_zone_forward
+      changed_when: _fw_zone_forward.rc == 0
+      failed_when: >-
+        _fw_zone_forward.rc != 0 and
+        ("ALREADY_ENABLED" not in (_fw_zone_forward.stderr | default(''))) and
+        ("NOT_ENABLED" not in (_fw_zone_forward.stderr | default('')))
+      loop: "{{ _firewall_policy_rules.zone_forwards | default([]) }}"
+      when: item.zone | default('', true) | length > 0
       tags: [firewall]
 
-    - name: Ensure lan-to-wan policy has ingress zone lan
-      ansible.builtin.command: "firewall-cmd --permanent --policy lan-to-wan --add-ingress-zone lan"
-      register: _fw_policy_ingress
-      changed_when: _fw_policy_ingress.rc == 0
-      failed_when: _fw_policy_ingress.rc != 0 and ("ALREADY_ENABLED" not in (_fw_policy_ingress.stderr | default('')))
-      when: net_wan_iface is defined
-      tags: [firewall]
-
-    - name: Ensure lan-to-wan policy has egress zone wan
-      ansible.builtin.command: "firewall-cmd --permanent --policy lan-to-wan --add-egress-zone wan"
-      register: _fw_policy_egress
-      changed_when: _fw_policy_egress.rc == 0
-      failed_when: _fw_policy_egress.rc != 0 and ("ALREADY_ENABLED" not in (_fw_policy_egress.stderr | default('')))
-      when: net_wan_iface is defined
-      tags: [firewall]
-
-    - name: Ensure lan-to-wan policy target is ACCEPT
-      ansible.builtin.command: "firewall-cmd --permanent --policy lan-to-wan --set-target ACCEPT"
-      register: _fw_policy_target
-      changed_when: _fw_policy_target.rc == 0
-      failed_when: _fw_policy_target.rc != 0
-      when: net_wan_iface is defined
+    - name: Apply policy definitions from firewall_policy_rules
+      ansible.builtin.include_tasks: tasks/firewalld_policy_rule.yml
+      loop: "{{ _firewall_policy_rules.policies | default({}) | dict2items }}"
+      loop_control:
+        loop_var: firewall_policy
+        label: "{{ firewall_policy.key }}"
+      when: firewall_policy.value.enabled | default(true) | bool
       tags: [firewall]
 
     - name: Reload firewalld (apply policy)
       ansible.builtin.command: "firewall-cmd --reload"
       register: _fw_reload
       changed_when: false
-      when: net_wan_iface is defined
       tags: [firewall]

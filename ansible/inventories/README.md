@@ -44,3 +44,61 @@ If a toggle is not set, it is treated as disabled.
 Flat overrides are also supported for compatibility, for example:
 - `wunderbox_service_repos: enabled`
 - `wunderbox_service_vault_config: disabled`
+
+## Generic Firewall Policy Rules
+
+`playbooks/stage-2b/10-firewall.yml` supports a generic inventory dict for additional
+inter-zone policy rules.
+
+```yaml
+firewall_policy_rules:
+  policies:
+    ocpmgmt-to-vcenter:
+      enabled: true
+      ingress_zones:
+        - lan
+      egress_zones:
+        - mgmt
+      target: ACCEPT
+      rich_rules:
+        - rule family=ipv4 source address=10.34.20.0/24 destination address=10.10.30.10 port port=443 protocol=tcp accept
+```
+
+Key structure:
+- `firewall_policy_rules` is the inventory variable (top-level in host/group vars)
+- `firewall_policy_rules.policies` is optional (dict of firewalld policies)
+- `firewall_policy_rules.zone_forwards` is optional (list of zone forward toggles)
+
+Optional nested key example (`zone_forwards` inside `firewall_policy_rules`):
+
+```yaml
+firewall_policy_rules:
+  zone_forwards:
+    - zone: lan
+      enabled: true
+```
+
+Full example:
+
+```yaml
+firewall_policy_rules:
+  zone_forwards:
+    - zone: lan
+      enabled: true
+  policies:
+    lan-to-wan:
+      enabled: true
+      ingress_zones:
+        - lan
+      egress_zones:
+        - wan
+      target: ACCEPT
+    ocpmgmt-to-vcenter:
+      enabled: true
+      ingress_zones:
+        - lan
+      egress_zones:
+        - mgmt
+      rich_rules:
+        - rule family=ipv4 source address=10.34.20.0/24 destination address=10.10.30.10 port port=443 protocol=tcp accept
+```
