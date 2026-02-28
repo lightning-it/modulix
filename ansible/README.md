@@ -65,7 +65,7 @@ podman run --rm -it \
   -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
-  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.0 \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.0 \
   ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
@@ -75,7 +75,7 @@ RPM baseline mode (`/opt/modulix/ansible` in image):
 ```bash
 INVENTORY_DIR=/path/to/inventories
 VAULT_PASS_FILE=/path/to/.vault-pass.txt
-RUN_EE_IMAGE=localhost/ee-wunder-ansible-ubi9-certified:local-modulix-rpmtest
+RUN_EE_IMAGE=localhost/ee-wunder-ansible-ubi9-certified:local
 
 podman run --rm -it \
   --privileged \
@@ -91,7 +91,7 @@ podman run --rm -it \
   -e ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never \
   -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false \
   -e ANSIBLE_VAULT_PASSWORD_FILE=/opt/modulix/ansible/.vault-pass.txt \
-  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.0 \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.0 \
   ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
@@ -126,9 +126,12 @@ podman run --rm -it \
   -w /opt/modulix/ansible \
   -v /tmp/run-ee.tar:/tmp/run-ee.tar:ro,Z \
   ... \
-  localhost/ee-wunder-toolbox-ubi9:local-modulix-rpmtest \
+  localhost/ee-wunder-toolbox-ubi9:local \
   bash -lc 'podman load -i /tmp/run-ee.tar && ansible-nav-local run <playbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>'
 ```
+
+For a complete local image build and runtime workflow, see:
+`lcp-docs/30-modulix/50-development/02-containers/20-local-modulix-runtime.md`.
 
 In RPM baseline mode (`/opt/modulix/ansible`), collection bootstrap defaults to
 `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false` (offline-safe). Collections are expected
@@ -233,10 +236,10 @@ ansible-nav-local run <playbook.yml> \
 `scripts/ansible-nav` runs the toolbox image directly via Podman or Docker.
 
 Default toolbox image:
-- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.0`
+- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.0`
 
 Wrapper behavior (`scripts/ansible-nav`):
-- External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
+- External inventories are auto-mounted from `../../ansible-inventory/inventories` to `/runner/project/inventories` when available.
 - When inventory mount is active, `-i inventories/...` is automatically rewritten to `/runner/project/inventories/...` for execution environment compatibility.
 - Host SSH directory is auto-mounted from `~/.ssh` to `/runner/.ssh` so inventory paths like `/runner/.ssh/id_ed25519` work inside the execution environment.
 - Host `SSH_AUTH_SOCK` is auto-mounted to `/runner/ssh-agent.sock` and exported in-container.
