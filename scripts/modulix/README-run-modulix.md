@@ -10,8 +10,12 @@ It uses an inventory, a Vault password file, an SSH agent, and registry auth dur
 
 `run-modulix.sh` uses published images on `quay.io`.
 
+For a complete local image build/start workflow, see:
+`lcp-docs/30-modulix/50-development/02-containers/20-local-modulix-runtime.md`.
+
 ```bash
 export INVENTORY_DIR="$PWD/ansible-inventory-lit/inventories"
+export INVENTORY_NAME="<inventory-name>"   # e.g. corp, ...
 export VAULT_PASS_FILE="$PWD/.vault-pass.txt"
 export AUTHFILE="$PWD/.podman-auth.json"
 # optional: host pulls EE image once, then streams it into toolbox (recommended)
@@ -30,7 +34,7 @@ export RUN_SKIP_AUTH=true
 export RUN_SKIP_CERT_CHECK=true
 ```
 
-To allow direct nested pulls inside toolbox (legacy behavior), disable host image transfer:
+To allow direct nested pulls inside toolbox, disable host image transfer:
 
 ```bash
 export RUN_USE_HOST_EE_IMAGE=false
@@ -52,40 +56,53 @@ chmod 600 "$AUTHFILE"
 ```
 
 ```bash
-# only after initial Vault setup/bootstrap is completed
+# preferred: provide VAULT_TOKEN directly (for example from your secret manager)
+export VAULT_TOKEN="<root-token>"
+```
+
+```bash
+# fallback: extract VAULT_TOKEN from an explicit vault file
 export VAULT_TOKEN="$(
-  ./run-modulix.sh --inventory "$INVENTORY_DIR" vault root-token
+  ./run-modulix.sh --inventory-dir "$INVENTORY_DIR" vault root-token \
+    --vault-file "inventories/$INVENTORY_NAME/group_vars/wunderboxes/vault-init.yml"
 )"
 ```
+
+`VAULT_TOKEN` is optional in `services` mode.  
+If set, `run-modulix.sh` forwards it as `-e vault_token=...`; if unset, it runs without that extra-var.
+
+`--inventory-dir` and Ansible `-i/--inventory` are intentionally different:
+- `--inventory-dir`: inventories root path that is mounted into the container runtime.
+- `-i/--inventory`: concrete inventory file used by `ansible-playbook`.
 
 ## Execution
 
 ```bash
-./run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox \
-  -i inventories/corp/inventory.yml --limit <HOST>
+./run-modulix.sh --inventory-dir "$INVENTORY_DIR" services wunderbox \
+  -i "inventories/$INVENTORY_NAME/inventory.yml" --limit <HOST>
 ```
 
 ```bash
-./run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox --rebuild \
-  -i inventories/corp/inventory.yml --limit <HOST>
+./run-modulix.sh --inventory-dir "$INVENTORY_DIR" services wunderbox --rebuild \
+  -i "inventories/$INVENTORY_NAME/inventory.yml" --limit <HOST>
 ```
 
 ```bash
-./run-modulix.sh --inventory "$INVENTORY_DIR" services aap \
-  -i inventories/corp/inventory.yml --limit <HOST>
+./run-modulix.sh --inventory-dir "$INVENTORY_DIR" services aap \
+  -i "inventories/$INVENTORY_NAME/inventory.yml" --limit <HOST>
 ```
 
 ```bash
-./run-modulix.sh --inventory "$INVENTORY_DIR" services aap --rebuild \
-  -i inventories/corp/inventory.yml --limit <HOST>
+./run-modulix.sh --inventory-dir "$INVENTORY_DIR" services aap --rebuild \
+  -i "inventories/$INVENTORY_NAME/inventory.yml" --limit <HOST>
 ```
 
 Run a specific playbook in `services` mode:
 
 ```bash
-./run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox \
+./run-modulix.sh --inventory-dir "$INVENTORY_DIR" services wunderbox \
   --playbook playbooks/services/12-wunderbox-service-stack.yml \
-  -i inventories/corp/inventory.yml --limit <HOST>
+  -i "inventories/$INVENTORY_NAME/inventory.yml" --limit <HOST>
 ```
 
 Supported `--playbook` forms:

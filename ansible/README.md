@@ -75,7 +75,7 @@ RPM baseline mode (`/opt/modulix/ansible` in image):
 ```bash
 INVENTORY_DIR=/path/to/inventories
 VAULT_PASS_FILE=/path/to/.vault-pass.txt
-RUN_EE_IMAGE=localhost/ee-wunder-ansible-ubi9-certified:local-modulix-rpmtest
+RUN_EE_IMAGE=localhost/ee-wunder-ansible-ubi9-certified:local
 
 podman run --rm -it \
   --privileged \
@@ -126,9 +126,12 @@ podman run --rm -it \
   -w /opt/modulix/ansible \
   -v /tmp/run-ee.tar:/tmp/run-ee.tar:ro,Z \
   ... \
-  localhost/ee-wunder-toolbox-ubi9:local-modulix-rpmtest \
+  localhost/ee-wunder-toolbox-ubi9:local \
   bash -lc 'podman load -i /tmp/run-ee.tar && ansible-nav-local run <playbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>'
 ```
+
+For a complete local image build and runtime workflow, see:
+`lcp-docs/30-modulix/50-development/02-containers/20-local-modulix-runtime.md`.
 
 In RPM baseline mode (`/opt/modulix/ansible`), collection bootstrap defaults to
 `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false` (offline-safe). Collections are expected
