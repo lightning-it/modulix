@@ -1,0 +1,86 @@
+---
+- name: Ensure policy exists
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --new-policy
+      - "{{ firewall_policy.key }}"
+  register: _fw_policy_create
+  changed_when: _fw_policy_create.rc == 0
+  failed_when:
+    - _fw_policy_create.rc != 0
+    - '"ALREADY_ENABLED" not in (_fw_policy_create.stderr | default(""))'
+    - '"NAME_CONFLICT" not in (_fw_policy_create.stderr | default(""))'
+
+- name: Ensure policy ingress zones are configured
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ firewall_policy.key }}"
+      - --add-ingress-zone
+      - "{{ item }}"
+  register: _fw_policy_ingress
+  changed_when: _fw_policy_ingress.rc == 0
+  failed_when: >-
+    _fw_policy_ingress.rc != 0 and
+    ("ALREADY_ENABLED" not in (_fw_policy_ingress.stderr | default('')))
+  loop: "{{ firewall_policy.value.ingress_zones | default([]) }}"
+
+- name: Ensure policy egress zones are configured
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ firewall_policy.key }}"
+      - --add-egress-zone
+      - "{{ item }}"
+  register: _fw_policy_egress
+  changed_when: _fw_policy_egress.rc == 0
+  failed_when: >-
+    _fw_policy_egress.rc != 0 and
+    ("ALREADY_ENABLED" not in (_fw_policy_egress.stderr | default('')))
+  loop: "{{ firewall_policy.value.egress_zones | default([]) }}"
+
+- name: Ensure policy target is configured
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ firewall_policy.key }}"
+      - --set-target
+      - "{{ firewall_policy.value.target }}"
+  register: _fw_policy_target
+  changed_when: _fw_policy_target.rc == 0
+  failed_when: _fw_policy_target.rc != 0
+  when: firewall_policy.value.target | default('', true) | length > 0
+
+- name: Ensure policy rich rules are configured
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ firewall_policy.key }}"
+      - --add-rich-rule
+      - "{{ _firewall_policy_rich_rule }}"
+  vars:
+    _firewall_policy_rich_rule: >-
+      {{
+        (
+          item.rule
+          if (item is mapping and item.rule is defined)
+          else (item if item is string else '')
+        )
+      }}
+  register: _fw_policy_rich_rule
+  changed_when: _fw_policy_rich_rule.rc == 0
+  failed_when: >-
+    _fw_policy_rich_rule.rc != 0 and
+    ("ALREADY_ENABLED" not in (_fw_policy_rich_rule.stderr | default('')))
+  loop: "{{ firewall_policy.value.rich_rules | default([]) }}"
+  when: _firewall_policy_rich_rule | length > 0
