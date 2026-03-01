@@ -43,6 +43,53 @@
       tags: [firewall]
 
   tasks:
+    - name: Build desired runtime interface-zone bindings
+      ansible.builtin.set_fact:
+        _firewall_interface_bindings: |-
+          {%- set out = [] -%}
+          {%- for item in (firewall is mapping | ternary([firewall], firewall | default([]))) -%}
+          {%- if item is mapping and (item.interface is defined) and (item.zone is defined) -%}
+          {%- set item_state = item.state | default('enabled') -%}
+          {%- if item_state in ['enabled', 'present'] -%}
+          {%- set _ = out.append({'interface': item.interface, 'zone': item.zone}) -%}
+          {%- endif -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+      changed_when: false
+      tags: [firewall]
+
+    - name: Query runtime zone for desired interfaces
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--get-zone-of-interface={{ item.interface }}"
+      register: _firewall_runtime_zone_query
+      changed_when: false
+      failed_when: _firewall_runtime_zone_query.rc not in [0, 1]
+      loop: "{{ _firewall_interface_bindings | default([]) }}"
+      loop_control:
+        label: "{{ item.interface }} -> {{ item.zone }}"
+      when: (_firewall_interface_bindings | default([]) | length) > 0
+      tags: [firewall]
+
+    - name: Ensure runtime interface-zone mapping is synchronized
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--zone={{ item.item.zone }}"
+          - "--change-interface={{ item.item.interface }}"
+      register: _firewall_runtime_zone_change
+      changed_when: _firewall_runtime_zone_change.rc == 0
+      failed_when: _firewall_runtime_zone_change.rc != 0
+      loop: "{{ _firewall_runtime_zone_query.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.interface }} -> {{ item.item.zone }}"
+      when:
+        - (_firewall_runtime_zone_query.results | default([]) | length) > 0
+        - (item.rc != 0) or ((item.stdout | default('') | trim) != (item.item.zone | string))
+      tags: [firewall]
+
     - name: Build effective firewalld policy dictionary
       ansible.builtin.set_fact:
         _firewall_policy_rules: >-
