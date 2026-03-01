@@ -374,6 +374,104 @@
         - network_state is defined or (network_connections | default([], true) | length) > 0
       tags: [network]
 
+    - name: Network - build static route activation check list
+      ansible.builtin.set_fact:
+        _network_route_activation_checks: >-
+          {{
+            query(
+              'subelements',
+              (net_connection_routes | default({}) | dict2items),
+              'value',
+              {'skip_missing': True}
+            )
+          }}
+      changed_when: false
+      when: (net_connection_routes | default({}) | length) > 0
+      tags: [network]
+
+    - name: Network - check runtime presence of configured static routes
+      ansible.builtin.shell: >-
+        ip -4 route show {{ item.1.network }}/{{ item.1.prefix }}
+        | grep -F "via {{ item.1.gateway }}"
+      args:
+        executable: /bin/bash
+      register: _network_route_runtime_checks
+      changed_when: false
+      failed_when: false
+      loop: "{{ _network_route_activation_checks | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.0.key
+          }} {{
+            item.1.network
+          }}/{{ item.1.prefix }} via {{
+            item.1.gateway
+          }}
+      when:
+        - (_network_route_activation_checks | default([]) | length) > 0
+        - item.1.network is defined
+        - item.1.prefix is defined
+        - item.1.gateway is defined
+      tags: [network]
+
+    - name: Network - build missing static route list
+      ansible.builtin.set_fact:
+        _network_missing_route_items: >-
+          {{
+            (_network_route_runtime_checks.results | default([]))
+            | selectattr('rc', 'ne', 0)
+            | map(attribute='item')
+            | list
+          }}
+      changed_when: false
+      when: _network_route_runtime_checks is defined
+      tags: [network]
+
+    - name: Network - resolve interface names for missing static routes
+      ansible.builtin.command:
+        argv:
+          - nmcli
+          - -g
+          - connection.interface-name
+          - connection
+          - show
+          - "{{ item.0.key }}"
+      register: _network_route_ifaces
+      changed_when: false
+      failed_when: >-
+        (_network_route_ifaces.rc != 0) or
+        ((_network_route_ifaces.stdout | default('') | trim | length) == 0)
+      loop: "{{ _network_missing_route_items | default([]) }}"
+      loop_control:
+        label: "{{ item.0.key }}"
+      when: (_network_missing_route_items | default([]) | length) > 0
+      tags: [network]
+
+    - name: Network - apply missing static routes at runtime without link flap
+      ansible.builtin.shell: >-
+        ip -4 route replace {{ item.item.1.network }}/{{ item.item.1.prefix }}
+        via {{ item.item.1.gateway }}
+        dev {{ item.stdout | trim }}
+        {% if item.item.1.metric is defined %}metric {{ item.item.1.metric }}{% endif %}
+      args:
+        executable: /bin/bash
+      register: _network_route_apply
+      changed_when: _network_route_apply.rc == 0
+      failed_when: _network_route_apply.rc != 0
+      loop: "{{ _network_route_ifaces.results | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.item.1.network
+          }}/{{ item.item.1.prefix }} via {{
+            item.item.1.gateway
+          }} dev {{
+            item.stdout | trim
+          }}
+      when: (_network_route_ifaces.results | default([]) | length) > 0
+      tags: [network]
+
     # -------------------------------------------------------------------------
     # Cleanup: remove inactive NetworkManager profiles (optional)
     # -------------------------------------------------------------------------
