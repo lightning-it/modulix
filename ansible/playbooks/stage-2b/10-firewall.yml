@@ -143,6 +143,63 @@
       when: firewall_policy.value.enabled | default(true) | bool
       tags: [firewall]
 
+    - name: Query firewalld direct rule presence
+      ansible.builtin.command: >-
+        firewall-cmd --permanent --direct
+        --query-rule {{ item.family | default('ipv4') }}
+        {{ item.table }} {{ item.chain }} {{ item.priority }}
+        {{ item.rule }}
+      register: _fw_direct_rule_query
+      changed_when: false
+      failed_when: _fw_direct_rule_query.rc not in [0, 1]
+      loop: "{{ firewall_direct_rules | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            (item.family | default('ipv4'))
+          }} {{
+            item.table
+          }} {{
+            item.chain
+          }} {{
+            item.priority
+          }} {{
+            item.rule
+          }}
+      when:
+        - firewall_direct_rules is defined
+        - (firewall_direct_rules | length) > 0
+        - item.enabled | default(true) | bool
+      tags: [firewall]
+
+    - name: Ensure firewalld direct rules are configured
+      ansible.builtin.command: >-
+        firewall-cmd --permanent --direct
+        --add-rule {{ item.item.family | default('ipv4') }}
+        {{ item.item.table }} {{ item.item.chain }} {{ item.item.priority }}
+        {{ item.item.rule }}
+      register: _fw_direct_rule_add
+      changed_when: _fw_direct_rule_add.rc == 0
+      failed_when: _fw_direct_rule_add.rc != 0
+      loop: "{{ _fw_direct_rule_query.results | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            (item.item.family | default('ipv4'))
+          }} {{
+            item.item.table
+          }} {{
+            item.item.chain
+          }} {{
+            item.item.priority
+          }} {{
+            item.item.rule
+          }}
+      when:
+        - (_fw_direct_rule_query.results | default([]) | length) > 0
+        - item.rc == 1
+      tags: [firewall]
+
     - name: Reload firewalld (apply policy)
       ansible.builtin.command: "firewall-cmd --reload"
       register: _fw_reload
