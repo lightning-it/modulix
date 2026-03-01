@@ -8,3 +8,114 @@
     - role: lit.supplementary.cloudflared
       vars:
         cloudflared_show_status: true
+
+  tasks:
+    - name: Gateway firewalld direct rules - validate input
+      ansible.builtin.assert:
+        that:
+          - item.family is defined
+          - item.table is defined
+          - item.chain is defined
+          - item.priority is defined
+          - (item.args | default([])) is iterable
+          - (item.args | default([])) is not string
+        fail_msg: >-
+          gateway_firewalld_direct_rules entries must define
+          family/table/chain/priority and list args.
+      loop: "{{ gateway_firewalld_direct_rules | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.family | default('?')
+          }} {{
+            item.table | default('?')
+          }} {{
+            item.chain | default('?')
+          }}
+      when: (gateway_firewalld_direct_rules | default([], true) | length) > 0
+      tags: [gateway, firewall, firewalld]
+
+    - name: Gateway firewalld direct rules - query rule presence
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'firewall-cmd',
+              '--permanent',
+              '--direct',
+              '--query-rule',
+              item.family,
+              item.table,
+              item.chain,
+              (item.priority | string)
+            ] + (item.args | default([]))
+          }}
+      register: gateway_firewalld_direct_query
+      changed_when: false
+      failed_when: gateway_firewalld_direct_query.rc not in [0, 1]
+      loop: "{{ gateway_firewalld_direct_rules | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.family
+          }} {{
+            item.table
+          }} {{
+            item.chain
+          }} {{
+            item.priority
+          }} {{
+            (item.args | default([])) | join(' ')
+          }}
+      when: (gateway_firewalld_direct_rules | default([], true) | length) > 0
+      tags: [gateway, firewall, firewalld]
+
+    - name: Gateway firewalld direct rules - add missing rules
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'firewall-cmd',
+              '--permanent',
+              '--direct',
+              '--add-rule',
+              item.item.family,
+              item.item.table,
+              item.item.chain,
+              (item.item.priority | string)
+            ] + (item.item.args | default([]))
+          }}
+      register: gateway_firewalld_direct_add
+      loop: "{{ gateway_firewalld_direct_query.results | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.item.family
+          }} {{
+            item.item.table
+          }} {{
+            item.item.chain
+          }} {{
+            item.item.priority
+          }} {{
+            (item.item.args | default([])) | join(' ')
+          }}
+      when:
+        - (gateway_firewalld_direct_rules | default([], true) | length) > 0
+        - item.rc != 0
+      tags: [gateway, firewall, firewalld]
+
+    - name: Gateway firewalld direct rules - reload firewalld
+      ansible.builtin.command:
+        argv: [firewall-cmd, --reload]
+      when:
+        - (gateway_firewalld_direct_rules | default([], true) | length) > 0
+        - gateway_firewalld_direct_add is defined
+        - >-
+          (
+            gateway_firewalld_direct_add.results | default([])
+            | selectattr('changed', 'equalto', true)
+            | list
+            | length
+          ) > 0
+      tags: [gateway, firewall, firewalld]

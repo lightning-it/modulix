@@ -3,6 +3,21 @@
   "extends": [
     "config:recommended"
   ],
+  "packageRules": [
+    {
+      "description": "Manage local controller Python pins in ansible requirements",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "ansible/requirements.txt"
+      ],
+      "matchPackageNames": [
+        "pyvmomi",
+        "requests"
+      ]
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",

@@ -27,7 +27,7 @@
     firewall_policy_defaults:
       zone_forwards:
         - zone: lan
-          enabled: "{{ net_wan_iface is defined }}"
+          enabled: true
       policies:
         lan-to-wan:
           enabled: "{{ net_wan_iface is defined }}"
@@ -43,6 +43,53 @@
       tags: [firewall]
 
   tasks:
+    - name: Build desired runtime interface-zone bindings
+      ansible.builtin.set_fact:
+        _firewall_interface_bindings: |-
+          {%- set out = [] -%}
+          {%- for item in (firewall is mapping | ternary([firewall], firewall | default([]))) -%}
+          {%- if item is mapping and (item.interface is defined) and (item.zone is defined) -%}
+          {%- set item_state = item.state | default('enabled') -%}
+          {%- if item_state in ['enabled', 'present'] -%}
+          {%- set _ = out.append({'interface': item.interface, 'zone': item.zone}) -%}
+          {%- endif -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+      changed_when: false
+      tags: [firewall]
+
+    - name: Query runtime zone for desired interfaces
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--get-zone-of-interface={{ item.interface }}"
+      register: _firewall_runtime_zone_query
+      changed_when: false
+      failed_when: _firewall_runtime_zone_query.rc not in [0, 1]
+      loop: "{{ _firewall_interface_bindings | default([]) }}"
+      loop_control:
+        label: "{{ item.interface }} -> {{ item.zone }}"
+      when: (_firewall_interface_bindings | default([]) | length) > 0
+      tags: [firewall]
+
+    - name: Ensure runtime interface-zone mapping is synchronized
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--zone={{ item.item.zone }}"
+          - "--change-interface={{ item.item.interface }}"
+      register: _firewall_runtime_zone_change
+      changed_when: _firewall_runtime_zone_change.rc == 0
+      failed_when: _firewall_runtime_zone_change.rc != 0
+      loop: "{{ _firewall_runtime_zone_query.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.interface }} -> {{ item.item.zone }}"
+      when:
+        - (_firewall_runtime_zone_query.results | default([]) | length) > 0
+        - (item.rc != 0) or ((item.stdout | default('') | trim) != (item.item.zone | string))
+      tags: [firewall]
+
     - name: Build effective firewalld policy dictionary
       ansible.builtin.set_fact:
         _firewall_policy_rules: >-
@@ -50,21 +97,41 @@
       changed_when: false
       tags: [firewall]
 
-    - name: Ensure zone forwarding state
+    - name: Query zone forwarding state
       ansible.builtin.command:
         argv:
           - firewall-cmd
           - "--zone={{ item.zone }}"
-          - "{{ '--add-forward' if (item.enabled | default(true) | bool) else '--remove-forward' }}"
+          - --query-forward
+          - --permanent
+      register: _fw_zone_forward_query
+      changed_when: false
+      failed_when: _fw_zone_forward_query.rc not in [0, 1]
+      loop: "{{ _firewall_policy_rules.zone_forwards | default([]) }}"
+      when: item.zone | default('', true) | length > 0
+      tags: [firewall]
+
+    - name: Ensure zone forwarding state
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--zone={{ item.item.zone }}"
+          - "{{ '--add-forward' if (item.item.enabled | default(true) | bool) else '--remove-forward' }}"
           - --permanent
       register: _fw_zone_forward
       changed_when: _fw_zone_forward.rc == 0
-      failed_when: >-
-        _fw_zone_forward.rc != 0 and
-        ("ALREADY_ENABLED" not in (_fw_zone_forward.stderr | default(''))) and
-        ("NOT_ENABLED" not in (_fw_zone_forward.stderr | default('')))
-      loop: "{{ _firewall_policy_rules.zone_forwards | default([]) }}"
-      when: item.zone | default('', true) | length > 0
+      failed_when: _fw_zone_forward.rc != 0
+      loop: "{{ _fw_zone_forward_query.results | default([]) }}"
+      when: >-
+        (
+          (item.item.enabled | default(true) | bool)
+          and (item.rc == 1)
+        )
+        or
+        (
+          not (item.item.enabled | default(true) | bool)
+          and (item.rc == 0)
+        )
       tags: [firewall]
 
     - name: Apply policy definitions from firewall_policy_rules
@@ -74,6 +141,63 @@
         loop_var: firewall_policy
         label: "{{ firewall_policy.key }}"
       when: firewall_policy.value.enabled | default(true) | bool
+      tags: [firewall]
+
+    - name: Query firewalld direct rule presence
+      ansible.builtin.command: >-
+        firewall-cmd --permanent --direct
+        --query-rule {{ item.family | default('ipv4') }}
+        {{ item.table }} {{ item.chain }} {{ item.priority }}
+        {{ item.rule }}
+      register: _fw_direct_rule_query
+      changed_when: false
+      failed_when: _fw_direct_rule_query.rc not in [0, 1]
+      loop: "{{ firewall_direct_rules | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            (item.family | default('ipv4'))
+          }} {{
+            item.table
+          }} {{
+            item.chain
+          }} {{
+            item.priority
+          }} {{
+            item.rule
+          }}
+      when:
+        - firewall_direct_rules is defined
+        - (firewall_direct_rules | length) > 0
+        - item.enabled | default(true) | bool
+      tags: [firewall]
+
+    - name: Ensure firewalld direct rules are configured
+      ansible.builtin.command: >-
+        firewall-cmd --permanent --direct
+        --add-rule {{ item.item.family | default('ipv4') }}
+        {{ item.item.table }} {{ item.item.chain }} {{ item.item.priority }}
+        {{ item.item.rule }}
+      register: _fw_direct_rule_add
+      changed_when: _fw_direct_rule_add.rc == 0
+      failed_when: _fw_direct_rule_add.rc != 0
+      loop: "{{ _fw_direct_rule_query.results | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            (item.item.family | default('ipv4'))
+          }} {{
+            item.item.table
+          }} {{
+            item.item.chain
+          }} {{
+            item.item.priority
+          }} {{
+            item.item.rule
+          }}
+      when:
+        - (_fw_direct_rule_query.results | default([]) | length) > 0
+        - item.rc == 1
       tags: [firewall]
 
     - name: Reload firewalld (apply policy)

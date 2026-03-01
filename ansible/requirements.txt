@@ -1,0 +1,5 @@
+# Local controller Python dependencies for direct ansible-playbook runs.
+# Needed for VMware tasks delegated to localhost.
+ansible-core==2.18.14
+requests==2.32.5
+pyvmomi==9.0.0.0
