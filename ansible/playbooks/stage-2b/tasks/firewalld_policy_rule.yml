@@ -1,11 +1,26 @@
 ---
+- name: Derive effective firewalld policy name
+  ansible.builtin.set_fact:
+    _firewall_policy_name: "{{ firewall_policy.value.name | default(firewall_policy.key) }}"
+  changed_when: false
+
+- name: Validate firewalld policy name constraints
+  ansible.builtin.assert:
+    that:
+      - (_firewall_policy_name | length) <= 18
+      - (_firewall_policy_name | regex_search('^[A-Za-z0-9_.-]+$')) is not none
+    fail_msg: >-
+      Invalid firewalld policy name '{{ _firewall_policy_name }}' for policy key
+      '{{ firewall_policy.key }}'. Name must be <= 18 chars and match
+      [A-Za-z0-9_.-].
+
 - name: Ensure policy exists
   ansible.builtin.command:
     argv:
       - firewall-cmd
       - --permanent
       - --new-policy
-      - "{{ firewall_policy.key }}"
+      - "{{ _firewall_policy_name }}"
   register: _fw_policy_create
   changed_when: _fw_policy_create.rc == 0
   failed_when:
@@ -13,21 +28,46 @@
     - '"ALREADY_ENABLED" not in (_fw_policy_create.stderr | default(""))'
     - '"NAME_CONFLICT" not in (_fw_policy_create.stderr | default(""))'
 
+- name: Query policy ingress zone presence
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ _firewall_policy_name }}"
+      - "--query-ingress-zone={{ item }}"
+  register: _fw_policy_ingress_query
+  changed_when: false
+  failed_when: _fw_policy_ingress_query.rc not in [0, 1]
+  loop: "{{ firewall_policy.value.ingress_zones | default([]) }}"
+
 - name: Ensure policy ingress zones are configured
   ansible.builtin.command:
     argv:
       - firewall-cmd
       - --permanent
       - --policy
-      - "{{ firewall_policy.key }}"
+      - "{{ _firewall_policy_name }}"
       - --add-ingress-zone
-      - "{{ item }}"
+      - "{{ item.item }}"
   register: _fw_policy_ingress
   changed_when: _fw_policy_ingress.rc == 0
-  failed_when: >-
-    _fw_policy_ingress.rc != 0 and
-    ("ALREADY_ENABLED" not in (_fw_policy_ingress.stderr | default('')))
-  loop: "{{ firewall_policy.value.ingress_zones | default([]) }}"
+  failed_when: _fw_policy_ingress.rc != 0
+  loop: "{{ _fw_policy_ingress_query.results | default([]) }}"
+  when: item.rc == 1
+
+- name: Query policy egress zone presence
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ _firewall_policy_name }}"
+      - "--query-egress-zone={{ item }}"
+  register: _fw_policy_egress_query
+  changed_when: false
+  failed_when: _fw_policy_egress_query.rc not in [0, 1]
+  loop: "{{ firewall_policy.value.egress_zones | default([]) }}"
 
 - name: Ensure policy egress zones are configured
   ansible.builtin.command:
@@ -35,15 +75,26 @@
       - firewall-cmd
       - --permanent
       - --policy
-      - "{{ firewall_policy.key }}"
+      - "{{ _firewall_policy_name }}"
       - --add-egress-zone
-      - "{{ item }}"
+      - "{{ item.item }}"
   register: _fw_policy_egress
   changed_when: _fw_policy_egress.rc == 0
-  failed_when: >-
-    _fw_policy_egress.rc != 0 and
-    ("ALREADY_ENABLED" not in (_fw_policy_egress.stderr | default('')))
-  loop: "{{ firewall_policy.value.egress_zones | default([]) }}"
+  failed_when: _fw_policy_egress.rc != 0
+  loop: "{{ _fw_policy_egress_query.results | default([]) }}"
+  when: item.rc == 1
+
+- name: Query current policy target
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ _firewall_policy_name }}"
+      - --get-target
+  register: _fw_policy_target_query
+  changed_when: false
+  failed_when: _fw_policy_target_query.rc != 0
 
 - name: Ensure policy target is configured
   ansible.builtin.command:
@@ -51,23 +102,24 @@
       - firewall-cmd
       - --permanent
       - --policy
-      - "{{ firewall_policy.key }}"
+      - "{{ _firewall_policy_name }}"
       - --set-target
       - "{{ firewall_policy.value.target }}"
   register: _fw_policy_target
   changed_when: _fw_policy_target.rc == 0
   failed_when: _fw_policy_target.rc != 0
-  when: firewall_policy.value.target | default('', true) | length > 0
+  when:
+    - firewall_policy.value.target | default('', true) | length > 0
+    - (firewall_policy.value.target | string | trim) != (_fw_policy_target_query.stdout | string | trim)
 
-- name: Ensure policy rich rules are configured
-  ansible.builtin.command:
-    argv:
-      - firewall-cmd
-      - --permanent
-      - --policy
-      - "{{ firewall_policy.key }}"
-      - --add-rich-rule
-      - "{{ _firewall_policy_rich_rule }}"
+- name: Initialize desired rich rules list
+  ansible.builtin.set_fact:
+    _firewall_policy_rich_rules_desired: []
+  changed_when: false
+
+- name: Build desired rich rules list
+  ansible.builtin.set_fact:
+    _firewall_policy_rich_rules_desired: "{{ _firewall_policy_rich_rules_desired + [_firewall_policy_rich_rule] }}"
   vars:
     _firewall_policy_rich_rule: >-
       {{
@@ -77,10 +129,34 @@
           else (item if item is string else '')
         )
       }}
-  register: _fw_policy_rich_rule
-  changed_when: _fw_policy_rich_rule.rc == 0
-  failed_when: >-
-    _fw_policy_rich_rule.rc != 0 and
-    ("ALREADY_ENABLED" not in (_fw_policy_rich_rule.stderr | default('')))
   loop: "{{ firewall_policy.value.rich_rules | default([]) }}"
   when: _firewall_policy_rich_rule | length > 0
+  changed_when: false
+
+- name: Query policy rich rule presence
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ _firewall_policy_name }}"
+      - "--query-rich-rule={{ item }}"
+  register: _fw_policy_rich_rule_query
+  changed_when: false
+  failed_when: _fw_policy_rich_rule_query.rc not in [0, 1]
+  loop: "{{ _firewall_policy_rich_rules_desired }}"
+
+- name: Ensure policy rich rules are configured
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - --policy
+      - "{{ _firewall_policy_name }}"
+      - --add-rich-rule
+      - "{{ item.item }}"
+  register: _fw_policy_rich_rule_add
+  changed_when: _fw_policy_rich_rule_add.rc == 0
+  failed_when: _fw_policy_rich_rule_add.rc != 0
+  loop: "{{ _fw_policy_rich_rule_query.results | default([]) }}"
+  when: item.rc == 1

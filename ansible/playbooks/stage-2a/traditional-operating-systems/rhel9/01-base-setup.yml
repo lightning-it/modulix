@@ -539,12 +539,29 @@
         (vars | dict2items | selectattr('key', 'match', '^crypto_policies_') | list | length) > 0
       tags: [crypto_policies]
 
-    # Kernel Settings System Role: activate when any kernel_settings_* var is set
+    # Firewalls only need a small sysctl subset. Apply it directly to avoid
+    # additional role/package dependencies on minimal images.
+    - name: Kernel Settings (firewalls - direct sysctl)
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value | string }}"
+        state: "{{ item.state | default('present') }}"
+        reload: "{{ item.reload | default(true) | bool }}"
+        sysctl_set: true
+      loop: "{{ kernel_settings_sysctl | default([], true) }}"
+      when:
+        - "'firewalls' in group_names"
+        - (kernel_settings_sysctl | default([], true) | length) > 0
+      tags: [kernel_settings, sysctl]
+
+    # Kernel Settings System Role: activate for non-firewalls when any
+    # kernel_settings_* var is set.
     - name: Kernel Settings (system role)
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.kernel_settings
-      when: >-
-        (vars | dict2items | selectattr('key', 'match', '^kernel_settings_') | list | length) > 0
+      when:
+        - "'firewalls' not in group_names"
+        - (vars | dict2items | selectattr('key', 'match', '^kernel_settings_') | list | length) > 0
       tags: [kernel_settings, sysctl]
 
     # AIDE System Role: activate when any aide_* var is set

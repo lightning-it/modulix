@@ -50,21 +50,41 @@
       changed_when: false
       tags: [firewall]
 
-    - name: Ensure zone forwarding state
+    - name: Query zone forwarding state
       ansible.builtin.command:
         argv:
           - firewall-cmd
           - "--zone={{ item.zone }}"
-          - "{{ '--add-forward' if (item.enabled | default(true) | bool) else '--remove-forward' }}"
+          - --query-forward
+          - --permanent
+      register: _fw_zone_forward_query
+      changed_when: false
+      failed_when: _fw_zone_forward_query.rc not in [0, 1]
+      loop: "{{ _firewall_policy_rules.zone_forwards | default([]) }}"
+      when: item.zone | default('', true) | length > 0
+      tags: [firewall]
+
+    - name: Ensure zone forwarding state
+      ansible.builtin.command:
+        argv:
+          - firewall-cmd
+          - "--zone={{ item.item.zone }}"
+          - "{{ '--add-forward' if (item.item.enabled | default(true) | bool) else '--remove-forward' }}"
           - --permanent
       register: _fw_zone_forward
       changed_when: _fw_zone_forward.rc == 0
-      failed_when: >-
-        _fw_zone_forward.rc != 0 and
-        ("ALREADY_ENABLED" not in (_fw_zone_forward.stderr | default(''))) and
-        ("NOT_ENABLED" not in (_fw_zone_forward.stderr | default('')))
-      loop: "{{ _firewall_policy_rules.zone_forwards | default([]) }}"
-      when: item.zone | default('', true) | length > 0
+      failed_when: _fw_zone_forward.rc != 0
+      loop: "{{ _fw_zone_forward_query.results | default([]) }}"
+      when: >-
+        (
+          (item.item.enabled | default(true) | bool)
+          and (item.rc == 1)
+        )
+        or
+        (
+          not (item.item.enabled | default(true) | bool)
+          and (item.rc == 0)
+        )
       tags: [firewall]
 
     - name: Apply policy definitions from firewall_policy_rules
