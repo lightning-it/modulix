@@ -5,6 +5,19 @@
   ],
   "packageRules": [
     {
+      "description": "Keep ansible-core on 2.18.x",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "ansible/requirements.txt"
+      ],
+      "matchPackageNames": [
+        "ansible-core"
+      ],
+      "allowedVersions": "/^2\\.18\\./"
+    },
+    {
       "description": "Manage local controller Python pins in ansible requirements",
       "matchManagers": [
         "pip_requirements"
