@@ -27,7 +27,7 @@
     firewall_policy_defaults:
       zone_forwards:
         - zone: lan
-          enabled: "{{ net_wan_iface is defined }}"
+          enabled: true
       policies:
         lan-to-wan:
           enabled: "{{ net_wan_iface is defined }}"
