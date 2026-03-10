@@ -7,11 +7,14 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 requirements_file="${RH_COLLECTIONS_REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements-rh.yml}"
 target_path="${RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
 strict="${RH_COLLECTIONS_STRICT:-true}"
-ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-https://console.redhat.com/api/automation-hub/content/published/}"
+ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-}"
+ah_server_published="${AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED:-https://console.redhat.com/api/automation-hub/content/published/}"
+ah_server_validated="${AUTOMATION_HUB_GALAXY_SERVER_VALIDATED:-https://console.redhat.com/api/automation-hub/content/validated/}"
 ah_token="${RH_AUTOMATION_HUB_TOKEN:-}"
 sso_token_url="${AUTOMATION_HUB_SSO_TOKEN_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 required_collections="${RH_COLLECTIONS_REQUIRED:-ansible.controller}"
 rh_collections_use="${RH_COLLECTIONS_USE:-true}"
+rh_collections_pre="${RH_COLLECTIONS_PRE:-false}"
 
 if ! command -v ansible-galaxy >/dev/null 2>&1; then
   if [[ -x "${SCRIPT_DIR}/ansible-nav" ]]; then
@@ -41,6 +44,14 @@ case "${rh_collections_use}" in
     ;;
 esac
 
+case "${rh_collections_pre}" in
+  true|false) ;;
+  *)
+    echo "Invalid RH_COLLECTIONS_PRE='${rh_collections_pre}' (use: true|false)." >&2
+    exit 2
+    ;;
+esac
+
 trim_spaces() {
   local value="$1"
   printf '%s' "${value}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
@@ -51,7 +62,8 @@ run_install_with_auth_url_flow() {
   local tmp_cfg
   tmp_cfg="$(mktemp "/tmp/automation-hub-ansible-galaxy.XXXXXX.cfg")"
 
-  cat >"${tmp_cfg}" <<EOF
+  if [[ -n "${ah_server}" ]]; then
+    cat >"${tmp_cfg}" <<EOF
 [galaxy]
 server_list = automation_hub
 
@@ -60,6 +72,22 @@ url = ${ah_server}
 auth_url = ${sso_token_url}
 token = ${token}
 EOF
+  else
+    cat >"${tmp_cfg}" <<EOF
+[galaxy]
+server_list = automation_hub_published,automation_hub_validated
+
+[galaxy_server.automation_hub_published]
+url = ${ah_server_published}
+auth_url = ${sso_token_url}
+token = ${token}
+
+[galaxy_server.automation_hub_validated]
+url = ${ah_server_validated}
+auth_url = ${sso_token_url}
+token = ${token}
+EOF
+  fi
 
   if ! ANSIBLE_CONFIG="${tmp_cfg}" "${install_cmd_base[@]}" -r "${requirements_file}"; then
     rm -f "${tmp_cfg}"
@@ -86,12 +114,27 @@ install_cmd_base=(
   --collections-path "${target_path}"
 )
 
+if [[ "${rh_collections_pre}" == "true" ]]; then
+  install_cmd_base+=(--pre)
+fi
+
 if [[ -f "${requirements_file}" ]]; then
   if [[ -n "${ah_token}" ]]; then
     echo "Installing RH extension collections from ${requirements_file} via Automation Hub"
     echo "INFO: Using galaxy auth_url flow."
+    if [[ -n "${ah_server}" ]]; then
+      echo "INFO: Using configured server: ${ah_server}"
+    else
+      echo "INFO: Using servers: ${ah_server_published} and ${ah_server_validated}"
+    fi
+    if [[ "${rh_collections_pre}" == "true" ]]; then
+      echo "INFO: Allowing pre-release collection versions (--pre)."
+    fi
     if ! run_install_with_auth_url_flow "${ah_token}"; then
-      echo "ERROR: Automation Hub install failed. Provide a valid RH_AUTOMATION_HUB_TOKEN." >&2
+      echo "ERROR: Automation Hub install failed." >&2
+      echo "Hint: token/auth may be fine; check collection version constraints in ${requirements_file}." >&2
+      echo "Hint: collections in the 'validated' repository require the validated endpoint." >&2
+      echo "Hint: if your channel only has pre-release builds, retry with RH_COLLECTIONS_PRE=true." >&2
       exit 1
     fi
   else
