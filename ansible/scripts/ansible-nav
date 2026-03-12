@@ -496,8 +496,7 @@ container_args+=(
   -e "XDG_CACHE_HOME=${nav_cache_dir}"
   -e "ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
   -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
-  -e "ANSIBLE_LOCAL_TEMP=/tmp"
-  -e "ANSIBLE_REMOTE_TEMP=/tmp"
+  -e "ANSIBLE_LOCAL_TEMP=/tmp/.ansible/tmp"
   -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
 )
 

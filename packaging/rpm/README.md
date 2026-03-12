@@ -1,7 +1,7 @@
 # modulix-automation-runtime RPM packaging
 
-This directory contains RPM packaging assets for publishing ModuLix scripts as
-`modulix-automation-runtime`.
+This directory contains RPM packaging assets for publishing the ModuLix runtime
+as `modulix-automation-runtime`.
 
 ## What gets packaged
 
@@ -22,6 +22,18 @@ Wrappers are used instead of raw symlinks so scripts that rely on
 Environment-specific inventory is not packaged. Provide your target inventory by
 mounting it into `/opt/modulix/ansible/inventories` or by updating that path on
 the host/toolbox runtime.
+
+The SRPM source archive is curated from the runtime tree only:
+- included:
+  - `LICENSE`
+  - `README.md`
+  - `scripts/`
+  - `ansible/`
+- excluded:
+  - repo app/build files such as `package.json`, `package-lock.json`, and `packaging/`
+  - environment inventory under `ansible/inventories/corp`
+  - local-only artifacts such as `.vault-pass.txt`, `ansible-navigator.log`, and
+    disconnected AAP bundle tarballs
 
 ## Build SRPM
 

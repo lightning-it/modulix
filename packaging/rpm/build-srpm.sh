@@ -6,6 +6,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 SPEC_FILE="${SCRIPT_DIR}/modulix-automation-runtime.spec"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 RPMBUILD_TOPDIR="${SCRIPT_DIR}/.rpmbuild"
+WORKDIR="$(mktemp -d)"
 
 version="${MODULIX_RPM_VERSION:-}"
 release="${MODULIX_RPM_RELEASE:-1}"
@@ -14,6 +15,11 @@ has_git_repo=false
 if command -v git >/dev/null 2>&1 && git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   has_git_repo=true
 fi
+
+cleanup() {
+  rm -rf "${WORKDIR}"
+}
+trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
@@ -94,7 +100,7 @@ if [[ -z "${package_name}" ]]; then
   exit 1
 fi
 
-for cmd in rpmbuild gzip tar; do
+for cmd in cp mkdir mktemp rpmbuild gzip tar; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo "Missing required command: ${cmd}" >&2
     exit 1
@@ -114,18 +120,26 @@ sed -i \
   "${spec_out}"
 
 source_tar="${RPMBUILD_TOPDIR}/SOURCES/modulix-${version}.tar.gz"
-if [[ "${has_git_repo}" == true ]]; then
-  git -C "${REPO_ROOT}" archive --format=tar --prefix="modulix-${version}/" HEAD | gzip -n > "${source_tar}"
-else
-  tar -C "${REPO_ROOT}" \
-    --exclude-vcs \
-    --exclude='./packaging/rpm/.rpmbuild' \
-    --exclude='./packaging/rpm/dist' \
-    --transform "s,^\.$,modulix-${version}," \
-    --transform "s,^\./,modulix-${version}/," \
-    -czf "${source_tar}" \
-    .
-fi
+source_root="${WORKDIR}/modulix-${version}"
+mkdir -p "${source_root}"
+
+for path in LICENSE README.md scripts; do
+  if [[ -e "${REPO_ROOT}/${path}" ]]; then
+    cp -a "${REPO_ROOT}/${path}" "${source_root}/"
+  fi
+done
+
+mkdir -p "${source_root}/ansible"
+tar -C "${REPO_ROOT}/ansible" \
+  --exclude='./.toolbox-podman' \
+  --exclude='./.vault-pass.txt' \
+  --exclude='./ansible-automation-platform-containerized-setup-bundle-*.tar.gz' \
+  --exclude='./ansible-navigator.log' \
+  --exclude='./inventories/corp' \
+  -cf - \
+  . | tar -C "${source_root}/ansible" -xf -
+
+tar -C "${WORKDIR}" -czf "${source_tar}" "modulix-${version}"
 
 rpmbuild -bs "${spec_out}" \
   --define "_topdir ${RPMBUILD_TOPDIR}"
