@@ -276,8 +276,7 @@ export ANSIBLE_GALAXY_CACHE_DIR="${ANSIBLE_GALAXY_CACHE_DIR:-${ANSIBLE_HOME}/gal
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
 export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
-export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
-export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
+export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
 legacy_collections_path_default="/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections"
 # Include both workspace-local and EE-mounted project paths.
 # In RPM baseline mode, REPO_ROOT is /opt/modulix/ansible in toolbox, while
@@ -288,7 +287,7 @@ if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" || "${ANSIBLE_COLLECTIONS_PATH}" == "${
 else
   export ANSIBLE_COLLECTIONS_PATH
 fi
-mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}"
+mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}" "${ANSIBLE_LOCAL_TEMP}"
 if [[ -z "${collections_stamp_file}" ]]; then
   collections_stamp_file="${ANSIBLE_HOME}/collections.requirements.sha256"
 fi

@@ -578,6 +578,9 @@
     - name: Bridge VLAN membership (self + ports)
       ansible.builtin.include_role:
         name: lit.foundational.bridge_vlan_membership
+        apply:
+          tags:
+            - network
       when:
         - network_state is defined
         - (bridge_vlan_ids | default([]) | length) > 0
