@@ -20,8 +20,11 @@
     - role: lit.rhel.developer_tools
       tags: [packages, developer_tools]
 
-    - role: lit.rhel.vscode
-      tags: [packages, vscode]
+    - role: lit.rhel.vscode_deploy
+      tags: [packages, vscode, vscode_deploy]
+
+    - role: lit.rhel.vscode_config
+      tags: [vscode, vscode_config]
 
     # GUI stack (GNOME or XFCE)
     - role: lit.rhel.gui
