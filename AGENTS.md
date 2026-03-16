@@ -18,7 +18,7 @@ podman run --rm \
   -e GIT_CONFIG_VALUE_0=/workspace \
   -v "$PWD":/workspace:Z \
   -w /workspace \
-  quay.io/l-it/ee-wunder-devtools-ubi9:v1.6.0 \
+  quay.io/l-it/ee-wunder-devtools-ubi9:v1.8.1 \
   pre-commit run --all-files
 ```
 
@@ -29,7 +29,7 @@ podman run --rm \
   --security-opt label=disable \
   -v "$PWD":/workspace:Z \
   -w /workspace \
-  quay.io/l-it/ee-wunder-devtools-ubi9:v1.6.0 \
+  quay.io/l-it/ee-wunder-devtools-ubi9:v1.8.1 \
   bash -lc 'set -euo pipefail; rpmspec -P packaging/rpm/modulix-automation-runtime.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1'
 ```
 
@@ -39,8 +39,6 @@ When host tooling is missing for RPM checks, do not stop at a local limitation.
 
 - If `rpmspec` and/or `rpmbuild` are not available on the host, run RPM parse/build
   validation in the devtools container first.
-- If the devtools image itself lacks `rpmspec`/`rpmbuild`, document that result and
-  continue with an RPM-capable containerized fallback (for example Fedora + `rpm-build`).
 - Only report a limitation after the devtools-container path has been attempted.
 - Avoid statements like:
   - `Could not run RPM parse/build locally because rpmspec/rpmbuild are not installed in this environment.`
