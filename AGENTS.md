@@ -1,5 +1,11 @@
 # Agent Instructions
 
+## Shared-Assets First
+
+For any file that is synchronized from `shared-assets`, make the change in the
+shared-assets source first and then sync it back to downstream repositories.
+Do not treat downstream synced copies as the source of truth.
+
 ## Dependency version policy
 
 - Use fixed package versions only. Do not introduce open-ended or floating
