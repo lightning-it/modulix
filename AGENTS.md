@@ -1,5 +1,20 @@
 # Agent Instructions
 
+## Shared-Assets First
+
+For any file that is synchronized from `shared-assets`, make the change in the
+shared-assets source first and then sync it back to downstream repositories.
+Do not treat downstream synced copies as the source of truth.
+
+## Dependency version policy
+
+- Use fixed package versions only. Do not introduce open-ended or floating
+  version ranges such as `>=`, `<=`, `~=` , `^`, or `latest` unless the user
+  explicitly asks for that behavior.
+- Manage package version updates via Renovate whenever possible.
+- When adding or changing a package version, prefer wiring it into existing
+  Renovate management instead of maintaining it manually.
+
 ## Mandatory validation gate (containerized)
 
 Before finishing any change in this repository, run a full validation pass in
@@ -39,8 +54,6 @@ When host tooling is missing for RPM checks, do not stop at a local limitation.
 
 - If `rpmspec` and/or `rpmbuild` are not available on the host, run RPM parse/build
   validation in the devtools container first.
-- If the devtools image itself lacks `rpmspec`/`rpmbuild`, document that result and
-  continue with an RPM-capable containerized fallback (for example Fedora + `rpm-build`).
 - Only report a limitation after the devtools-container path has been attempted.
 - Avoid statements like:
   - `Could not run RPM parse/build locally because rpmspec/rpmbuild are not installed in this environment.`

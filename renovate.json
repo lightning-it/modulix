@@ -76,6 +76,20 @@
       "depNameTemplate": "quay.io/l-it/ee-wunder-ansible-ubi9",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track devtools image references in repo docs and agent guidance",
+      "managerFilePatterns": [
+        "/^AGENTS\\.md$/",
+        "/^scripts\\/README\\.md$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-devtools-ubi9:v(?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-devtools-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
     }
   ]
 }

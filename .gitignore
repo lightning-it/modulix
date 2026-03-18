@@ -1,6 +1,7 @@
 infra/
 ansible-navigator.log
 ansible_collections/
+venv*
 
 # Ansible Collections Development
 collections-dev/ansible_collections/**
@@ -16,3 +17,4 @@ packaging/rpm/dist/
 ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz
 ansible/.ansible-runner/
 ansible/.toolbox-podman/
+
