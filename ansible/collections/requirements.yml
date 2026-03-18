@@ -9,10 +9,10 @@ collections:
   - name: community.hashi_vault
     version: "7.1.0"
   - name: fedora.linux_system_roles
-    version: "1.120.5"
+    version: "1.121.0"
   - name: lit.supplementary
     version: "1.17.0"
   - name: lit.foundational
-    version: "1.17.0"
+    version: "1.17.1"
   - name: lit.rhel
-    version: "1.10.0"
+    version: "1.12.0"
