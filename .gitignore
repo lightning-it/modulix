@@ -18,3 +18,6 @@ ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz
 ansible/.ansible-runner/
 ansible/.toolbox-podman/
 
+# Python
+venv*
+.venv*
