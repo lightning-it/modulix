@@ -1,6 +1,7 @@
 infra/
 ansible-navigator.log
 ansible_collections/
+venv*
 
 # Ansible Collections Development
 collections-dev/ansible_collections/**
