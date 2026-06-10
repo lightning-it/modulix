@@ -11,7 +11,7 @@ collections:
   - name: fedora.linux_system_roles
     version: "1.125.3"
   - name: lit.supplementary
-    version: "1.18.9"
+    version: "1.19.0"
   - name: lit.foundational
     version: "1.17.2"
   - name: lit.rhel
