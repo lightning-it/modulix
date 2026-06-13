@@ -5,7 +5,7 @@
 This repo supports two runtime modes:
 
 - As-code mode (`scripts/ansible-nav`): host wrapper that starts the toolbox
-  container and runs playbooks in the nested Ansible EE.
+  container and runs runbooks in the nested Ansible EE.
 - In-container mode (`ansible-nav-local`): run directly inside the toolbox
   container when only container access is available.
 
@@ -33,17 +33,17 @@ reproducibility (for example CI or fresh environments).
 
 For manual collection install modes, see `Tasks` -> `Install collections`.
 
-#### 2) Run a single playbook
+#### 2) Run a single runbook
 
 ```bash
-./scripts/ansible-nav run playbooks/<stage-or-service>/<playbook>.yml \
+./scripts/ansible-nav run runbooks/<stage-or-service>/<runbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
 #### 3) Run a runbook/service pipeline
 
 ```bash
-./scripts/ansible-nav run playbooks/services/<service>-rebuild.yml \
+./scripts/ansible-nav run runbooks/services/<service>-rebuild.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -66,7 +66,7 @@ podman run --rm -it \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.2 \
-  ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
+  ansible-nav-local run runbooks/<stage-or-service>/<runbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -92,7 +92,7 @@ podman run --rm -it \
   -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false \
   -e ANSIBLE_VAULT_PASSWORD_FILE=/opt/modulix/ansible/.vault-pass.txt \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.2 \
-  ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
+  ansible-nav-local run runbooks/<stage-or-service>/<runbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -127,7 +127,7 @@ podman run --rm -it \
   -v /tmp/run-ee.tar:/tmp/run-ee.tar:ro,Z \
   ... \
   localhost/ee-wunder-toolbox-ubi9:local \
-  bash -lc 'podman load -i /tmp/run-ee.tar && ansible-nav-local run <playbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>'
+  bash -lc 'podman load -i /tmp/run-ee.tar && ansible-nav-local run <runbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>'
 ```
 
 For a complete local image build and runtime workflow, see:
@@ -168,7 +168,7 @@ flags are usually not required.
 Default usage:
 
 ```bash
-./scripts/ansible-nav run <playbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>
+./scripts/ansible-nav run <runbook.yml> -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
 Container engine selection is automatic by default. Manual override is documented in `Reference` (`ANSIBLE_TOOLBOX_ENGINE`).
@@ -211,17 +211,17 @@ while runbook content and sequencing live in:
 Execution pattern:
 
 ```bash
-./scripts/ansible-nav run <runbook-or-service-playbook.yml> \
+./scripts/ansible-nav run <runbook-or-service-runbook.yml> \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
 ### In-container mode (`ansible-nav-local`)
 
-After starting the toolbox container (see Get Started), use the same playbook
+After starting the toolbox container (see Get Started), use the same runbook
 syntax with `ansible-nav-local`:
 
 ```bash
-ansible-nav-local run <playbook.yml> \
+ansible-nav-local run <runbook.yml> \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -251,15 +251,15 @@ Wrapper behavior (`scripts/ansible-nav`):
   - run EE image:
     - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.10.0`).
 - For `exec`, when a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the toolbox container.
-- For AAP runs (`playbook path contains "aap"` or `--tags/-t` includes `aap`), wrapper runs
-  `scripts/install-rh-collections` automatically before playbook execution when
+- For AAP runs (`runbook path contains "aap"` or `--tags/-t` includes `aap`), wrapper runs
+  `scripts/install-rh-collections` automatically before runbook execution when
   `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto` (default).
 
 #### In-container mode (`ansible-nav-local`)
 
 - Execute from inside toolbox container.
 - `ansible-nav-local` runs `ansible-navigator` directly.
-- Use the same playbook paths, inventory flags, and limits as in as-code mode.
+- Use the same runbook paths, inventory flags, and limits as in as-code mode.
 - EE image/engine defaults are taken from `ansible-navigator.yml`.
 - `ANSIBLE_CONFIG` defaults to `ansible.cfg` in the active runtime workspace.
 - For RH collection profile resolution, provide `RH_AUTOMATION_HUB_TOKEN`.
@@ -282,13 +282,13 @@ Wrapper behavior (`scripts/ansible-nav`):
   (host/group model, network zones, access paths, and required runtime inputs).
 - `lit.supplementary.aap` is backend-agnostic and expects resolved password inputs
   (`aap_*_admin_password_input`).
-- `playbooks/stage-2b/13-aap.yml` provides an optional Vault pre-step
+- `runbooks/stage-2b/13-aap.yml` provides an optional Vault pre-step
   (`tasks/aap_seed_passwords_vault.yml`) to read/create admin passwords and publish
   resolved inputs before the AAP roles run.
-- `playbooks/stage-2b/core-tenant/25-github-runner-setup.yml` configures
+- `runbooks/stage-2b/core-tenant/25-github-runner-setup.yml` configures
   Ubuntu-based GitHub Actions self-hosted runners. See
   `../docs/github-actions-runner.md`.
-- `playbooks/stage-2b/core-tenant/27-incus-host-setup.yml` configures
+- `runbooks/stage-2b/core-tenant/27-incus-host-setup.yml` configures
   Ubuntu-based Incus hosts for containers and VM workloads. See
   `../docs/incus-host.md`.
 
@@ -300,7 +300,7 @@ The Vault bootstrap writes its init output to the target only. The repo must not
 
 Recommended flow:
 - First run (`vault_bootstrap`): Vault init runs on the target; the init payload is kept in memory for unseal and root token, and the encrypted init file is written to the target.
-- Subsequent runs: unseal/root token come from vaulted inventory vars (`vault_init.*`, e.g. `group_vars/wunderboxes/vault-init.yml`). The playbooks do not read the encrypted init file on the target.
+- Subsequent runs: unseal/root token come from vaulted inventory vars (`vault_init.*`, e.g. `group_vars/wunderboxes/vault-init.yml`). The runbooks do not read the encrypted init file on the target.
 - `vault_config` creates AppRole roles and stores credentials in Vault KV at:
   - `stage-2c/<inventory_hostname>/nexus/approle-kv`
   - `stage-2c/<inventory_hostname>/nexus/approle-pki`
@@ -310,7 +310,7 @@ Best practice: use a short-lived, least-privilege token for KV read + PKI issue,
 
 ### Runtime secret inputs
 
-- Required at runtime, depending on playbook:
+- Required at runtime, depending on runbook:
   - `ANSIBLE_VAULT_PASSWORD_FILE`
   - `VAULT_TOKEN`
 - Do not commit secret values to the repository.

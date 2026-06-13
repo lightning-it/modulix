@@ -7,7 +7,7 @@ as `modulix-automation-runtime`.
 
 - Runtime payload under `/opt/modulix`:
   - `/opt/modulix/scripts`
-  - `/opt/modulix/ansible` (playbooks, config, collections requirements, scripts)
+  - `/opt/modulix/ansible` (runbooks, config, collections requirements, scripts)
   - `/opt/modulix/ansible/inventories` is shipped as a dummy baseline only
     (`example/inventory.yml` with localhost)
 - Wrapper commands under `/usr/bin`:

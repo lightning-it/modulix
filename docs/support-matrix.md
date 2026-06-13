@@ -39,6 +39,6 @@ This matrix defines supported execution modes for ModuLix automation.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Ubuntu GitHub Actions self-hosted runner | Supported | Configured by `playbooks/stage-2b/core-tenant/25-github-runner-setup.yml` using `lit.ubuntu.github_runner` |
-| Ubuntu Incus host | Supported | Configured by `playbooks/stage-2b/core-tenant/27-incus-host-setup.yml` using `lit.ubuntu.incus` |
+| Ubuntu GitHub Actions self-hosted runner | Supported | Configured by `runbooks/stage-2b/core-tenant/25-github-runner-setup.yml` using `lit.ubuntu.github_runner` |
+| Ubuntu Incus host | Supported | Configured by `runbooks/stage-2b/core-tenant/27-incus-host-setup.yml` using `lit.ubuntu.incus` |
 | Incus VM workloads with QEMU/KVM | Supported on Ubuntu hosts with nested virtualization | Requires `/dev/kvm`; Incus manages the workload while QEMU/KVM provides VM acceleration |

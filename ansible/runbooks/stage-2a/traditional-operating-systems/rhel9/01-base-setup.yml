@@ -21,7 +21,7 @@
   tasks:
     - name: Verify that a limit is set
       ansible.builtin.fail:
-        msg: "This playbook cannot be run without --limit. Please use --limit <host-or-group>."
+        msg: "This runbook cannot be run without --limit. Please use --limit <host-or-group>."
       run_once: true
       when: ansible_limit is not defined
       tags: [always]

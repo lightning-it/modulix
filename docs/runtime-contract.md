@@ -6,7 +6,7 @@ This document defines the canonical execution contract for ModuLix automation re
 
 - Wrapper: `ansible/scripts/ansible-nav`
 - Subcommands:
-  - `run <playbook.yml> [playbook args...]`
+  - `run <runbook.yml> [ansible run args...]`
   - `exec -- <command> [args...]`
 
 ## Default runtime behavior
@@ -44,7 +44,7 @@ Supported wrapper options (environment variables):
 
 ## Required runtime inputs
 
-Depending on playbook:
+Depending on runbook:
 
 - inventory (`-i ...`)
 - SSH key material (`~/.ssh` and/or ssh-agent)

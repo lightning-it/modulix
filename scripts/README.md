@@ -58,7 +58,8 @@ podman run --rm \
 Run ansible-navigator wrapper from repository root:
 
 ```bash
-./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml -i inventories/example/inventory.yml --limit <host>
+./scripts/ansible-nav run runbooks/services/02-aap-rebuild.yml \
+  -i inventories/example/inventory.yml --limit <host>
 ```
 
 Behavior note:

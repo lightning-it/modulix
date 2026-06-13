@@ -22,7 +22,7 @@ Canonical release-coupled docs in this repo:
 
 ```bash
 cd ansible
-./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
+./scripts/ansible-nav run runbooks/services/01-wunderbox-rebuild.yml \
   -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
@@ -30,7 +30,7 @@ cd ansible
 
 When developing local Ansible collections from sibling repos (for example
 `ansible-collection-supplementary`, `ansible-collection-foundational`), install
-them as local overlays before running playbooks:
+them as local overlays before running runbooks:
 
 ```bash
 cd ansible

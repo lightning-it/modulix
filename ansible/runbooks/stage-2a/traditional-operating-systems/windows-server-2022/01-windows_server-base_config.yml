@@ -5,7 +5,7 @@
   pre_tasks:
     - name: Verifying that a limit is set
       fail:
-        msg: 'This playbook cannot be run with no limit'
+        msg: 'This runbook cannot be run with no limit'
       run_once: true
       when: ansible_limit is not defined
     - debug:

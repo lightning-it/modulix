@@ -39,7 +39,7 @@
 #         tfstate files. Otherwise it marks /srv/vault/bootstrap as pending migration.
 #       * minio_bootstrap: once MinIO backend is ready, it migrates any pending local state
 #         dirs and deletes local tfstate files on success.
-#   - Therefore, the playbook contains NO explicit tfstate migration logic.
+#   - Therefore, the runbook contains NO explicit tfstate migration logic.
 #
 # --
 # Inventory contract (default behavior):
@@ -48,7 +48,7 @@
 #   2) wunderbox_service_<service>: enabled|disabled (override)
 # - Service role inputs (ports, hosts, credentials, DB settings, host mappings, etc.) are
 #   provided by inventory/group_vars/host_vars.
-# - This playbook intentionally does not generate environment-specific defaults or secrets.
+# - This runbook intentionally does not generate environment-specific defaults or secrets.
 # -----------------------------------------------------------------------------
 
 - name: Configure wunderboxes

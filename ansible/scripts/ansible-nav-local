@@ -35,7 +35,7 @@ automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.
 usage() {
   cat <<'EOF'
 Usage:
-  ansible-nav-local run <playbook.yml> [ansible-navigator run args...]
+  ansible-nav-local run <runbook.yml> [ansible-navigator run args...]
   ansible-nav-local exec -- <command> [args...]
 
 Environment:
@@ -300,7 +300,7 @@ shift
 case "${subcommand}" in
   run)
     if [[ $# -lt 1 ]]; then
-      echo "Missing playbook path for 'run'." >&2
+      echo "Missing runbook path for 'run'." >&2
       usage
       exit 1
     fi
@@ -333,8 +333,8 @@ case "${subcommand}" in
     fi
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
     cmd+=(--ce "${nav_container_engine}")
-    # In RPM/runtime mode, playbooks live under /opt/modulix. Mirror that path
-    # into the nested EE so imported playbooks resolve correctly.
+    # In RPM/runtime mode, runbooks live under /opt/modulix. Mirror that path
+    # into the nested EE so imported runbooks resolve correctly.
     if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
       cmd+=(--eev "/opt/modulix:/opt/modulix:Z")
     fi

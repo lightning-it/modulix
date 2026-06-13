@@ -4,7 +4,7 @@
 #
 # Purpose:
 # - Apply CIS baseline via lit.rhel.cis_rhel9 (SSG/OSCAP wrapper)
-# - Produce reports to see what base setup missed and adjust base playbook accordingly
+# - Produce reports to see what base setup missed and adjust base runbook accordingly
 # -----------------------------------------------------------------------------
 - name: CIS hardening (RHEL9)
   hosts: all

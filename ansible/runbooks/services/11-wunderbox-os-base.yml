@@ -3,7 +3,7 @@
 # - Apply Wunderbox base operating-system setup
 #
 # Usage:
-# ansible-navigator run playbooks/services/11-wunderbox-os-base.yml \
+# ansible-navigator run runbooks/services/11-wunderbox-os-base.yml \
 #   -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
 # Current implementation targets RHEL9 baseline.

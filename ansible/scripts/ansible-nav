@@ -25,7 +25,7 @@ ssh_agent_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT:-auto}"
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/ansible-nav run <playbook.yml> [playbook args...]
+  ./scripts/ansible-nav run <runbook.yml> [ansible run args...]
   ./scripts/ansible-nav exec -- <command> [args...]
 
 Environment:
@@ -578,7 +578,7 @@ case "${subcommand}" in
 
     container_args+=(--privileged --user 0:0)
     if [[ $# -lt 1 ]]; then
-      echo "Missing playbook path for 'run'." >&2
+      echo "Missing runbook path for 'run'." >&2
       usage
       exit 1
     fi
