@@ -46,6 +46,7 @@ for pb in \
   stage-2b/12-wunderbox.yml \
   stage-2b/13-aap.yml \
   stage-2b/core-tenant/25-github-runner-setup.yml \
+  stage-2b/core-tenant/27-incus-host-setup.yml \
 ; do
   test -f "%{buildroot}/opt/modulix/ansible/playbooks/${pb}"
 done

@@ -285,6 +285,12 @@ Wrapper behavior (`scripts/ansible-nav`):
 - `playbooks/stage-2b/13-aap.yml` provides an optional Vault pre-step
   (`tasks/aap_seed_passwords_vault.yml`) to read/create admin passwords and publish
   resolved inputs before the AAP roles run.
+- `playbooks/stage-2b/core-tenant/25-github-runner-setup.yml` configures
+  Ubuntu-based GitHub Actions self-hosted runners. See
+  `../docs/github-actions-runner.md`.
+- `playbooks/stage-2b/core-tenant/27-incus-host-setup.yml` configures
+  Ubuntu-based Incus hosts for containers and VM workloads. See
+  `../docs/incus-host.md`.
 
 ## Security
 
@@ -313,4 +319,6 @@ Best practice: use a short-lived, least-privilege token for KV read + PKI issue,
 
 - `../docs/runtime-contract.md`
 - `../docs/support-matrix.md`
+- `../docs/github-actions-runner.md`
+- `../docs/incus-host.md`
 - `lcp-docs/30-modulix/30-runbooks/00-index.md`

@@ -49,6 +49,8 @@ Depending on playbook:
 - inventory (`-i ...`)
 - SSH key material (`~/.ssh` and/or ssh-agent)
 - secrets (`ANSIBLE_VAULT_PASSWORD_FILE`, `VAULT_TOKEN`, etc.)
+- GitHub Actions runner registration token (`GITHUB_RUNNER_TOKEN`) when
+  registering or replacing a self-hosted runner
 - for AAP/CaC execution with `requirements-rh.yml`: `RH_AUTOMATION_HUB_TOKEN`
   - offline token values are used via Automation Hub `auth_url` flow
 
