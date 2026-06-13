@@ -16,3 +16,5 @@ collections:
     version: "1.17.1"
   - name: lit.rhel
     version: "1.13.1"
+  - name: lit.ubuntu
+    version: "0.1.0"

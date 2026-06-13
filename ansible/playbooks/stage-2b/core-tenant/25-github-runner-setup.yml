@@ -1,0 +1,16 @@
+---
+- name: Setup GitHub Actions runner
+  hosts: github_runners
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lit.ubuntu.incus
+      when: incus_enabled | default(false) | bool
+      tags:
+        - incus
+
+    - role: lit.ubuntu.github_runner
+      tags:
+        - github_runner
+...
