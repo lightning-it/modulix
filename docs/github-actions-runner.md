@@ -6,7 +6,7 @@ runners for platform CI workloads.
 The operational entrypoint is:
 
 ```text
-ansible/runbooks/stage-2b/core-tenant/25-github-runner-setup.yml
+ansible/runbooks/services/core-tenant/25-github-runner-setup.yml
 ```
 
 The runbook is intentionally inventory-driven. It only orchestrates collection
@@ -80,7 +80,7 @@ Run with the standard ModuLix Ansible wrapper:
 cd ansible
 
 ./scripts/ansible-nav run \
-  runbooks/stage-2b/core-tenant/25-github-runner-setup.yml \
+  runbooks/services/core-tenant/25-github-runner-setup.yml \
   -i inventories/<env>/inventory.yml \
   --limit <runner-host-or-group>
 ```
@@ -91,7 +91,7 @@ When using an external inventory checkout:
 cd ansible
 
 ./scripts/ansible-nav run \
-  runbooks/stage-2b/core-tenant/25-github-runner-setup.yml \
+  runbooks/services/core-tenant/25-github-runner-setup.yml \
   -i /path/to/inventories/<env>/inventory.yml \
   --limit <runner-host-or-group>
 ```

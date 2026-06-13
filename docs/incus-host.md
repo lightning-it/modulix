@@ -11,13 +11,13 @@ when precision matters.
 The standalone operational entrypoint is:
 
 ```text
-ansible/runbooks/stage-2b/core-tenant/27-incus-host-setup.yml
+ansible/runbooks/services/core-tenant/27-incus-host-setup.yml
 ```
 
 GitHub Actions runners can also consume this host capability through:
 
 ```text
-ansible/runbooks/stage-2b/core-tenant/25-github-runner-setup.yml
+ansible/runbooks/services/core-tenant/25-github-runner-setup.yml
 ```
 
 ## Role Shape
@@ -82,7 +82,7 @@ Run with the standard ModuLix Ansible wrapper:
 cd ansible
 
 ./scripts/ansible-nav run \
-  runbooks/stage-2b/core-tenant/27-incus-host-setup.yml \
+  runbooks/services/core-tenant/27-incus-host-setup.yml \
   -i inventories/<env>/inventory.yml \
   --limit <incus-host-or-group>
 ```
@@ -93,7 +93,7 @@ When using an external inventory checkout:
 cd ansible
 
 ./scripts/ansible-nav run \
-  runbooks/stage-2b/core-tenant/27-incus-host-setup.yml \
+  runbooks/services/core-tenant/27-incus-host-setup.yml \
   -i /path/to/inventories/<env>/inventory.yml \
   --limit <incus-host-or-group>
 ```

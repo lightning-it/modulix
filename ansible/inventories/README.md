@@ -8,7 +8,7 @@ Default placeholder path:
 
 ## Wunderbox service toggles
 
-`runbooks/stage-2b/12-wunderbox.yml` supports per-task service toggles from inventory.
+`runbooks/services/12-wunderbox.yml` supports per-task service toggles from inventory.
 
 Preferred structure:
 
@@ -47,7 +47,7 @@ Flat overrides are also supported for compatibility, for example:
 
 ## Generic Firewall Policy Rules
 
-`runbooks/stage-2b/10-firewall.yml` supports a generic inventory dict for additional
+`runbooks/services/10-firewall.yml` supports a generic inventory dict for additional
 inter-zone policy rules.
 
 ```yaml

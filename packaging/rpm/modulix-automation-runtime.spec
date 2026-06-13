@@ -39,14 +39,17 @@ cp -a ansible %{buildroot}/opt/modulix/
 # Build-time sanity checks: fail packaging early if expected runbooks are missing.
 test -d %{buildroot}/opt/modulix/ansible/runbooks
 for pb in \
-  services/01-wunderbox-rebuild.yml \
-  services/10-wunderbox-vmware-provision.yml \
-  services/11-wunderbox-os-base.yml \
-  services/12-wunderbox-service-stack.yml \
-  stage-2b/12-wunderbox.yml \
-  stage-2b/13-aap.yml \
-  stage-2b/core-tenant/25-github-runner-setup.yml \
-  stage-2b/core-tenant/27-incus-host-setup.yml \
+  workflows/01-wunderbox-rebuild.yml \
+  workflows/02-aap-rebuild.yml \
+  workflows/10-wunderbox-vmware-provision.yml \
+  workflows/11-wunderbox-os-base.yml \
+  workflows/12-wunderbox-service-stack.yml \
+  infrastructure/infrastructure-platform-vsphere/20-vm-template.yml \
+  base-os/traditional-operating-systems/rhel9/01-base-setup.yml \
+  services/12-wunderbox.yml \
+  services/13-aap.yml \
+  services/core-tenant/25-github-runner-setup.yml \
+  services/core-tenant/27-incus-host-setup.yml \
 ; do
   test -f "%{buildroot}/opt/modulix/ansible/runbooks/${pb}"
 done

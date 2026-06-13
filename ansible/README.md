@@ -40,10 +40,10 @@ For manual collection install modes, see `Tasks` -> `Install collections`.
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
-#### 3) Run a runbook/service pipeline
+#### 3) Run a workflow pipeline
 
 ```bash
-./scripts/ansible-nav run runbooks/services/<service>-rebuild.yml \
+./scripts/ansible-nav run runbooks/workflows/<service>-rebuild.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -211,7 +211,7 @@ while runbook content and sequencing live in:
 Execution pattern:
 
 ```bash
-./scripts/ansible-nav run <runbook-or-service-runbook.yml> \
+./scripts/ansible-nav run <runbook-or-workflow.yml> \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -282,13 +282,13 @@ Wrapper behavior (`scripts/ansible-nav`):
   (host/group model, network zones, access paths, and required runtime inputs).
 - `lit.supplementary.aap` is backend-agnostic and expects resolved password inputs
   (`aap_*_admin_password_input`).
-- `runbooks/stage-2b/13-aap.yml` provides an optional Vault pre-step
+- `runbooks/services/13-aap.yml` provides an optional Vault pre-step
   (`tasks/aap_seed_passwords_vault.yml`) to read/create admin passwords and publish
   resolved inputs before the AAP roles run.
-- `runbooks/stage-2b/core-tenant/25-github-runner-setup.yml` configures
+- `runbooks/services/core-tenant/25-github-runner-setup.yml` configures
   Ubuntu-based GitHub Actions self-hosted runners. See
   `../docs/github-actions-runner.md`.
-- `runbooks/stage-2b/core-tenant/27-incus-host-setup.yml` configures
+- `runbooks/services/core-tenant/27-incus-host-setup.yml` configures
   Ubuntu-based Incus hosts for containers and VM workloads. See
   `../docs/incus-host.md`.
 
