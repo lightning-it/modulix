@@ -36,17 +36,17 @@ cp -a scripts %{buildroot}/opt/modulix/
 # Ship full Ansible runtime payload under /opt/modulix/ansible.
 cp -a ansible %{buildroot}/opt/modulix/
 
-# Build-time sanity checks: fail packaging early if expected playbooks are missing.
-test -d %{buildroot}/opt/modulix/ansible/playbooks
+# Build-time sanity checks: fail packaging early if expected runbooks are missing.
+test -d %{buildroot}/opt/modulix/ansible/runbooks
 for pb in \
-  services/01-wunderbox-rebuild.yml \
-  services/10-wunderbox-vmware-provision.yml \
-  services/11-wunderbox-os-base.yml \
-  services/12-wunderbox-service-stack.yml \
-  stage-2b/12-wunderbox.yml \
-  stage-2b/13-aap.yml \
+  10-compute/virtualization/vsphere/20-vm-template.yml \
+  30-operating-systems/rhel/9/01-base-setup.yml \
+  40-platforms/incus/10-host-setup.yml \
+  50-applications/aap/10-deploy.yml \
+  50-applications/github-runner/10-setup.yml \
+  50-applications/wunderbox/10-deploy.yml \
 ; do
-  test -f "%{buildroot}/opt/modulix/ansible/playbooks/${pb}"
+  test -f "%{buildroot}/opt/modulix/ansible/runbooks/${pb}"
 done
 
 # Remove local-only runtime artifacts from packaged payload.

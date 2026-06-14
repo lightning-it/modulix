@@ -1,0 +1,11 @@
+---
+- name: Setup Incus host
+  hosts: incus_hosts
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lit.ubuntu.incus
+      tags:
+        - incus
+...

@@ -18,6 +18,10 @@ ansible-navigator:
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
+        - ANSIBLE_REMOTE_TEMP
+        - AAP_BUNDLE_FILE
+        - VAULT_ADDR
+        - VAULT_SKIP_VERIFY
         - VAULT_TOKEN
       set:
         ANSIBLE_CONFIG: /runner/project/ansible.cfg

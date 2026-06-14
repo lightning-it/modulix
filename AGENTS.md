@@ -59,13 +59,13 @@ When host tooling is missing for RPM checks, do not stop at a local limitation.
   - `Could not run RPM parse/build locally because rpmspec/rpmbuild are not installed in this environment.`
   without also documenting the devtools-container attempt and result.
 
-## Playbook Design Default (Inventory-Driven)
+## Runbook Design Default (Inventory-Driven)
 
-For stage playbooks (for example `ansible/playbooks/stage-2b/12-wunderbox.yml`), default behavior MUST be inventory-driven.
+For application and platform runbooks (for example `ansible/runbooks/50-applications/wunderbox/10-deploy.yml`), default behavior MUST be inventory-driven.
 
-1. Playbooks SHOULD orchestrate roles, not implement business/configuration logic that belongs in inventory or roles.
+1. Runbooks SHOULD orchestrate roles, not implement business/configuration logic that belongs in inventory or roles.
 2. Service enablement MUST come from inventory toggles (`services.<group>.*` and/or `wunderbox_service_*` overrides).
 3. Service configuration values (endpoints, ports, credentials, DB settings, host mappings) MUST come from inventory/group vars/host vars.
-4. Playbooks MUST NOT silently generate environment-specific defaults for service credentials or topology.
-5. Cross-service wiring SHOULD be expressed as inventory variables (or role defaults that map inventory inputs), not large `set_fact`/fallback blocks in playbooks.
-6. If values are required, fail fast with clear assertions instead of deriving hidden defaults in playbook code.
+4. Runbooks MUST NOT silently generate environment-specific defaults for service credentials or topology.
+5. Cross-service wiring SHOULD be expressed as inventory variables (or role defaults that map inventory inputs), not large `set_fact`/fallback blocks in runbooks.
+6. If values are required, fail fast with clear assertions instead of deriving hidden defaults in runbook code.

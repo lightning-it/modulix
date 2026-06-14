@@ -89,7 +89,7 @@ This security policy covers:
   - ModuLix product inventory,
   - environment inventories (e.g. nightly, demo),
   - group variables and blueprints,
-  - orchestration playbooks and documentation in this repo.
+  - orchestration runbooks and documentation in this repo.
 
 It does **not** cover:
 

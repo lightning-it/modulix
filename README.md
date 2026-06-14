@@ -12,25 +12,28 @@ It is delivered as the `modulix-automation-runtime` RPM.
   `ansible/collections/requirements-rh.yml` (Automation Hub token required)
 - Optional runtime: host-native execution (supported with prerequisites)
 
-Canonical release-coupled docs in this repo:
+Release-coupled packaging documentation in this repo:
 
-- Runtime contract: `docs/runtime-contract.md`
-- Support matrix: `docs/support-matrix.md`
 - Packaging/build: `packaging/rpm/README.md`
 
 ## Quick start (default)
 
 ```bash
 cd ansible
-./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
-  -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+./scripts/ansible-nav run runbooks/50-applications/wunderbox/10-deploy.yml \
+  -i /path/to/private/inventory.yml --limit wunderbox01.prd.dmz.example.invalid
 ```
+
+This public repository provides reusable capability runbooks. Customer-specific
+workflow compositions live in private `modulix-operations-*` repositories.
+Sanitized inventory examples live in the public `ansible-inventory-example`
+repository.
 
 ## Development
 
 When developing local Ansible collections from sibling repos (for example
 `ansible-collection-supplementary`, `ansible-collection-foundational`), install
-them as local overlays before running playbooks:
+them as local overlays before running runbooks:
 
 ```bash
 cd ansible

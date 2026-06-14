@@ -1,0 +1,398 @@
+---
+# -----------------------------------------------------------------------------
+# Wunderboxes - Core Services (no GUI)
+#
+# Purpose:
+# - Enable required repos
+# - Apply wunderbox firewall policy
+# - Install & configure core services on wunderboxes:
+#   - CoreDNS (internal DNS service provider)
+#   - DHCP (internal DHCP provider, system service)
+#   - HashiCorp Vault (secrets & bootstrap control-plane)
+#   - MinIO (S3 backend for Terraform/Terragrunt state + buckets)
+#   - Sonatype Nexus Repository Manager
+#   - NGINX (internal reverse proxy/gateway for stable service endpoints)
+#
+# Notes / Decisions:
+# - CoreDNS provides internal DNS for service endpoints (authoritative and/or forwarding).
+# - DHCP is NOT container-based here: it runs as a system service (bind to specific interface).
+#
+# - NGINX:
+#   - Internal-only (no internet). Publishes stable internal FQDN endpoints on 443.
+#   - During provisioning, services may be reached on their native ports (e.g., Vault 8200)
+#     until nginx_config is applied.
+#   - Tag convenience: nginx_deploy is also tagged with nginx_config so `-t nginx_config`
+#     ensures nginx is present.
+#
+# - Vault:
+#   - vault_bootstrap initializes/unseals Vault (first run) and writes an encrypted init-file.
+#   - vault_validate is executed AFTER bootstrap (so health/permissions checks are meaningful).
+#   - vault_config may run BEFORE MinIO; during bootstrap it uses LOCAL state under
+#     /srv/vault/bootstrap.
+#
+# - MinIO:
+#   - Root credentials are GENERATED during minio_deploy (random) and stored in Vault.
+#   - minio_bootstrap creates `tfstate` bucket + `terraform` user/policy (not managed by
+#     Terraform), enables versioning, and stores terraform creds in Vault.
+#   - State migration is handled INSIDE the roles:
+#       * vault_config: if backend is ready, it migrates its local state and deletes local
+#         tfstate files. Otherwise it marks /srv/vault/bootstrap as pending migration.
+#       * minio_bootstrap: once MinIO backend is ready, it migrates any pending local state
+#         dirs and deletes local tfstate files on success.
+#   - Therefore, the runbook contains NO explicit tfstate migration logic.
+#
+# --
+# Inventory contract (default behavior):
+# - Service enablement is controlled via:
+#   1) services.wunderbox.<service>: enabled|disabled
+#   2) wunderbox_service_<service>: enabled|disabled (override)
+# - Service role inputs (ports, hosts, credentials, DB settings, host mappings, etc.) are
+#   provided by inventory/group_vars/host_vars.
+# - This runbook intentionally does not generate environment-specific defaults or secrets.
+# -----------------------------------------------------------------------------
+
+- name: Configure wunderboxes
+  hosts: wunderboxes
+  become: true
+  gather_facts: true
+  vars:
+    _wunderbox_services_cfg: >-
+      {{
+        (
+          services.wunderbox
+          if (
+            services is defined and
+            services is mapping and
+            services.wunderbox is defined and
+            services.wunderbox is mapping
+          )
+          else
+          (wunderbox_services | default({}))
+        )
+      }}
+    _enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']
+
+
+  tasks:
+    # Repositories
+    - name: Enable required repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [repos]
+      when: >-
+        (
+          wunderbox_service_repos
+          | default(_wunderbox_services_cfg.repos | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [repos]
+
+    # Host firewall baseline
+    - name: Apply firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [firewall]
+      when: >-
+        (
+          wunderbox_service_firewall
+          | default('disabled')
+          | string | lower
+        ) in _enabled_values
+      tags: [firewall]
+
+    # DNS service
+    - name: Deploy CoreDNS
+      ansible.builtin.include_role:
+        name: lit.supplementary.coredns_deploy
+        apply:
+          tags: [dns, coredns, coredns_deploy]
+      when: >-
+        (
+          wunderbox_service_coredns
+          | default(_wunderbox_services_cfg.coredns | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [dns, coredns, coredns_deploy]
+
+    # DHCP service (system service)
+    - name: Deploy DHCP
+      ansible.builtin.include_role:
+        name: lit.supplementary.dhcp_deploy
+        apply:
+          tags: [dhcp, dhcp_deploy]
+      when: >-
+        (
+          wunderbox_service_dhcp
+          | default(_wunderbox_services_cfg.dhcp | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [dhcp, dhcp_deploy]
+
+    # NGINX runtime deployment
+    - name: Deploy Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_deploy
+        apply:
+          tags: [nginx, nginx_deploy]
+      when: >-
+        (
+          wunderbox_service_nginx_deploy
+          | default(_wunderbox_services_cfg.nginx_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [nginx, nginx_deploy]
+
+    # Vault runtime deployment
+    - name: Deploy Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_deploy
+        apply:
+          tags: [vault, vault_deploy]
+      when: >-
+        (
+          wunderbox_service_vault_deploy
+          | default(_wunderbox_services_cfg.vault_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [vault, vault_deploy]
+
+    # Vault bootstrap phase
+    - name: Bootstrap Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_bootstrap
+        apply:
+          tags: [vault, vault_bootstrap]
+      when: >-
+        (
+          wunderbox_service_vault_bootstrap
+          | default(_wunderbox_services_cfg.vault_bootstrap | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [vault, vault_bootstrap]
+
+    # Vault validation phase
+    - name: Validate Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_validate
+        apply:
+          tags: [vault, vault_validate]
+      when: >-
+        (
+          wunderbox_service_vault_validate
+          | default(_wunderbox_services_cfg.vault_validate | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [vault, vault_validate]
+
+    # Vault day-2 operations
+    - name: Vault ops
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_ops
+        apply:
+          tags: [vault, vault_ops]
+      when: >-
+        (
+          wunderbox_service_vault_ops
+          | default(_wunderbox_services_cfg.vault_ops | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [vault, vault_ops]
+
+    # Vault content/configuration phase
+    - name: Configure Vault content
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_config
+        apply:
+          tags: [vault, vault_config]
+      when: >-
+        (
+          wunderbox_service_vault_config
+          | default(_wunderbox_services_cfg.vault_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [vault, vault_config]
+
+    # MinIO runtime deployment
+    - name: Deploy MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_deploy
+        apply:
+          tags: [minio, minio_deploy]
+      when: >-
+        (
+          wunderbox_service_minio_deploy
+          | default(_wunderbox_services_cfg.minio_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [minio, minio_deploy]
+
+    # MinIO configuration phase
+    - name: Configure MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_config
+        apply:
+          tags: [minio, minio_config]
+      when: >-
+        (
+          wunderbox_service_minio_config
+          | default(_wunderbox_services_cfg.minio_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [minio, minio_config]
+
+    # MinIO bootstrap phase
+    - name: Bootstrap MinIO
+      ansible.builtin.include_role:
+        name: lit.supplementary.minio_bootstrap
+        apply:
+          tags: [minio, minio_bootstrap]
+      when: >-
+        (
+          wunderbox_service_minio_bootstrap
+          | default(_wunderbox_services_cfg.minio_bootstrap | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [minio, minio_bootstrap]
+
+    # Nexus runtime deployment (initial API config controlled via inventory)
+    - name: Deploy Nexus
+      ansible.builtin.include_role:
+        name: lit.supplementary.nexus
+        apply:
+          tags: [nexus]
+      when: >-
+        (
+          wunderbox_service_nexus_deploy
+          | default(_wunderbox_services_cfg.nexus_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [nexus]
+
+    # Shared PostgreSQL runtime service
+    - name: Deploy shared PostgreSQL service
+      ansible.builtin.include_role:
+        name: lit.supplementary.postgres_deploy
+        apply:
+          tags: [postgres, postgres_deploy]
+      when: >-
+        (
+          wunderbox_service_postgres_deploy
+          | default(_wunderbox_services_cfg.postgres_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [postgres, postgres_deploy]
+
+    # Semaphore runtime deployment
+    - name: Deploy Semaphore
+      ansible.builtin.include_role:
+        name: lit.supplementary.semaphore_deploy
+        apply:
+          tags: [semaphore, semaphore_deploy]
+      when: >-
+        (
+          wunderbox_service_semaphore_deploy
+          | default(_wunderbox_services_cfg.semaphore_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [semaphore, semaphore_deploy]
+
+    # Semaphore configuration-as-code
+    - name: Configure Semaphore objects
+      ansible.builtin.include_role:
+        name: lit.supplementary.semaphore_cac
+        apply:
+          tags: [semaphore, semaphore_cac]
+      when: >-
+        (
+          wunderbox_service_semaphore_cac
+          | default(_wunderbox_services_cfg.semaphore_cac | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [semaphore, semaphore_cac]
+
+    # Forgejo runtime deployment
+    - name: Deploy Forgejo
+      ansible.builtin.include_role:
+        name: lit.supplementary.forgejo_deploy
+        apply:
+          tags: [forgejo, forgejo_deploy]
+      when: >-
+        (
+          wunderbox_service_forgejo_deploy
+          | default(_wunderbox_services_cfg.forgejo_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [forgejo, forgejo_deploy]
+
+    # Forgejo configuration-as-code
+    - name: Configure Forgejo objects
+      ansible.builtin.include_role:
+        name: lit.supplementary.forgejo_cac
+        apply:
+          tags: [forgejo, forgejo_cac]
+      when: >-
+        (
+          wunderbox_service_forgejo_cac
+          | default(_wunderbox_services_cfg.forgejo_cac | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [forgejo, forgejo_cac]
+
+    # Keycloak runtime deployment
+    - name: Deploy Keycloak
+      ansible.builtin.include_role:
+        name: lit.supplementary.keycloak_deploy
+        apply:
+          tags: [keycloak, keycloak_deploy]
+      when: >-
+        (
+          wunderbox_service_keycloak_deploy
+          | default(_wunderbox_services_cfg.keycloak_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [keycloak, keycloak_deploy]
+
+    # Keycloak configuration-as-code
+    - name: Configure Keycloak objects
+      ansible.builtin.include_role:
+        name: lit.supplementary.keycloak_cac
+        apply:
+          tags: [keycloak, keycloak_cac]
+      when: >-
+        (
+          wunderbox_service_keycloak_cac
+          | default(_wunderbox_services_cfg.keycloak_cac | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [keycloak, keycloak_cac]
+
+    # NGINX configuration after backend services exist
+    - name: Configure Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+        apply:
+          tags: [nginx, nginx_config]
+      when: >-
+        (
+          wunderbox_service_nginx_config
+          | default(_wunderbox_services_cfg.nginx_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [nginx, nginx_config]
+
+    # Nexus API configuration phase (separate from runtime deploy)
+    - name: Configure Nexus API
+      ansible.builtin.include_role:
+        name: lit.supplementary.nexus
+        tasks_from: initial_config
+        apply:
+          tags: [nexus, sonatype_nexus_config]
+      when: >-
+        (
+          wunderbox_service_nexus_config
+          | default(_wunderbox_services_cfg.nexus_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [nexus, sonatype_nexus_config]
