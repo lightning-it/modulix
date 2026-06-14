@@ -36,7 +36,7 @@ For manual collection install modes, see `Tasks` -> `Install collections`.
 #### 2) Run a single runbook
 
 ```bash
-./scripts/ansible-nav run runbooks/<stage-or-service>/<runbook>.yml \
+./scripts/ansible-nav run runbooks/<domain>/<area>/<runbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -62,7 +62,7 @@ podman run --rm -it \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.2 \
-  ansible-nav-local run runbooks/<stage-or-service>/<runbook>.yml \
+  ansible-nav-local run runbooks/<domain>/<area>/<runbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -88,7 +88,7 @@ podman run --rm -it \
   -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false \
   -e ANSIBLE_VAULT_PASSWORD_FILE=/opt/modulix/ansible/.vault-pass.txt \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.2 \
-  ansible-nav-local run runbooks/<stage-or-service>/<runbook>.yml \
+  ansible-nav-local run runbooks/<domain>/<area>/<runbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -281,13 +281,13 @@ Wrapper behavior (`scripts/ansible-nav`):
 - Sanitized public examples live in `ansible-inventory-example`.
 - `lit.supplementary.aap` is backend-agnostic and expects resolved password inputs
   (`aap_*_admin_password_input`).
-- `runbooks/services/13-aap.yml` provides an optional Vault pre-step
+- `runbooks/50-applications/aap/10-deploy.yml` provides an optional Vault pre-step
   (`tasks/aap_seed_passwords_vault.yml`) to read/create admin passwords and publish
   resolved inputs before the AAP roles run.
-- `runbooks/services/core-tenant/25-github-runner-setup.yml` configures
+- `runbooks/50-applications/github-runner/10-setup.yml` configures
   Ubuntu-based GitHub Actions self-hosted runners. See
   `../docs/github-actions-runner.md`.
-- `runbooks/services/core-tenant/27-incus-host-setup.yml` configures
+- `runbooks/40-platforms/incus/10-host-setup.yml` configures
   Ubuntu-based Incus hosts for containers and VM workloads. See
   `../docs/incus-host.md`.
 

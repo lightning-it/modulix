@@ -61,7 +61,7 @@ When host tooling is missing for RPM checks, do not stop at a local limitation.
 
 ## Runbook Design Default (Inventory-Driven)
 
-For service runbooks (for example `ansible/runbooks/services/12-wunderbox.yml`), default behavior MUST be inventory-driven.
+For application and platform runbooks (for example `ansible/runbooks/50-applications/wunderbox/10-deploy.yml`), default behavior MUST be inventory-driven.
 
 1. Runbooks SHOULD orchestrate roles, not implement business/configuration logic that belongs in inventory or roles.
 2. Service enablement MUST come from inventory toggles (`services.<group>.*` and/or `wunderbox_service_*` overrides).

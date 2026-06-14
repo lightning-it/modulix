@@ -1,9 +1,0 @@
-## OCP4 runbook sequence
-
-Run these from `modulix-automation/ansible`:
-
-```bash
-ansible-playbook -i hosts runbooks/container-platforms/container-platform-ocp4/prepare-ee.yml
-ansible-playbook -i hosts runbooks/container-platforms/container-platform-ocp4/20-ocp-install.yml
-ansible-playbook -i hosts runbooks/container-platforms/container-platform-ocp4/21-post-install.yml
-```

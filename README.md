@@ -22,7 +22,7 @@ Canonical release-coupled docs in this repo:
 
 ```bash
 cd ansible
-./scripts/ansible-nav run runbooks/services/12-wunderbox.yml \
+./scripts/ansible-nav run runbooks/50-applications/wunderbox/10-deploy.yml \
   -i /path/to/private/inventory.yml --limit wunderbox01.prd.dmz.example.invalid
 ```
 
