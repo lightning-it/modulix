@@ -1,0 +1,789 @@
+---
+# -----------------------------------------------------------------------------
+# Traditional OS - RHEL10 - Base Setup
+#
+# Features:
+# - Require --limit (fail fast)
+# - Bootstrap path (optional): if desired SSH port is not reachable but bootstrap is
+# - SELinux: allow non-standard SSH port via community.general.seport
+# - Bootstrap firewall: open desired SSH port (temporary/simple; final policy elsewhere)
+# - Reconnect after SSH port change (wait_for + set ansible_port + wait_for_connection)
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# PreCheck: enforce --limit
+# -----------------------------------------------------------------------------
+- name: PreCheck (require --limit)
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Verify that a limit is set
+      ansible.builtin.fail:
+        msg: "This runbook cannot be run without --limit. Please use --limit <host-or-group>."
+      run_once: true
+      when: ansible_limit is not defined
+      tags: [always]
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing."
+      run_once: true
+      when: ansible_limit is defined
+      tags: [always]
+
+# -----------------------------------------------------------------------------
+# Bootstrap: only when desired SSH port is unreachable but bootstrap works
+# -----------------------------------------------------------------------------
+- name: Bootstrap (when desired SSH is unreachable but bootstrap works)
+  hosts: all
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  vars:
+    # Desired SSH port (final state)
+    _sshd_port_desired: "{{ sshd_port | default(22) | int }}"
+
+    # Normal probe port: ALWAYS the desired port (no ansible_port recursion).
+    _probe_port_normal: "{{ _sshd_port_desired }}"
+
+    # Bootstrap path port (factory/installer login)
+    _probe_port_bootstrap: "{{ linux_bootstrap_ssh_port | default(22) | int }}"
+
+    # Optional: which zone to open for the bootstrap port rule (temporary)
+    _bootstrap_firewalld_zone: "{{ bootstrap_firewalld_zone | default(firewall_default_zone | default('public')) }}"
+
+    # Bootstrap is considered "configured" if at least a user is known and either
+    # a password is provided or a key-based login is expected (password may be omitted).
+    _bootstrap_configured: >-
+      {{
+        (bootstrap_user_effective | default('') | length > 0)
+        and (linux_bootstrap_password | default('') | length > 0)
+      }}
+
+    bootstrap_user_effective: >-
+      {{
+        linux_bootstrap_user
+          | default('root', true)
+      }}
+
+    bootstrap_password_effective: >-
+      {{
+        linux_bootstrap_password
+          | default(omit)
+      }}
+
+  pre_tasks:
+    - name: Check reachability on desired SSH port (normal path)
+      ansible.builtin.ping:
+      ignore_unreachable: true
+      ignore_errors: true
+      register: ping_normal
+      vars:
+        ansible_port: "{{ _probe_port_normal }}"
+      tags: [bootstrap]
+
+    - name: Check reachability on bootstrap SSH port
+      ansible.builtin.ping:
+      ignore_unreachable: true
+      ignore_errors: true
+      register: ping_bootstrap
+      vars:
+        ansible_port: "{{ _probe_port_bootstrap }}"
+        ansible_user: "{{ bootstrap_user_effective }}"
+        ansible_password: "{{ bootstrap_password_effective }}"
+      when: _bootstrap_configured | bool
+      tags: [bootstrap]
+
+    - name: Derive reachability flags
+      ansible.builtin.set_fact:
+        _normal_ok: "{{ not (ping_normal is failed or (ping_normal.unreachable | default(false))) }}"
+        _bootstrap_ok: >-
+          {{
+            _bootstrap_configured | bool
+            and not (ping_bootstrap is failed or (ping_bootstrap.unreachable | default(false)))
+          }}
+      changed_when: false
+      tags: [bootstrap]
+
+    - name: Decide whether bootstrap is needed
+      ansible.builtin.set_fact:
+        _bootstrap_needed: "{{ (not _normal_ok) and _bootstrap_ok }}"
+      changed_when: false
+      tags: [bootstrap]
+
+    - name: Compute reconnect flag (bootstrap only; when desired port differs from bootstrap port)
+      ansible.builtin.set_fact:
+        _sshd_reconnect_after_change: >-
+          {{
+            _bootstrap_needed | bool
+            and (_sshd_port_desired | int) != (_probe_port_bootstrap | int)
+          }}
+      changed_when: false
+      tags: [bootstrap]
+
+    - name: Show connection mode
+      ansible.builtin.debug:
+        msg: >-
+          Connection mode: {{
+            _normal_ok | ternary(
+              'NORMAL (desired SSH port reachable)',
+              (_bootstrap_needed | ternary('BOOTSTRAP (using bootstrap creds/port)',
+                                          'UNREACHABLE (neither path works)'))
+            )
+          }}
+      tags: [bootstrap]
+
+    - name: Fail if host is unreachable and bootstrap is not configured
+      ansible.builtin.fail:
+        msg: >-
+          Host {{ inventory_hostname }} is unreachable on desired SSH port ({{ _probe_port_normal }}),
+          and bootstrap is not configured. Set linux_bootstrap_* vars in inventory.
+      when:
+        - not _normal_ok
+        - not _bootstrap_configured | bool
+      tags: [bootstrap]
+
+    - name: Fail if host is unreachable on both paths (bootstrap configured)
+      ansible.builtin.fail:
+        msg: >-
+          Host {{ inventory_hostname }} is unreachable on both:
+          - desired port: {{ _probe_port_normal }}
+          - bootstrap port: {{ _probe_port_bootstrap }}
+      when:
+        - not _normal_ok
+        - _bootstrap_configured | bool
+        - not _bootstrap_ok
+      tags: [bootstrap]
+
+  tasks:
+    - name: Bootstrap tasks (always use bootstrap connection)
+      when: _bootstrap_needed | bool
+      vars:
+        ansible_user: "{{ bootstrap_user_effective }}"
+        ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
+        ansible_port: "{{ _probe_port_bootstrap }}"
+      block:
+        - name: Bootstrap - ensure users exist
+          ansible.builtin.include_role:
+            name: lit.rhel.users
+            apply:
+              become: true
+          tags: [bootstrap]
+
+        - name: Bootstrap - gather minimal facts (SELinux)
+          ansible.builtin.setup:
+            gather_subset:
+              - "!all"
+              - "!min"
+              - selinux
+          when: (_sshd_port_desired | int) != 22
+          tags: [bootstrap]
+
+        - name: Bootstrap - SELinux allow desired SSH port (ssh_port_t)
+          community.general.seport:
+            ports: "{{ _sshd_port_desired | int }}"
+            proto: tcp
+            setype: ssh_port_t
+            state: present
+          when:
+            - (_sshd_port_desired | int) != 22
+            - ansible_facts.selinux is defined
+            - ansible_facts.selinux.status | default('disabled') == 'enabled'
+          tags: [bootstrap]
+
+        - name: Bootstrap - ensure firewalld is installed
+          ansible.builtin.package:
+            name: firewalld
+            state: present
+          when: _sshd_reconnect_after_change | bool
+          become: true
+          tags: [bootstrap]
+
+        - name: Bootstrap - enable and start firewalld
+          ansible.builtin.service:
+            name: firewalld
+            state: started
+            enabled: true
+          when: _sshd_reconnect_after_change | bool
+          become: true
+          tags: [bootstrap]
+
+        - name: Bootstrap - open desired SSH port in firewalld
+          ansible.posix.firewalld:
+            port: "{{ _sshd_port_desired | int }}/tcp"
+            zone: "{{ _bootstrap_firewalld_zone }}"
+            permanent: true
+            immediate: true
+            state: enabled
+          when: _sshd_reconnect_after_change | bool
+          become: true
+          tags: [bootstrap]
+
+        - name: Bootstrap - RHSM
+          ansible.builtin.include_role:
+            name: lit.rhel.rhsm
+            apply:
+              tags: [rhsm]
+          when: rhsm_method | default('none') != 'none'
+          tags: [bootstrap]
+
+        - name: Bootstrap - configure sshd for bootstrap-to-target port transition
+          ansible.builtin.include_role:
+            name: fedora.linux_system_roles.sshd
+            apply:
+              become: true
+          when: _sshd_reconnect_after_change | bool
+          vars:
+            # During bootstrap we only need port transition, not package management.
+            # Package updates can restart sshd unexpectedly and break bootstrap auth.
+            sshd_packages: []
+          tags: [bootstrap]
+
+        # IMPORTANT: flush sshd handlers while we are still connected via bootstrap port.
+        - name: Bootstrap - flush handlers before reconnect
+          ansible.builtin.meta: flush_handlers
+          when: _sshd_reconnect_after_change | bool
+          tags: [bootstrap]
+
+    - name: Reconnect after SSH port change
+      block:
+        - name: Wait for new SSH port (controller-side)
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host | default(inventory_hostname) }}"
+            port: "{{ _sshd_port_desired | int }}"
+            timeout: 180
+          delegate_to: localhost
+
+        - name: Switch Ansible to new port
+          ansible.builtin.set_fact:
+            ansible_port: "{{ _sshd_port_desired | int }}"
+          changed_when: false
+
+        - name: Wait for SSH connection on new port
+          ansible.builtin.wait_for_connection:
+            timeout: 180
+      when: _sshd_reconnect_after_change | bool
+      tags: [bootstrap]
+
+    - name: Reset SSH connection before base setup
+      ansible.builtin.meta: reset_connection
+      tags: [bootstrap]
+
+    - name: Wait for stable SSH before base setup
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ bootstrap_wait_for_connection_timeout | default(300) }}"
+        sleep: 5
+      when: _normal_ok | bool or _bootstrap_needed | bool
+      tags: [bootstrap]
+
+# -----------------------------------------------------------------------------
+# Base setup (inventory defaults)
+# -----------------------------------------------------------------------------
+- name: Base setup
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+
+  vars:
+    _sshd_port_desired: "{{ sshd_port | default(22) | int }}"
+
+  pre_tasks:
+    - name: Base setup - reset SSH connection
+      ansible.builtin.meta: reset_connection
+
+    - name: Base setup - wait for stable SSH
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ base_setup_wait_for_connection_timeout | default(300) }}"
+        sleep: 5
+      register: base_setup_wait_result
+      retries: "{{ base_setup_wait_retries | default(6) }}"
+      delay: "{{ base_setup_wait_delay | default(10) }}"
+      until: base_setup_wait_result is succeeded
+
+    - name: Base setup - gather facts after SSH stabilization
+      ansible.builtin.setup:
+
+  tasks:
+    - name: Users
+      ansible.builtin.include_role:
+        name: lit.rhel.users
+      tags: [users]
+
+    - name: RHSM
+      ansible.builtin.include_role:
+        name: lit.rhel.rhsm
+        apply:
+          tags: [rhsm]
+      when: rhsm_method | default('none') != 'none'
+      tags: [rhsm]
+
+    - name: Repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [repos]
+      tags: [repos]
+
+    - name: Virtual guest
+      ansible.builtin.include_role:
+        name: lit.rhel.virtual_guest
+      when: virtual_guest_enabled | default(true) | bool
+      tags: [virtual_guest, base_config]
+
+    - name: Baseline
+      ansible.builtin.include_role:
+        name: lit.rhel.baseline
+      tags: [baseline, base_config]
+
+    # -------------------------------------------------------------------------
+    # Networking
+    # -------------------------------------------------------------------------
+    - name: VLAN trunk autogen
+      ansible.builtin.include_role:
+        name: lit.foundational.net_vlan_autogen
+      when:
+        - network_state is not defined
+        - (network_connections | default([], true) | length) == 0
+        - (net_ifaces | default([], true) | length) > 0
+      tags: [network]
+
+    # -------------------------------------------------------------------------
+    # DNS: inject dns_servers into generated network_connections (NM provider)
+    # -------------------------------------------------------------------------
+    - name: Network - inject DNS servers into uplink connection
+      ansible.builtin.set_fact:
+        network_connections: |-
+          {%- set out = [] -%}
+          {%- set uplink_name = (net_vlan_autogen_wan_connection_name | default('wan')) -%}
+          {%- for c in (network_connections | default([])) -%}
+          {%- if (c.name | default('')) == uplink_name -%}
+          {%- set ip = (c.ip | default({})) | combine({
+                'dns': (dns_servers | default([])),
+                'ipv4_ignore_auto_dns': true,
+                'dns_priority': (dns_priority | default(-50))
+              }, recursive=True) -%}
+          {%- set _ = out.append(c | combine({'ip': ip}, recursive=True)) -%}
+          {%- else -%}
+          {%- set _ = out.append(c) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+      when:
+        - (dns_servers | default([]) | length) > 0
+        - (network_connections | default([]) | length) > 0
+      tags: [network]
+
+    - name: Network (nmstate / network_connections)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.network
+        apply:
+          tags: [network]
+      when:
+        - network_apply_state | default(false) | bool
+        - network_state is defined or (network_connections | default([], true) | length) > 0
+      tags: [network]
+
+    - name: Network - build static route activation check list
+      ansible.builtin.set_fact:
+        _network_route_activation_checks: >-
+          {{
+            query(
+              'subelements',
+              (net_connection_routes | default({}) | dict2items),
+              'value',
+              {'skip_missing': True}
+            )
+          }}
+      changed_when: false
+      when: (net_connection_routes | default({}) | length) > 0
+      tags: [network]
+
+    - name: Network - check runtime presence of configured static routes
+      ansible.builtin.shell: >-
+        ip -4 route show {{ item.1.network }}/{{ item.1.prefix }}
+        | grep -F "via {{ item.1.gateway }}"
+      args:
+        executable: /bin/bash
+      register: _network_route_runtime_checks
+      changed_when: false
+      failed_when: false
+      loop: "{{ _network_route_activation_checks | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.0.key
+          }} {{
+            item.1.network
+          }}/{{ item.1.prefix }} via {{
+            item.1.gateway
+          }}
+      when:
+        - (_network_route_activation_checks | default([]) | length) > 0
+        - item.1.network is defined
+        - item.1.prefix is defined
+        - item.1.gateway is defined
+      tags: [network]
+
+    - name: Network - build missing static route list
+      ansible.builtin.set_fact:
+        _network_missing_route_items: >-
+          {{
+            (_network_route_runtime_checks.results | default([]))
+            | selectattr('rc', 'ne', 0)
+            | map(attribute='item')
+            | list
+          }}
+      changed_when: false
+      when: _network_route_runtime_checks is defined
+      tags: [network]
+
+    - name: Network - resolve interface names for missing static routes
+      ansible.builtin.command:
+        argv:
+          - nmcli
+          - -g
+          - connection.interface-name
+          - connection
+          - show
+          - "{{ item.0.key }}"
+      register: _network_route_ifaces
+      changed_when: false
+      failed_when: >-
+        (_network_route_ifaces.rc != 0) or
+        ((_network_route_ifaces.stdout | default('') | trim | length) == 0)
+      loop: "{{ _network_missing_route_items | default([]) }}"
+      loop_control:
+        label: "{{ item.0.key }}"
+      when: (_network_missing_route_items | default([]) | length) > 0
+      tags: [network]
+
+    - name: Network - apply missing static routes at runtime without link flap
+      ansible.builtin.shell: >-
+        ip -4 route replace {{ item.item.1.network }}/{{ item.item.1.prefix }}
+        via {{ item.item.1.gateway }}
+        dev {{ item.stdout | trim }}
+        {% if item.item.1.metric is defined %}metric {{ item.item.1.metric }}{% endif %}
+      args:
+        executable: /bin/bash
+      register: _network_route_apply
+      changed_when: _network_route_apply.rc == 0
+      failed_when: _network_route_apply.rc != 0
+      loop: "{{ _network_route_ifaces.results | default([]) }}"
+      loop_control:
+        label: >-
+          {{
+            item.item.1.network
+          }}/{{ item.item.1.prefix }} via {{
+            item.item.1.gateway
+          }} dev {{
+            item.stdout | trim
+          }}
+      when: (_network_route_ifaces.results | default([]) | length) > 0
+      tags: [network]
+
+    # -------------------------------------------------------------------------
+    # Cleanup: remove inactive NetworkManager profiles (optional)
+    # -------------------------------------------------------------------------
+    - name: Network - list connection profiles
+      ansible.builtin.command: nmcli -t -f NAME,UUID,DEVICE con show
+      register: network_nmcli_connections
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - build desired profile name list
+      ansible.builtin.set_fact:
+        network_cleanup_desired_names: >-
+          {{
+            (network_connections | default([]))
+            | select('mapping')
+            | map(attribute='name')
+            | select('string')
+            | list
+            + (network_cleanup_keep_profiles | default([]))
+          }}
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - parse connection profiles
+      ansible.builtin.set_fact:
+        network_nmcli_profiles: >-
+          {%- set rows = [] -%}
+          {%- for line in (network_nmcli_connections.stdout_lines | default([])) -%}
+          {%- set parts = line.split(':', 2) -%}
+          {%- if parts | length > 2 -%}
+          {%- set _ = rows.append({
+                'name': parts[0],
+                'uuid': parts[1],
+                'device': parts[2]
+              }) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ rows }}
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - build inactive profile list
+      ansible.builtin.set_fact:
+        network_nmcli_inactive_uuids: >-
+          {%- set ids = [] -%}
+          {%- set desired = (network_cleanup_desired_names | default([]) | unique | list) -%}
+          {%- set profiles = (network_nmcli_profiles | default([])) -%}
+
+          {# Remove inactive profiles no longer desired #}
+          {%- for p in profiles -%}
+          {%- if (p.device == '' or p.device == '--') and (p.name not in desired) -%}
+          {%- set _ = ids.append(p.uuid) -%}
+          {%- endif -%}
+          {%- endfor -%}
+
+          {# Remove inactive duplicates for desired names (keep one profile per name) #}
+          {%- for name in desired -%}
+          {%- set active = [] -%}
+          {%- set inactive = [] -%}
+          {%- for p in profiles if p.name == name -%}
+          {%- if p.device == '' or p.device == '--' -%}
+          {%- set _ = inactive.append(p) -%}
+          {%- else -%}
+          {%- set _ = active.append(p) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- if (active | length) > 0 -%}
+          {%- for p in inactive -%}
+          {%- set _ = ids.append(p.uuid) -%}
+          {%- endfor -%}
+          {%- elif (inactive | length) > 1 -%}
+          {%- for p in (inactive[1:]) -%}
+          {%- set _ = ids.append(p.uuid) -%}
+          {%- endfor -%}
+          {%- endif -%}
+          {%- endfor -%}
+
+          {{ ids | unique }}
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
+    - name: Network - remove inactive profiles
+      ansible.builtin.command: nmcli con delete "{{ item }}"
+      loop: "{{ network_nmcli_inactive_uuids | default([]) }}"
+      when:
+        - network_cleanup_inactive_profiles | default(false) | bool
+        - (network_nmcli_inactive_uuids | default([]) | length) > 0
+      tags: [network]
+
+    # -------------------------------------------------------------------------
+    # Bridge VLAN: ensure host participates in VLANs (self) + ports have VLAN membership
+    # -------------------------------------------------------------------------
+    - name: Bridge VLAN membership (self + ports)
+      ansible.builtin.include_role:
+        name: lit.foundational.bridge_vlan_membership
+        apply:
+          tags:
+            - network
+      when:
+        - network_state is defined
+        - (bridge_vlan_ids | default([]) | length) > 0
+        - (bridge_vlan_ports | default([]) | length) > 0
+      tags: [network]
+
+    # Network profile changes can invalidate persistent SSH control sockets.
+    # Reset and re-check connectivity before continuing with package roles.
+    - name: Refresh SSH connection after network changes
+      ansible.builtin.meta: reset_connection
+      tags: [network]
+
+    - name: Wait for host connectivity after network changes
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ network_reconnect_timeout | default(300) }}"
+        sleep: 5
+      tags: [network]
+
+    # -------------------------------------------------------------------------
+    # Time sync
+    # -------------------------------------------------------------------------
+    - name: Timesync
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.timesync
+      when: (timesync_ntp_servers | default([])) | length > 0
+      tags: [timesync, chronyd]
+
+    # -------------------------------------------------------------------------
+    # System Roles (security/hardening) - only if vars are provided
+    # -------------------------------------------------------------------------
+
+    # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
+    - name: Firewall (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [firewall]
+      when:
+        - "'firewalls' not in group_names"
+        - (firewall | default([], true) | length) > 0
+      tags: [firewall, firewalld]
+
+    # Journald System Role: activate when any journald_* var is set
+    - name: Journald (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.journald
+      when: >-
+        (vars | dict2items | selectattr('key', 'match', '^journald_') | list | length) > 0
+      tags: [journald, logging]
+
+    # Logging System Role (rsyslog provider): activate when any logging_* var is set
+    - name: Logging (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.logging
+      when: >-
+        (vars | dict2items | selectattr('key', 'match', '^logging_') | list | length) > 0
+      tags: [logging, rsyslog]
+
+    # Crypto Policies System Role: activate when any crypto_policies_* var is set
+    - name: Crypto Policies (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.crypto_policies
+      when: >-
+        (vars | dict2items | selectattr('key', 'match', '^crypto_policies_') | list | length) > 0
+      tags: [crypto_policies]
+
+    # Firewalls only need a small sysctl subset. Apply it directly to avoid
+    # additional role/package dependencies on minimal images.
+    - name: Kernel Settings (firewalls - direct sysctl)
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value | string }}"
+        state: "{{ item.state | default('present') }}"
+        reload: "{{ item.reload | default(true) | bool }}"
+        sysctl_set: true
+      loop: "{{ kernel_settings_sysctl | default([], true) }}"
+      when:
+        - "'firewalls' in group_names"
+        - (kernel_settings_sysctl | default([], true) | length) > 0
+      tags: [kernel_settings, sysctl]
+
+    # Kernel Settings System Role: activate for non-firewalls when any
+    # kernel_settings_* var is set.
+    - name: Kernel Settings (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.kernel_settings
+      when:
+        - "'firewalls' not in group_names"
+        - (vars | dict2items | selectattr('key', 'match', '^kernel_settings_') | list | length) > 0
+      tags: [kernel_settings, sysctl]
+
+    # AIDE System Role: activate when any aide_* var is set
+    - name: AIDE (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.aide
+      when: >-
+        (vars | dict2items | selectattr('key', 'match', '^aide_') | list | length) > 0
+      tags: [aide]
+
+    # fapolicyd System Role: activate when any fapolicyd_* var is set
+    - name: fapolicyd (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.fapolicyd
+      when: >-
+        (vars | dict2items | selectattr('key', 'match', '^fapolicyd_') | list | length) > 0
+      tags: [fapolicyd]
+
+    # sudo System Role: activate when any sudo_* var is set
+    - name: Sudo (system role)
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.sudo
+      when: >-
+        (vars | dict2items | selectattr('key', 'match', '^sudo_') | list | length) > 0
+      tags: [sudo]
+
+    # -------------------------------------------------------------------------
+    # CIS / Hardening (custom lit.rhel roles) - staged rollout (commented)
+    # -------------------------------------------------------------------------
+
+    # - name: MOTD
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.motd
+    #   tags: [motd]
+
+    # - name: Login Banner (/etc/issue, /etc/issue.net, SSH Banner)
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.login_banner
+    #   tags: [banner]
+
+    # - name: Auditd
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.auditd
+    #   tags: [auditd]
+
+    # - name: Auth/Password Policies (pwquality/faillock/authselect)
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.auth_hardening
+    #   tags: [auth, pam]
+
+    # - name: Logrotate
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.logrotate
+    #   tags: [logrotate]
+
+    # - name: Service-/Package-Minimization & Disable unused services
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.service_hardening
+    #   tags: [services]
+    #
+    # - name: Package minimization
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.package_minimization
+    #   tags: [packages]
+
+    # - name: Mount-/FS Hardening
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.mount_hardening
+    #   tags: [mounts]
+    #
+    # - name: Kernel module blacklist
+    #   ansible.builtin.include_role:
+    #     name: lit.rhel.module_blacklist
+    #   tags: [modules]
+
+    # -------------------------------------------------------------------------
+    # SSH hardening
+    # -------------------------------------------------------------------------
+    - name: SSHD - SELinux allow desired SSH port
+      community.general.seport:
+        ports: "{{ _sshd_port_desired | int }}"
+        proto: tcp
+        setype: ssh_port_t
+        state: present
+      when:
+        - (_sshd_port_desired | int) != 22
+        - ansible_facts.selinux is defined
+        - ansible_facts.selinux.status | default('disabled') == 'enabled'
+      tags: [sshd]
+
+    - name: SSHD
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.sshd
+        apply:
+          tags: [sshd]
+      tags: [sshd]
+
+    # -------------------------------------------------------------------------
+    # Host identity & updates
+    # -------------------------------------------------------------------------
+    - name: Hostname
+      ansible.builtin.include_role:
+        name: lit.rhel.hostname
+        apply:
+          tags: [hostname]
+      tags: [hostname]
+
+    - name: Automatic updates
+      ansible.builtin.include_role:
+        name: lit.rhel.automatic_updates
+      tags: [automatic_updates]
