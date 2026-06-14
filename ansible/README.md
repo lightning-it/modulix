@@ -40,14 +40,10 @@ For manual collection install modes, see `Tasks` -> `Install collections`.
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
-#### 3) Run a workflow pipeline
+#### 3) Compose customer workflows privately
 
-```bash
-./scripts/ansible-nav run runbooks/workflows/<service>-rebuild.yml \
-  -i inventories/<env>/inventory.yml --limit <host-or-group>
-```
-
-For full workflows and all variants, see `Tasks`.
+This public repository provides reusable capability runbooks. Customer-specific
+workflow composition belongs in private `modulix-operations-*` repositories.
 
 ### In-container mode (`ansible-nav-local`)
 
@@ -202,16 +198,18 @@ For controlled development procedures, see:
 
 #### Execute runbooks
 
-Use runbooks as the execution contract for service rollout and rebuild order.
-This README documents runtime mechanics (`ansible-nav` and `ansible-nav-local`),
-while runbook content and sequencing live in:
+Use runbooks as reusable capability entrypoints. This README documents runtime
+mechanics (`ansible-nav` and `ansible-nav-local`), while private customer
+workflow sequencing lives in `modulix-operations-*` repositories.
+
+Runbook content is documented in:
 
 - `lcp-docs/30-modulix/30-runbooks/00-index.md`
 
 Execution pattern:
 
 ```bash
-./scripts/ansible-nav run <runbook-or-workflow.yml> \
+./scripts/ansible-nav run <runbook.yml> \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
@@ -274,12 +272,13 @@ Wrapper behavior (`scripts/ansible-nav`):
 
 ### Inventory and roles
 
-- Inventory: `inventories/<env>/inventory.yml`
+- Inventory is supplied from an external inventory repository.
 - Roles path: `./roles` (set in `ansible.cfg`)
 - Adjust vars in `group_vars/` and `host_vars/` as needed.
 - Inventory is environment-specific and is not provided as a universal ModuLix baseline.
 - Platform teams must define inventory to match their infrastructure and operating context
   (host/group model, network zones, access paths, and required runtime inputs).
+- Sanitized public examples live in `ansible-inventory-example`.
 - `lit.supplementary.aap` is backend-agnostic and expects resolved password inputs
   (`aap_*_admin_password_input`).
 - `runbooks/services/13-aap.yml` provides an optional Vault pre-step

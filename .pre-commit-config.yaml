@@ -9,10 +9,13 @@ repos:
         pass_filenames: true
         files: ^ansible/.*\.(yml|yaml)$
 
-      - id: ansible-inventory-validate
-        name: ansible-inventory validate (ansible/example)
+      - id: ansible-inventory-validate-smoke
+        name: ansible-inventory validate (generated smoke)
         language: system
         entry: >-
-          bash -c 'ansible-inventory -i ansible/inventories/example/inventory.yml
-          --list >/dev/null'
+          bash -c 'tmp_inventory="$(mktemp)";
+          printf "%s\n" "---" "all:" "  hosts:" "    localhost:"
+          "      ansible_connection: local" > "$tmp_inventory";
+          ansible-inventory -i "$tmp_inventory" --list >/dev/null;
+          rm -f "$tmp_inventory"'
         pass_filenames: false

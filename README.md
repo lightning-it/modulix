@@ -22,9 +22,14 @@ Canonical release-coupled docs in this repo:
 
 ```bash
 cd ansible
-./scripts/ansible-nav run runbooks/workflows/01-wunderbox-rebuild.yml \
-  -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+./scripts/ansible-nav run runbooks/services/12-wunderbox.yml \
+  -i /path/to/private/inventory.yml --limit wunderbox01.prd.dmz.example.invalid
 ```
+
+This public repository provides reusable capability runbooks. Customer-specific
+workflow compositions live in private `modulix-operations-*` repositories.
+Sanitized inventory examples live in the public `ansible-inventory-example`
+repository.
 
 ## Development
 
