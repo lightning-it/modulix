@@ -1,0 +1,17 @@
+---
+- name: Stage and import Incus image artifacts
+  hosts: "{{ incus_image_artifacts_target | default('incus_hosts') }}"
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: lit.supplementary.artifacts
+      tags:
+        - artifacts
+        - incus
+        - incus_images
+
+    - role: lit.ubuntu.incus_image
+      tags:
+        - incus
+        - incus_images
