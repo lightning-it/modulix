@@ -13,7 +13,8 @@ backend, an internal HTTPS endpoint, or copied from a controller-local path.
 The deployment role then consumes the staged bundle through
 `aap_deploy_setup_archive_src` or `aap_deploy_setup_archive_path`.
 
-Example inventory shape:
+Example inventory shape only. Put real values and copy-paste rollout
+instructions in the private operations repository for the environment.
 
 ```yaml
 artifacts_items:

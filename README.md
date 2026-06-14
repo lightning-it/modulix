@@ -16,7 +16,7 @@ Release-coupled packaging documentation in this repo:
 
 - Packaging/build: `packaging/rpm/README.md`
 
-## Quick start (default)
+## Example Usage
 
 ```bash
 cd ansible
@@ -24,10 +24,11 @@ cd ansible
   -i /path/to/private/inventory.yml --limit wunderbox01.prd.dmz.example.invalid
 ```
 
-This public repository provides reusable capability runbooks. Customer-specific
-workflow compositions live in private `modulix-operations-*` repositories.
-Sanitized inventory examples live in the public `ansible-inventory-example`
-repository.
+This is a generic example only. This public repository provides reusable
+capability runbooks, not copy-paste rollout procedures. Customer-specific or
+Lightning IT copy-paste operations live in private `modulix-operations-*`
+repositories. Sanitized inventory examples live in the public
+`ansible-inventory-example` repository.
 
 ## Development
 
@@ -46,11 +47,15 @@ What this does:
 - Installs them into `ansible/collections-dev`.
 - Ensures local overlays take precedence over `ansible/collections` during runs.
 
-## Full operator documentation
+## Operator Documentation
 
-Curated operator guides, architecture, runbooks and troubleshooting live in:
+Copy-paste operator guides, environment-specific workflows, and
+troubleshooting procedures live in private operations repositories such as:
 
-- `https://github.com/lightning-it/lcp-docs/tree/main/ModuLix`
+- `modulix-operations-lit`
+- `modulix-operations-<customer>`
+
+This public repository keeps reusable automation docs and examples only.
 
 ## Security statement
 
