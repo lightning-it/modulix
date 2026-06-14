@@ -261,7 +261,8 @@ Wrapper behavior (`scripts/ansible-nav`):
 - EE image/engine defaults are taken from `ansible-navigator.yml`.
 - `ANSIBLE_CONFIG` defaults to `ansible.cfg` in the active runtime workspace.
 - For RH collection profile resolution, provide `RH_AUTOMATION_HUB_TOKEN`.
-- Full runtime variable reference: `../docs/runtime-contract.md`.
+- Runtime options are listed by `scripts/ansible-nav --help` and
+  `scripts/ansible-nav-local --help`.
 
 #### Run EE image variants
 
@@ -285,11 +286,9 @@ Wrapper behavior (`scripts/ansible-nav`):
   (`tasks/aap_seed_passwords_vault.yml`) to read/create admin passwords and publish
   resolved inputs before the AAP roles run.
 - `runbooks/50-applications/github-runner/10-setup.yml` configures
-  Ubuntu-based GitHub Actions self-hosted runners. See
-  `../docs/github-actions-runner.md`.
+  Ubuntu-based GitHub Actions self-hosted runners.
 - `runbooks/40-platforms/incus/10-host-setup.yml` configures
-  Ubuntu-based Incus hosts for containers and VM workloads. See
-  `../docs/incus-host.md`.
+  Ubuntu-based Incus hosts for containers and VM workloads.
 
 ## Security
 
@@ -316,8 +315,4 @@ Best practice: use a short-lived, least-privilege token for KV read + PKI issue,
 
 ## Related Docs
 
-- `../docs/runtime-contract.md`
-- `../docs/support-matrix.md`
-- `../docs/github-actions-runner.md`
-- `../docs/incus-host.md`
 - `lcp-docs/30-modulix/30-runbooks/00-index.md`

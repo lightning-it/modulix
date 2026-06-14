@@ -49,8 +49,6 @@
       "customType": "regex",
       "description": "Track default toolbox image references in docs and runtime scripts",
       "managerFilePatterns": [
-        "/^docs\\/runtime-contract\\.md$/",
-        "/^docs\\/support-matrix\\.md$/",
         "/^ansible\\/scripts\\/ansible-nav$/",
         "/^ansible\\/README\\.md$/"
       ],
@@ -65,8 +63,6 @@
       "customType": "regex",
       "description": "Track ansible run EE image defaults",
       "managerFilePatterns": [
-        "/^docs\\/runtime-contract\\.md$/",
-        "/^docs\\/support-matrix\\.md$/",
         "/^ansible\\/scripts\\/ansible-nav$/"
       ],
       "matchStrings": [

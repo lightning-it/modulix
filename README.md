@@ -12,10 +12,8 @@ It is delivered as the `modulix-automation-runtime` RPM.
   `ansible/collections/requirements-rh.yml` (Automation Hub token required)
 - Optional runtime: host-native execution (supported with prerequisites)
 
-Canonical release-coupled docs in this repo:
+Release-coupled packaging documentation in this repo:
 
-- Runtime contract: `docs/runtime-contract.md`
-- Support matrix: `docs/support-matrix.md`
 - Packaging/build: `packaging/rpm/README.md`
 
 ## Quick start (default)
