@@ -16,6 +16,17 @@
   gather_facts: true
 
   tasks:
+    - name: Stage AAP artifacts
+      ansible.builtin.include_role:
+        name: lit.supplementary.artifacts
+        apply:
+          tags: [aap, aap_deploy, artifacts]
+      when: artifacts_items | default([]) | length > 0
+      tags:
+        - aap
+        - aap_deploy
+        - artifacts
+
     - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
       ansible.builtin.import_tasks: tasks/aap_seed_passwords_vault.yml
       when: aap_password_seed_enabled | default(false) | bool
