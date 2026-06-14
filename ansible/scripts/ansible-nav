@@ -225,7 +225,7 @@ rewrite_host_path_for_container() {
   fi
 
   if [[ -n "${abs}" && "${abs}" == "${REPO_ROOT}"* ]]; then
-    echo "/runner/project${abs#${REPO_ROOT}}"
+    echo "/runner/project${abs#"${REPO_ROOT}"}"
     return 0
   fi
 
@@ -269,7 +269,7 @@ rewrite_inventory_spec_for_container() {
         out+=("/runner/project/${part#./}")
         ;;
       "${REPO_ROOT}"/inventories/*)
-        out+=("/runner/project/inventories/${part#${REPO_ROOT}/inventories/}")
+        out+=("/runner/project/inventories/${part#"${REPO_ROOT}"/inventories/}")
         ;;
       *)
         out+=("${part}")
@@ -497,6 +497,7 @@ container_args+=(
   -e "ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
   -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
   -e "ANSIBLE_LOCAL_TEMP=/tmp/.ansible/tmp"
+  -e "ANSIBLE_REMOTE_TEMP=${ANSIBLE_REMOTE_TEMP:-~/.ansible/tmp}"
   -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
 )
 
@@ -511,6 +512,11 @@ fi
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   vault_pass_file_in_container="$(rewrite_host_path_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}")"
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
+fi
+
+if [[ -n "${AAP_BUNDLE_FILE:-}" ]]; then
+  aap_bundle_file_in_container="$(rewrite_host_path_for_container "${AAP_BUNDLE_FILE}")"
+  container_args+=(-e "AAP_BUNDLE_FILE=${aap_bundle_file_in_container}")
 fi
 
 if [[ -n "${AUTOMATION_HUB_GALAXY_SERVER:-}" ]]; then
