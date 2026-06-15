@@ -12,9 +12,10 @@ This document defines the canonical execution contract for ModuLix automation re
 ## Default runtime behavior
 
 - Runs inside toolbox container image:
-  - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.3`
+  - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4`
 - `ansible-navigator run` is always executed with `--ee true`.
-- Collections are resolved from `ANSIBLE_COLLECTIONS_PATH` with local project overlays first.
+- Connected runs resolve collections from `ANSIBLE_COLLECTIONS_PATH` with local
+  project overlays first.
 - `ansible/scripts/ansible-nav-local run` bootstraps collections by default
   (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
 - Default requirements profile: `ansible/collections/requirements.yml`.
@@ -26,21 +27,39 @@ This document defines the canonical execution contract for ModuLix automation re
 Supported wrapper options (environment variables):
 
 - `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker`
+- `ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected`
 - `ANSIBLE_TOOLBOX_IMAGE=<image:tag>`
-- `ANSIBLE_TOOLBOX_RUN_EE_IMAGE=<image:tag>`
+- `MODULIX_RUN_EE_IMAGE=<image:tag>`
+- `ANSIBLE_TOOLBOX_RUN_EE_IMAGE=<image:tag>` (compatibility override)
 - `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never`
 - `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive`
 - `ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>` (optional override for `ansible-nav-local`)
 - `ANSIBLE_TOOLBOX_MOUNT_INVENTORIES=auto|true|false`
 - `ANSIBLE_TOOLBOX_INVENTORY_SOURCE=/path/to/inventories`
+- `INVENTORY_FILE=/path/to/inventories/<name>/inventory.yml`
 - `ANSIBLE_TOOLBOX_MOUNT_SSH=auto|true|false`
 - `ANSIBLE_TOOLBOX_SSH_SOURCE=/path/to/.ssh`
 - `ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT=auto|true|false`
+- `ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=true|false`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto|always|never`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT=true|false`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS=./collections/requirements-rh.yml`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=./collections-dev`
 - `RH_COLLECTIONS_USE=true|false`
+
+`ANSIBLE_TOOLBOX_RUNTIME_MODE=disconnected` changes runtime defaults only:
+
+- `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`
+- `ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=false`
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=never`
+- `ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true`
+
+It does not select an application-specific EE image or artifact directory.
+Those values belong to the caller, inventory, or operator procedure.
+
+When `ANSIBLE_TOOLBOX_INVENTORY_SOURCE` is unset, the wrapper can derive the
+inventory source from `INVENTORY_FILE` if it points below an `inventories`
+directory.
 
 ## Required runtime inputs
 

@@ -6,17 +6,35 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
+runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
 image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4}"
-run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1}"
+run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1}}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
-rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
 rh_collections_strict="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT:-true}"
 rh_collections_requirements="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS:-${REPO_ROOT}/collections/requirements-rh.yml}"
 rh_collections_target="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
 rh_collections_use="${RH_COLLECTIONS_USE:-true}"
+case "${runtime_mode}" in
+  connected)
+    run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
+    rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
+    auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}"
+    collection_overlays="${ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS:-true}"
+    ;;
+  disconnected)
+    run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-true}"
+    rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-never}"
+    auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-false}"
+    collection_overlays="${ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS:-false}"
+    ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_RUNTIME_MODE='${runtime_mode}' (use: connected|disconnected)." >&2
+    exit 1
+    ;;
+esac
 
 inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-auto}"
 ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-auto}"
@@ -30,7 +48,11 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
+  ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
   ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4)
+  MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1)
+  ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
+  ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=true|false  (default: true; false in disconnected mode)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
@@ -141,6 +163,8 @@ find_container_api_socket() {
 
 find_inventory_source() {
   local from_env="${ANSIBLE_TOOLBOX_INVENTORY_SOURCE:-${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}}"
+  local inventory_file="${ANSIBLE_TOOLBOX_INVENTORY_FILE:-${INVENTORY_FILE:-}}"
+  local source_from_inventory_file
   local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory/inventories"
 
   if [[ -n "${from_env}" ]]; then
@@ -150,6 +174,14 @@ find_inventory_source() {
     fi
     echo "Configured ANSIBLE_NAVIGATOR_INVENTORY_SOURCE does not exist: ${from_env}" >&2
     return 1
+  fi
+
+  if [[ -n "${inventory_file}" && "${inventory_file}" == */inventories/* ]]; then
+    source_from_inventory_file="${inventory_file%%/inventories/*}/inventories"
+    if [[ -d "${source_from_inventory_file}" ]]; then
+      echo "${source_from_inventory_file}"
+      return 0
+    fi
   fi
 
   if [[ -d "${default_source}" ]]; then
@@ -232,6 +264,85 @@ rewrite_host_path_for_container() {
   echo "${original}"
 }
 
+map_file_for_container() {
+  local original="$1"
+  local target="$2"
+  local rewritten=""
+
+  rewritten="$(rewrite_host_path_for_container "${original}")"
+  if [[ "${rewritten}" != "${original}" ]]; then
+    mapped_file_for_container_result="${rewritten}"
+    return 0
+  fi
+
+  if [[ ! -f "${original}" ]]; then
+    mapped_file_for_container_result="${original}"
+    return 0
+  fi
+
+  container_args+=(-v "${original}:${target}:ro")
+  mapped_file_for_container_result="${target}"
+}
+
+add_env_if_set() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ -n "${value}" ]]; then
+    container_args+=(-e "${name}=${value}")
+  fi
+}
+
+add_rewritten_run_env_if_set() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ -n "${value}" ]]; then
+    run_nav_env+=("${name}=$(rewrite_host_path_for_container "${value}")")
+  fi
+}
+
+add_mount() {
+  local source="$1"
+  local target="$2"
+  local mode="${3:-}"
+  local mount_spec="${source}:${target}"
+
+  if [[ -n "${mode}" ]]; then
+    mount_spec+=":${mode}"
+  fi
+
+  container_args+=(-v "${mount_spec}")
+}
+
+mount_requested_source() {
+  local requested="$1"
+  local finder="$2"
+  local target="$3"
+  local mode="$4"
+  local source=""
+
+  case "${requested}" in
+    auto)
+      if source="$("${finder}")"; then
+        add_mount "${source}" "${target}" "${mode}"
+        mounted_source_result="${source}"
+        return 0
+      fi
+      return 1
+      ;;
+    true)
+      source="$("${finder}")" || exit 1
+      add_mount "${source}" "${target}" "${mode}"
+      mounted_source_result="${source}"
+      return 0
+      ;;
+    false)
+      return 1
+      ;;
+  esac
+}
+
 find_ssh_agent_socket() {
   local from_env="${SSH_AUTH_SOCK:-}"
   local resolved=""
@@ -258,9 +369,15 @@ rewrite_inventory_spec_for_container() {
   local spec="$1"
   local out=()
   local part
+  local inventory_source_prefix="${inventory_source:-}"
   IFS=',' read -r -a parts <<< "${spec}"
 
   for part in "${parts[@]}"; do
+    if [[ -n "${inventory_source_prefix}" && "${part}" == "${inventory_source_prefix}"/* ]]; then
+      out+=("/runner/project/inventories/${part#"${inventory_source_prefix}"/}")
+      continue
+    fi
+
     case "${part}" in
       inventories/*)
         out+=("/runner/project/${part}")
@@ -399,6 +516,8 @@ validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT" "${ssh_agent_mount_requested
 validate_rh_collections_mode "${rh_collections_mode}"
 validate_bool "ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT" "${rh_collections_strict}"
 validate_bool "RH_COLLECTIONS_USE" "${rh_collections_use}"
+validate_bool "ANSIBLE_TOOLBOX_RUN_EE_PRELOAD" "${run_ee_preload}"
+validate_bool "ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS" "${collection_overlays}"
 
 case "${nav_mode}" in
   stdout|interactive) ;;
@@ -442,52 +561,34 @@ container_args+=(-v "${REPO_ROOT}:/runner/project" -w /runner/project)
 
 inventory_mounted=false
 ssh_agent_mounted=false
+inventory_source=""
+mounted_source_result=""
+run_ee_tar=""
+mapped_file_for_container_result=""
 
-case "${inventory_mount_requested}" in
-  auto)
-    if inventory_source="$(find_inventory_source)"; then
-      container_args+=(-v "${inventory_source}:/runner/project/inventories:ro")
-      inventory_mounted=true
-    fi
-    ;;
-  true)
-    inventory_source="$(find_inventory_source)"
-    container_args+=(-v "${inventory_source}:/runner/project/inventories:ro")
-    inventory_mounted=true
-    ;;
-  false)
-    ;;
-esac
+cleanup() {
+  if [[ -n "${run_ee_tar}" ]]; then
+    rm -f -- "${run_ee_tar}"
+  fi
+}
+trap cleanup EXIT
 
-case "${ssh_mount_requested}" in
-  auto)
-    if ssh_source="$(find_ssh_source)"; then
-      container_args+=(-v "${ssh_source}:/runner/.ssh:ro")
-    fi
-    ;;
-  true)
-    ssh_source="$(find_ssh_source)"
-    container_args+=(-v "${ssh_source}:/runner/.ssh:ro")
-    ;;
-  false)
-    ;;
-esac
+if mount_requested_source "${inventory_mount_requested}" find_inventory_source "/runner/project/inventories" "ro"; then
+  inventory_source="${mounted_source_result}"
+  inventory_mounted=true
+fi
 
-case "${ssh_agent_mount_requested}" in
-  auto)
-    if ssh_agent_socket="$(find_ssh_agent_socket)"; then
-      container_args+=(-v "${ssh_agent_socket}:/runner/ssh-agent.sock")
-      ssh_agent_mounted=true
-    fi
-    ;;
-  true)
-    ssh_agent_socket="$(find_ssh_agent_socket)"
-    container_args+=(-v "${ssh_agent_socket}:/runner/ssh-agent.sock")
-    ssh_agent_mounted=true
-    ;;
-  false)
-    ;;
-esac
+mount_requested_source "${ssh_mount_requested}" find_ssh_source "/runner/.ssh" "ro" || true
+
+if mount_requested_source "${ssh_agent_mount_requested}" find_ssh_agent_socket "/runner/ssh-agent.sock" ""; then
+  ssh_agent_mounted=true
+fi
+
+if [[ "${collection_overlays}" == "true" ]]; then
+  collections_path="/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+else
+  collections_path="/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+fi
 
 container_args+=(
   -e "HOME=/runner"
@@ -498,47 +599,28 @@ container_args+=(
   -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
   -e "ANSIBLE_LOCAL_TEMP=/tmp/.ansible/tmp"
   -e "ANSIBLE_REMOTE_TEMP=${ANSIBLE_REMOTE_TEMP:-~/.ansible/tmp}"
-  -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+  -e "ANSIBLE_COLLECTIONS_PATH=${collections_path}"
 )
 
-if [[ -n "${VAULT_TOKEN:-}" ]]; then
-  container_args+=(-e "VAULT_TOKEN=${VAULT_TOKEN}")
-fi
-
-if [[ -n "${RH_AUTOMATION_HUB_TOKEN:-}" ]]; then
-  container_args+=(-e "RH_AUTOMATION_HUB_TOKEN=${RH_AUTOMATION_HUB_TOKEN}")
-fi
+add_env_if_set VAULT_TOKEN
+add_env_if_set RH_AUTOMATION_HUB_TOKEN
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
-  vault_pass_file_in_container="$(rewrite_host_path_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}")"
+  map_file_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}" "/runner/secrets/ansible-vault-pass.txt"
+  vault_pass_file_in_container="${mapped_file_for_container_result}"
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
 
-if [[ -n "${AAP_BUNDLE_FILE:-}" ]]; then
-  aap_bundle_file_in_container="$(rewrite_host_path_for_container "${AAP_BUNDLE_FILE}")"
-  container_args+=(-e "AAP_BUNDLE_FILE=${aap_bundle_file_in_container}")
-fi
-
-if [[ -n "${AUTOMATION_HUB_GALAXY_SERVER:-}" ]]; then
-  container_args+=(-e "AUTOMATION_HUB_GALAXY_SERVER=${AUTOMATION_HUB_GALAXY_SERVER}")
-fi
-if [[ -n "${AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED:-}" ]]; then
-  container_args+=(-e "AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED=${AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED}")
-fi
-if [[ -n "${AUTOMATION_HUB_GALAXY_SERVER_VALIDATED:-}" ]]; then
-  container_args+=(-e "AUTOMATION_HUB_GALAXY_SERVER_VALIDATED=${AUTOMATION_HUB_GALAXY_SERVER_VALIDATED}")
-fi
-
 for pass_var in \
+  AUTOMATION_HUB_GALAXY_SERVER \
+  AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED \
+  AUTOMATION_HUB_GALAXY_SERVER_VALIDATED \
   RH_COLLECTIONS_USE \
   RH_COLLECTIONS_REQUIREMENTS_FILE \
   RH_COLLECTIONS_TARGET \
   RH_COLLECTIONS_STRICT \
   RH_COLLECTIONS_REQUIRED; do
-  pass_value="${!pass_var:-}"
-  if [[ -n "${pass_value}" ]]; then
-    container_args+=(-e "${pass_var}=${pass_value}")
-  fi
+  add_env_if_set "${pass_var}"
 done
 
 if [[ "${ssh_agent_mounted}" == true ]]; then
@@ -564,23 +646,16 @@ case "${subcommand}" in
       "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
       "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
       "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
+      "ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=${collection_overlays}"
     )
 
-    if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}" ]]; then
-      run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS}")
+    if [[ -n "${auto_collections}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${auto_collections}")
     fi
 
-    if [[ -n "${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}" ]]; then
-      run_nav_env+=("ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=$(rewrite_host_path_for_container "${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS}")")
-    fi
-
-    if [[ -n "${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH:-}" ]]; then
-      run_nav_env+=("ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=$(rewrite_host_path_for_container "${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH}")")
-    fi
-
-    if [[ -n "${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-}" ]]; then
-      run_nav_env+=("ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=$(rewrite_host_path_for_container "${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE}")")
-    fi
+    add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS
+    add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH
+    add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE
 
     container_args+=(--privileged --user 0:0)
     if [[ $# -lt 1 ]]; then
@@ -595,6 +670,13 @@ case "${subcommand}" in
     if [[ "${rh_collections_use}" == "true" ]] && should_prepare_rh_collections "${rh_collections_mode}" "${run_args[@]}"; then
       run_rh_collection_preflight=true
     fi
+    if [[ "${run_ee_preload}" == "true" ]]; then
+      ensure_image_present "${engine}" "${run_ee_image}" "${pull_policy}"
+      run_ee_tar="$(mktemp "${TMPDIR:-/tmp}/modulix-run-ee.XXXXXX.tar")"
+      "${engine}" save -o "${run_ee_tar}" "${run_ee_image}"
+      container_args+=(-v "${run_ee_tar}:/runner/run-ee.tar:ro")
+      run_nav_env+=("ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never")
+    fi
     execution_image="${image}"
     in_container_cmd=(
       env
@@ -603,11 +685,11 @@ case "${subcommand}" in
       run
       "${run_args[@]}"
     )
+    if [[ "${run_ee_preload}" == "true" ]]; then
+      in_container_cmd=(bash -lc 'set -euo pipefail; podman load -i /runner/run-ee.tar; exec "$@"' bash "${in_container_cmd[@]}")
+    fi
     ;;
   exec)
-    if [[ "${engine}" == "podman" ]]; then
-      container_args+=(--userns=keep-id)
-    fi
     container_args+=(--user "$(id -u):$(id -g)")
     if [[ "${1:-}" == "--" ]]; then
       shift
@@ -648,4 +730,8 @@ if [[ "${run_rh_collection_preflight}" == true ]]; then
     /runner/project/scripts/install-rh-collections
 fi
 
-exec "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
+if [[ -n "${run_ee_tar}" ]]; then
+  "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
+else
+  exec "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
+fi

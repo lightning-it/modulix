@@ -6,9 +6,9 @@ ansible-navigator:
   execution-environment:
     enabled: true
     container-engine: podman
-    # Default image (public profile). Override at runtime with:
+    # Default image. Override at runtime with:
     # ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>
-    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.10.0
+    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.16.0
     pull:
       policy: missing
     container-options:
@@ -19,7 +19,6 @@ ansible-navigator:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
         - ANSIBLE_REMOTE_TEMP
-        - AAP_BUNDLE_FILE
         - VAULT_ADDR
         - VAULT_SKIP_VERIFY
         - VAULT_TOKEN

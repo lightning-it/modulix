@@ -63,7 +63,8 @@
       "customType": "regex",
       "description": "Track ansible run EE image defaults",
       "managerFilePatterns": [
-        "/^ansible\\/scripts\\/ansible-nav$/"
+        "/^ansible\\/scripts\\/ansible-nav$/",
+        "/^ansible\\/ansible-navigator\\.yml$/"
       ],
       "matchStrings": [
         "quay\\.io\\/l-it\\/ee-wunder-ansible-ubi9:(?<currentValue>[^\\s`]+)",
