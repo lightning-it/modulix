@@ -69,3 +69,29 @@ For application and platform runbooks (for example `ansible/runbooks/50-applicat
 4. Runbooks MUST NOT silently generate environment-specific defaults for service credentials or topology.
 5. Cross-service wiring SHOULD be expressed as inventory variables (or role defaults that map inventory inputs), not large `set_fact`/fallback blocks in runbooks.
 6. If values are required, fail fast with clear assertions instead of deriving hidden defaults in runbook code.
+
+## Public Documentation Boundary
+
+This repository is public reusable automation. Documentation here MUST explain
+generic runbook behavior, variable contracts, and sanitized examples only.
+
+Do not add customer-specific or Lightning IT-specific copy-paste rollout
+instructions here. Copy-paste procedures with real repo names, inventory paths,
+hostnames, artifact locations, tokens, Vault paths, or operator session setup
+belong in the private `modulix-operations-*` repository for that environment.
+
+Allowed here:
+
+- reusable runbook documentation
+- generic examples with placeholder paths and sanitized inventory names
+- variable contract examples
+- development and packaging instructions for this repository
+
+Not allowed here:
+
+- end-to-end operational rollout guides
+- real customer or Lightning IT hostnames and inventory paths
+- environment-specific artifact locations
+- private workflow composition
+- instructions that operators are expected to copy and paste into a real
+  environment
