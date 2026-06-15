@@ -23,3 +23,4 @@ ansible/.toolbox-podman/
 # Python
 venv*
 .venv*
+.artifacts/

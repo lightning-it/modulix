@@ -60,62 +60,55 @@ Environment:
 EOF
 }
 
-case "${nav_mode}" in
-  stdout|interactive) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_MODE='${nav_mode}' (use: stdout|interactive)." >&2
-    exit 1
-    ;;
-esac
+validate_choice() {
+  local name="$1"
+  local value="$2"
+  local allowed="$3"
 
-case "${nav_ee_enabled}" in
-  true|false) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
-    exit 1
-    ;;
-esac
-
-case "${nav_skip_auth}" in
-  true|false) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_SKIP_AUTH='${nav_skip_auth}' (use: true|false)." >&2
-    exit 1
-    ;;
-esac
-
-case "${nav_skip_cert_check}" in
-  true|false) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK='${nav_skip_cert_check}' (use: true|false)." >&2
-    exit 1
-    ;;
-esac
-
-case "${auto_collections}" in
-  auto|true|false) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_AUTO_COLLECTIONS='${auto_collections}' (use: auto|true|false)." >&2
-    exit 1
-    ;;
-esac
-
-case "${nav_container_engine}" in
-  auto|podman|docker) ;;
-  *)
-    echo "Invalid ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE='${nav_container_engine}' (use: auto|podman|docker)." >&2
-    exit 1
-    ;;
-esac
-
-if [[ -n "${nav_pull_policy}" ]]; then
-  case "${nav_pull_policy}" in
-    always|missing|never|tag) ;;
+  case " ${allowed} " in
+    *" ${value} "*)
+      ;;
     *)
-      echo "Invalid ANSIBLE_TOOLBOX_NAV_PULL_POLICY='${nav_pull_policy}' (use: always|missing|never|tag)." >&2
+      echo "Invalid ${name}='${value}' (use: ${allowed// /|})." >&2
       exit 1
       ;;
   esac
+}
+
+add_ee_volume_if_present() {
+  local source="$1"
+  local target="${2:-${source}}"
+  local kind="${3:-file}"
+
+  if [[ "${nav_ee_enabled}" != "true" || -z "${source}" ]]; then
+    return 0
+  fi
+
+  case "${kind}" in
+    dir)
+      [[ -d "${source}" ]] || return 0
+      ;;
+    file)
+      [[ -f "${source}" ]] || return 0
+      ;;
+    *)
+      echo "Invalid EE volume kind '${kind}'." >&2
+      exit 1
+      ;;
+  esac
+
+  cmd+=(--eev "${source}:${target}:ro")
+}
+
+validate_choice "ANSIBLE_TOOLBOX_NAV_MODE" "${nav_mode}" "stdout interactive"
+validate_choice "ANSIBLE_TOOLBOX_NAV_EE_ENABLED" "${nav_ee_enabled}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_AUTH" "${nav_skip_auth}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK" "${nav_skip_cert_check}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_AUTO_COLLECTIONS" "${auto_collections}" "auto true false"
+validate_choice "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE" "${nav_container_engine}" "auto podman docker"
+
+if [[ -n "${nav_pull_policy}" ]]; then
+  validate_choice "ANSIBLE_TOOLBOX_NAV_PULL_POLICY" "${nav_pull_policy}" "always missing never tag"
 fi
 
 if [[ "${nav_skip_auth}" == "true" ]]; then
@@ -338,6 +331,10 @@ case "${subcommand}" in
     if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
       cmd+=(--eev "/opt/modulix:/opt/modulix:Z")
     fi
+    add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
+    add_ee_volume_if_present "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
+    add_ee_volume_if_present "${AAP_ARTIFACT_DIR:-}" "${AAP_ARTIFACT_DIR:-}" dir
+    add_ee_volume_if_present "${AAP_BUNDLE_FILE:-}"
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
     fi
