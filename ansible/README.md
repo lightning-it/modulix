@@ -237,7 +237,9 @@ Default toolbox image:
 - `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4`
 
 Wrapper behavior (`scripts/ansible-nav`):
-- External inventories are auto-mounted from `../../ansible-inventory/inventories` to `/runner/project/inventories` when available.
+- External inventories are auto-mounted from `ANSIBLE_TOOLBOX_INVENTORY_SOURCE`,
+  or derived from `INVENTORY_FILE` when it points below an `inventories`
+  directory.
 - When inventory mount is active, `-i inventories/...` is automatically rewritten to `/runner/project/inventories/...` for execution environment compatibility.
 - Host SSH directory is auto-mounted from `~/.ssh` to `/runner/.ssh` so inventory paths like `/runner/.ssh/id_ed25519` work inside the execution environment.
 - Host `SSH_AUTH_SOCK` is auto-mounted to `/runner/ssh-agent.sock` and exported in-container.
@@ -247,7 +249,8 @@ Wrapper behavior (`scripts/ansible-nav`):
   - `ansible-nav-local` runs `ansible-navigator` with EE enabled.
   - inner EE container engine is fixed to `podman`.
   - run EE image:
-    - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1`).
+    - `MODULIX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1`).
+    - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` can override it for compatibility.
     - `ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected` (default: `connected`).
 - For `exec`, when a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the toolbox container.
 - For AAP runs (`runbook path contains "aap"` or `--tags/-t` includes `aap`), wrapper runs

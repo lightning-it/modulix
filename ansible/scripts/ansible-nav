@@ -8,7 +8,7 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
 image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4}"
-run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1}"
+run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1}}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
@@ -50,6 +50,7 @@ Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
   ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
   ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4)
+  MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1)
   ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
   ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=true|false  (default: true; false in disconnected mode)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
@@ -162,6 +163,8 @@ find_container_api_socket() {
 
 find_inventory_source() {
   local from_env="${ANSIBLE_TOOLBOX_INVENTORY_SOURCE:-${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}}"
+  local inventory_file="${ANSIBLE_TOOLBOX_INVENTORY_FILE:-${INVENTORY_FILE:-}}"
+  local source_from_inventory_file
   local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory/inventories"
 
   if [[ -n "${from_env}" ]]; then
@@ -171,6 +174,14 @@ find_inventory_source() {
     fi
     echo "Configured ANSIBLE_NAVIGATOR_INVENTORY_SOURCE does not exist: ${from_env}" >&2
     return 1
+  fi
+
+  if [[ -n "${inventory_file}" && "${inventory_file}" == */inventories/* ]]; then
+    source_from_inventory_file="${inventory_file%%/inventories/*}/inventories"
+    if [[ -d "${source_from_inventory_file}" ]]; then
+      echo "${source_from_inventory_file}"
+      return 0
+    fi
   fi
 
   if [[ -d "${default_source}" ]]; then
