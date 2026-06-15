@@ -254,8 +254,9 @@ Wrapper behavior (`scripts/ansible-nav`):
   `scripts/install-rh-collections` automatically before runbook execution when
   `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto` (default).
 - `ANSIBLE_TOOLBOX_RUNTIME_MODE=disconnected` sets offline-safe defaults:
-  `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`, `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=never`,
-  and `ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true`.
+  `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`, `ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=false`,
+  `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=never`, and
+  `ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true`.
 
 #### In-container mode (`ansible-nav-local`)
 

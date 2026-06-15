@@ -22,11 +22,13 @@ case "${runtime_mode}" in
     run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
     rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
     auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}"
+    collection_overlays="${ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS:-true}"
     ;;
   disconnected)
     run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-true}"
     rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-never}"
     auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-false}"
+    collection_overlays="${ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS:-false}"
     ;;
   *)
     echo "Invalid ANSIBLE_TOOLBOX_RUNTIME_MODE='${runtime_mode}' (use: connected|disconnected)." >&2
@@ -49,6 +51,7 @@ Environment:
   ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
   ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4)
   ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
+  ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=true|false  (default: true; false in disconnected mode)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
@@ -503,6 +506,7 @@ validate_rh_collections_mode "${rh_collections_mode}"
 validate_bool "ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT" "${rh_collections_strict}"
 validate_bool "RH_COLLECTIONS_USE" "${rh_collections_use}"
 validate_bool "ANSIBLE_TOOLBOX_RUN_EE_PRELOAD" "${run_ee_preload}"
+validate_bool "ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS" "${collection_overlays}"
 
 case "${nav_mode}" in
   stdout|interactive) ;;
@@ -569,6 +573,12 @@ if mount_requested_source "${ssh_agent_mount_requested}" find_ssh_agent_socket "
   ssh_agent_mounted=true
 fi
 
+if [[ "${collection_overlays}" == "true" ]]; then
+  collections_path="/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+else
+  collections_path="/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+fi
+
 container_args+=(
   -e "HOME=/runner"
   -e "ANSIBLE_HOME=/tmp/.ansible"
@@ -578,7 +588,7 @@ container_args+=(
   -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
   -e "ANSIBLE_LOCAL_TEMP=/tmp/.ansible/tmp"
   -e "ANSIBLE_REMOTE_TEMP=${ANSIBLE_REMOTE_TEMP:-~/.ansible/tmp}"
-  -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+  -e "ANSIBLE_COLLECTIONS_PATH=${collections_path}"
 )
 
 add_env_if_set VAULT_TOKEN
@@ -625,6 +635,7 @@ case "${subcommand}" in
       "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
       "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
       "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
+      "ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=${collection_overlays}"
     )
 
     if [[ -n "${auto_collections}" ]]; then
