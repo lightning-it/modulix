@@ -16,7 +16,19 @@
   gather_facts: true
 
   tasks:
-    - name: Stage AAP artifacts
+    - name: Prepare AAP prerequisites and artifacts
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_prepare
+        apply:
+          tags: [aap, aap_prepare, aap_deploy, aap_cac, artifacts]
+      tags:
+        - aap
+        - aap_prepare
+        - aap_deploy
+        - aap_cac
+        - artifacts
+
+    - name: Stage additional configured artifacts
       ansible.builtin.include_role:
         name: lit.supplementary.artifacts
         apply:
