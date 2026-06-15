@@ -26,6 +26,7 @@ This document defines the canonical execution contract for ModuLix automation re
 Supported wrapper options (environment variables):
 
 - `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker`
+- `ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected`
 - `ANSIBLE_TOOLBOX_IMAGE=<image:tag>`
 - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE=<image:tag>`
 - `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never`
@@ -41,6 +42,15 @@ Supported wrapper options (environment variables):
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS=./collections/requirements-rh.yml`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=./collections-dev`
 - `RH_COLLECTIONS_USE=true|false`
+
+`ANSIBLE_TOOLBOX_RUNTIME_MODE=disconnected` changes runtime defaults only:
+
+- `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=never`
+- `ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true`
+
+It does not select an application-specific EE image or artifact directory.
+Those values belong to the caller, inventory, or operator procedure.
 
 ## Required runtime inputs
 

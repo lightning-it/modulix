@@ -333,8 +333,6 @@ case "${subcommand}" in
     fi
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
     add_ee_volume_if_present "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
-    add_ee_volume_if_present "${AAP_ARTIFACT_DIR:-}" "${AAP_ARTIFACT_DIR:-}" dir
-    add_ee_volume_if_present "${AAP_BUNDLE_FILE:-}"
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
     fi

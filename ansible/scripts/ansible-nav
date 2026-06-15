@@ -6,18 +6,33 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
+runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
 image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4}"
 run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1}"
-run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
-rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
 rh_collections_strict="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT:-true}"
 rh_collections_requirements="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS:-${REPO_ROOT}/collections/requirements-rh.yml}"
 rh_collections_target="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
 rh_collections_use="${RH_COLLECTIONS_USE:-true}"
+case "${runtime_mode}" in
+  connected)
+    run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
+    rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
+    auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}"
+    ;;
+  disconnected)
+    run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-true}"
+    rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-never}"
+    auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-false}"
+    ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_RUNTIME_MODE='${runtime_mode}' (use: connected|disconnected)." >&2
+    exit 1
+    ;;
+esac
 
 inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-auto}"
 ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-auto}"
@@ -31,6 +46,7 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
+  ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
   ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4)
   ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
@@ -252,26 +268,6 @@ map_file_for_container() {
 
   container_args+=(-v "${original}:${target}:ro")
   mapped_file_for_container_result="${target}"
-}
-
-map_dir_for_container() {
-  local original="$1"
-  local target="$2"
-  local rewritten=""
-
-  rewritten="$(rewrite_host_path_for_container "${original}")"
-  if [[ "${rewritten}" != "${original}" ]]; then
-    mapped_dir_for_container_result="${rewritten}"
-    return 0
-  fi
-
-  if [[ -d "${original}" ]]; then
-    container_args+=(-v "${original}:${target}:ro")
-    mapped_dir_for_container_result="${target}"
-    return 0
-  fi
-
-  mapped_dir_for_container_result="${original}"
 }
 
 add_env_if_set() {
@@ -554,7 +550,6 @@ inventory_source=""
 mounted_source_result=""
 run_ee_tar=""
 mapped_file_for_container_result=""
-mapped_dir_for_container_result=""
 
 cleanup() {
   if [[ -n "${run_ee_tar}" ]]; then
@@ -595,17 +590,6 @@ if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
 
-if [[ -n "${AAP_BUNDLE_FILE:-}" ]]; then
-  map_file_for_container "${AAP_BUNDLE_FILE}" "/runner/artifacts/$(basename -- "${AAP_BUNDLE_FILE}")"
-  aap_bundle_file_in_container="${mapped_file_for_container_result}"
-  container_args+=(-e "AAP_BUNDLE_FILE=${aap_bundle_file_in_container}")
-fi
-
-if [[ -n "${AAP_ARTIFACT_DIR:-}" ]]; then
-  map_dir_for_container "${AAP_ARTIFACT_DIR}" "/runner/aap-artifacts"
-  container_args+=(-e "AAP_ARTIFACT_DIR=${mapped_dir_for_container_result}")
-fi
-
 for pass_var in \
   AUTOMATION_HUB_GALAXY_SERVER \
   AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED \
@@ -643,8 +627,8 @@ case "${subcommand}" in
       "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
     )
 
-    if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}" ]]; then
-      run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS}")
+    if [[ -n "${auto_collections}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${auto_collections}")
     fi
 
     add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS

@@ -19,8 +19,6 @@ ansible-navigator:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
         - ANSIBLE_REMOTE_TEMP
-        - AAP_BUNDLE_FILE
-        - AAP_ARTIFACT_DIR
         - VAULT_ADDR
         - VAULT_SKIP_VERIFY
         - VAULT_TOKEN

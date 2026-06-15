@@ -248,10 +248,14 @@ Wrapper behavior (`scripts/ansible-nav`):
   - inner EE container engine is fixed to `podman`.
   - run EE image:
     - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1`).
+    - `ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected` (default: `connected`).
 - For `exec`, when a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the toolbox container.
 - For AAP runs (`runbook path contains "aap"` or `--tags/-t` includes `aap`), wrapper runs
   `scripts/install-rh-collections` automatically before runbook execution when
   `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto` (default).
+- `ANSIBLE_TOOLBOX_RUNTIME_MODE=disconnected` sets offline-safe defaults:
+  `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`, `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=never`,
+  and `ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true`.
 
 #### In-container mode (`ansible-nav-local`)
 
