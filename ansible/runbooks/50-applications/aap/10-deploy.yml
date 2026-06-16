@@ -75,11 +75,30 @@
         - aap_deploy
         - dns
 
+    - name: Resolve expected AAP public DNS addresses from inventory
+      ansible.builtin.set_fact:
+        aap_public_dns_expected_addresses: >-
+          {{
+            (
+              net_ifaces
+              | default([], true)
+              | selectattr('role', 'equalto', 'uplink')
+              | map(attribute='ipv4')
+              | map('regex_replace', '/.*$', '')
+              | list
+            )
+            | default([], true)
+          }}
+      tags:
+        - aap
+        - aap_deploy
+        - dns
+
     - name: Validate AAP public DNS before AAP preparation
       ansible.builtin.command:
         argv:
           - getent
-          - hosts
+          - ahostsv4
           - "{{ aap_public_dns_precheck_hostname }}"
       register: aap_public_dns_precheck_getent
       changed_when: false
@@ -129,11 +148,21 @@
               | list
               | length
             ) > 0
+          - >-
+            (aap_public_dns_expected_addresses | length == 0)
+            or
+            (
+              aap_public_dns_precheck_usable_addresses
+              | intersect(aap_public_dns_expected_addresses)
+              | length
+            ) > 0
         fail_msg: >-
           AAP public hostname '{{ aap_public_dns_precheck_hostname }}' does not
-          resolve to a usable IPv4 target address from the managed host.
+          resolve to the expected IPv4 target address from the managed host.
           Resolved addresses:
           {{ aap_public_dns_precheck_addresses | default([]) | join(', ') | default('none', true) }}.
+          Expected addresses:
+          {{ aap_public_dns_expected_addresses | default([]) | join(', ') | default('none', true) }}.
           Fix DNS before running the AAP rollout.
         quiet: true
       tags:
