@@ -36,6 +36,31 @@
       tags:
         - always
 
+    - name: Validate AAP public DNS before AAP preparation
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_deploy
+        tasks_from: 08_validate_dns
+        apply:
+          tags: [aap, aap_deploy, dns]
+      when:
+        - aap_deploy_dns_precheck_enabled | default(true) | bool
+        - aap_deploy_run_installer | default(true) | bool
+      tags:
+        - aap
+        - aap_deploy
+        - dns
+
+    - name: Mark AAP public DNS precheck as completed
+      ansible.builtin.set_fact:
+        aap_deploy_dns_precheck_completed: true
+      when:
+        - aap_deploy_dns_precheck_enabled | default(true) | bool
+        - aap_deploy_run_installer | default(true) | bool
+      tags:
+        - aap
+        - aap_deploy
+        - dns
+
   tasks:
     - name: Prepare AAP prerequisites and artifacts
       ansible.builtin.include_role:
