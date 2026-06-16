@@ -13,7 +13,28 @@
 - name: Configure AAP hosts
   hosts: aaps
   become: true
-  gather_facts: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Bootstrap custom Ansible remote tmp when configured
+      ansible.builtin.include_role:
+        name: lit.foundational.ansible_remote_tmp
+        apply:
+          tags: [always]
+      vars:
+        ansible_remote_tmp_path: "{{ ansible_remote_tmp | default('', true) }}"
+        ansible_remote_tmp_validate_users:
+          - "{{ ansible_user | default('') }}"
+          - "{{ aap_deploy_install_user | default('aap') }}"
+      when:
+        - ansible_remote_tmp | default('', true) | trim | length > 0
+      tags:
+        - always
+
+    - name: Gather facts after Ansible remote tmp bootstrap
+      ansible.builtin.setup:
+      tags:
+        - always
 
   tasks:
     - name: Prepare AAP prerequisites and artifacts
