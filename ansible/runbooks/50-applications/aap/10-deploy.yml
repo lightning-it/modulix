@@ -13,29 +13,9 @@
 - name: Configure AAP hosts
   hosts: aaps
   become: true
-  gather_facts: false
+  gather_facts: true
 
   pre_tasks:
-    - name: Bootstrap custom Ansible remote tmp when configured
-      ansible.builtin.include_role:
-        name: lit.foundational.ansible_remote_tmp
-        apply:
-          tags: [always]
-      vars:
-        ansible_remote_tmp_path: "{{ ansible_remote_tmp | default('', true) }}"
-        ansible_remote_tmp_validate_users:
-          - "{{ ansible_user | default('') }}"
-          - "{{ aap_deploy_install_user | default('aap') }}"
-      when:
-        - ansible_remote_tmp | default('', true) | trim | length > 0
-      tags:
-        - always
-
-    - name: Gather facts after Ansible remote tmp bootstrap
-      ansible.builtin.setup:
-      tags:
-        - always
-
     - name: Resolve AAP public DNS precheck hostname
       ansible.builtin.set_fact:
         aap_public_dns_precheck_hostname: >-
@@ -171,6 +151,36 @@
         - dns
 
   tasks:
+    - name: Register RHEL host with RHSM
+      ansible.builtin.include_role:
+        name: lit.rhel.rhsm
+        apply:
+          tags: [aap, aap_deploy, rhsm]
+      tags:
+        - aap
+        - aap_deploy
+        - rhsm
+
+    - name: Enable RHEL repositories for AAP host
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [aap, aap_deploy, repos]
+      tags:
+        - aap
+        - aap_deploy
+        - repos
+
+    - name: Prepare Podman on AAP host
+      ansible.builtin.include_role:
+        name: lit.rhel.podman
+        apply:
+          tags: [aap, aap_deploy, podman]
+      tags:
+        - aap
+        - aap_deploy
+        - podman
+
     - name: Prepare AAP prerequisites and artifacts
       ansible.builtin.include_role:
         name: lit.supplementary.aap_prepare

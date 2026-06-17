@@ -19,6 +19,6 @@ collections:
   - name: lit.foundational
     version: "1.19.0"
   - name: lit.rhel
-    version: "1.16.3"
+    version: "1.17.0"
   - name: lit.ubuntu
     version: "0.1.0"
