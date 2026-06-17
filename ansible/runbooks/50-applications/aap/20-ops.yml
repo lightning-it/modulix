@@ -1,0 +1,28 @@
+---
+# -----------------------------------------------------------------------------
+# Ansible Automation Platform (AAP) day-2 operations
+#
+# Purpose:
+# - Run explicit AAP operational actions such as status, restart, upgrade, or
+#   hub password synchronization.
+# -----------------------------------------------------------------------------
+
+- name: Operate AAP hosts
+  hosts: aaps
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Prepare AAP shared context
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap
+        apply:
+          tags: [aap, aap_ops]
+      tags: [aap, aap_ops]
+
+    - name: Run AAP day-2 operation
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_ops
+        apply:
+          tags: [aap, aap_ops]
+      tags: [aap, aap_ops]

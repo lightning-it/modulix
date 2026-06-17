@@ -3,6 +3,11 @@
 AAP runbooks deploy and operate Red Hat Ansible Automation Platform from
 inventory-owned values.
 
+## Runbooks
+
+- `10-deploy.yml`: prepare and deploy AAP, then apply configuration-as-code.
+- `20-ops.yml`: run explicit day-2 AAP operations with `aap_ops_action`.
+
 ## Artifact Staging
 
 `10-deploy.yml` stages AAP artifacts with `lit.supplementary.aap_prepare`
@@ -13,6 +18,10 @@ copied from a controller-local path.
 
 The deployment role then consumes the staged bundle through
 `aap_deploy_setup_archive_path`.
+
+Generic artifact staging with `lit.supplementary.artifacts` remains available
+for non-AAP artifacts, but AAP bundle and manifest handling belongs in
+`lit.supplementary.aap_prepare`.
 
 Example inventory shape only. Put real values and copy-paste rollout
 instructions in the private operations repository for the environment.

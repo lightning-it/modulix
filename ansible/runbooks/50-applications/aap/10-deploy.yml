@@ -16,9 +16,9 @@
   gather_facts: true
 
   pre_tasks:
-    - name: Resolve AAP public DNS precheck hostname
+    - name: Resolve AAP gateway URL precheck hostname
       ansible.builtin.set_fact:
-        aap_public_dns_precheck_hostname: >-
+        aap_gateway_url_precheck_hostname: >-
           {{
             (
               aap_deploy_gateway_main_url
@@ -40,47 +40,28 @@
         - aap_deploy
         - dns
 
-    - name: Validate AAP public DNS precheck hostname
+    - name: Validate AAP gateway URL precheck hostname
       ansible.builtin.assert:
         that:
-          - aap_public_dns_precheck_hostname | trim | length > 0
-          - aap_public_dns_precheck_hostname is not match('^https?://')
+          - aap_gateway_url_precheck_hostname | trim | length > 0
+          - aap_gateway_url_precheck_hostname is not match('^https?://')
         fail_msg: >-
-          AAP public DNS precheck requires a plain hostname. Set
-          aap_deploy_gateway_main_url or aap_cac_gateway_hostname to the public
-          AAP FQDN before running the AAP rollout.
+          AAP gateway URL precheck requires a resolvable hostname. Set
+          aap_deploy_gateway_main_url or aap_cac_gateway_hostname to the AAP
+          gateway FQDN before running the AAP rollout.
         quiet: true
       tags:
         - aap
         - aap_deploy
         - dns
 
-    - name: Resolve expected AAP public DNS addresses from inventory
-      ansible.builtin.set_fact:
-        aap_public_dns_expected_addresses: >-
-          {{
-            (
-              net_ifaces
-              | default([], true)
-              | selectattr('role', 'equalto', 'uplink')
-              | map(attribute='ipv4')
-              | map('regex_replace', '/.*$', '')
-              | list
-            )
-            | default([], true)
-          }}
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Validate AAP public DNS before AAP preparation
+    - name: Resolve AAP gateway URL before AAP preparation
       ansible.builtin.command:
         argv:
           - getent
           - ahostsv4
-          - "{{ aap_public_dns_precheck_hostname }}"
-      register: aap_public_dns_precheck_getent
+          - "{{ aap_gateway_url_precheck_hostname }}"
+      register: aap_gateway_url_precheck_getent
       changed_when: false
       failed_when: false
       tags:
@@ -88,11 +69,11 @@
         - aap_deploy
         - dns
 
-    - name: Build AAP public DNS address list
+    - name: Build AAP gateway URL address lists
       ansible.builtin.set_fact:
-        aap_public_dns_precheck_addresses: >-
+        aap_gateway_url_precheck_addresses: >-
           {{
-            aap_public_dns_precheck_getent.stdout_lines
+            aap_gateway_url_precheck_getent.stdout_lines
             | default([], true)
             | map('split')
             | map(attribute=0)
@@ -100,14 +81,11 @@
             | unique
             | list
           }}
-        aap_public_dns_precheck_usable_addresses: >-
+        aap_gateway_url_local_addresses: >-
           {{
-            aap_public_dns_precheck_getent.stdout_lines
+            ansible_all_ipv4_addresses
             | default([], true)
-            | map('split')
-            | map(attribute=0)
             | reject('equalto', '')
-            | reject('match', '^(fe80:|127\.|::1$)')
             | unique
             | list
           }}
@@ -116,34 +94,24 @@
         - aap_deploy
         - dns
 
-    - name: Require usable AAP public DNS before AAP preparation
+    - name: Require AAP gateway URL to resolve to this host
       ansible.builtin.assert:
         that:
-          - aap_public_dns_precheck_addresses | length > 0
-          - aap_public_dns_precheck_usable_addresses | length > 0
+          - aap_gateway_url_precheck_addresses | length > 0
+          - aap_gateway_url_local_addresses | length > 0
           - >-
             (
-              aap_public_dns_precheck_usable_addresses
-              | select('match', '^[0-9]+\.')
-              | list
-              | length
-            ) > 0
-          - >-
-            (aap_public_dns_expected_addresses | length == 0)
-            or
-            (
-              aap_public_dns_precheck_usable_addresses
-              | intersect(aap_public_dns_expected_addresses)
+              aap_gateway_url_precheck_addresses
+              | intersect(aap_gateway_url_local_addresses)
               | length
             ) > 0
         fail_msg: >-
-          AAP public hostname '{{ aap_public_dns_precheck_hostname }}' does not
-          resolve to the expected IPv4 target address from the managed host.
-          Resolved addresses:
-          {{ aap_public_dns_precheck_addresses | default([]) | join(', ') | default('none', true) }}.
-          Expected addresses:
-          {{ aap_public_dns_expected_addresses | default([]) | join(', ') | default('none', true) }}.
-          Fix DNS before running the AAP rollout.
+          AAP gateway hostname '{{ aap_gateway_url_precheck_hostname }}' must
+          resolve to one of this host's IPv4 addresses before rollout.
+          Resolved:
+          {{ aap_gateway_url_precheck_addresses | default([]) | join(', ') | default('none', true) }}.
+          Local:
+          {{ aap_gateway_url_local_addresses | default([]) | join(', ') | default('none', true) }}.
         quiet: true
       tags:
         - aap
@@ -186,9 +154,13 @@
               {{
                 aap_deploy_install_user_home
                 | default(
-                    (aap_deploy_install_dir | default('/opt/aap', true))
-                    ~ '/'
-                    ~ (aap_deploy_install_user | default('svc_aap', true)),
+                    (
+                      '/appl/home/' ~ (aap_deploy_install_user | default('svc_aap', true))
+                      if (aap_deploy_install_dir | default('/opt/aap', true) | string).startswith('/appl/')
+                      else (
+                        aap_deploy_install_dir | default('/opt/aap', true) | regex_replace('/+$', '')
+                      ) ~ '/' ~ (aap_deploy_install_user | default('svc_aap', true))
+                    ),
                     true
                   )
               }}
@@ -220,17 +192,6 @@
         - aap_prepare
         - aap_deploy
         - aap_cac
-        - artifacts
-
-    - name: Stage additional configured artifacts
-      ansible.builtin.include_role:
-        name: lit.supplementary.artifacts
-        apply:
-          tags: [aap, aap_deploy, artifacts]
-      when: artifacts_items | default([]) | length > 0
-      tags:
-        - aap
-        - aap_deploy
         - artifacts
 
     - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
@@ -291,8 +252,8 @@
       ansible.builtin.include_role:
         name: lit.supplementary.aap
         apply:
-          tags: [aap, aap_deploy, aap_cac, aap_ops]
-      tags: [aap, aap_deploy, aap_cac, aap_ops]
+          tags: [aap, aap_deploy, aap_cac]
+      tags: [aap, aap_deploy, aap_cac]
 
     - name: Deploy AAP
       ansible.builtin.include_role:
@@ -353,11 +314,3 @@
         - roles
         - schedules
         - ee_builder
-
-    # Day-2 operations (default action is none; enables `-t aap_ops -e aap_ops_action=...`)
-    - name: AAP ops
-      ansible.builtin.include_role:
-        name: lit.supplementary.aap_ops
-        apply:
-          tags: [aap, aap_ops]
-      tags: [aap, aap_ops]
