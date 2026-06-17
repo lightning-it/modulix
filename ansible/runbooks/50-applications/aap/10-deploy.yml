@@ -3,196 +3,111 @@
 # Ansible Automation Platform (AAP) hosts
 #
 # Purpose:
-# - Enable required repos
-# - Apply host firewall policy when provided
-# - Install AAP packages
+# - Optionally prepare host OS prerequisites
+# - Stage AAP artifacts
+# - Install AAP with the containerized installer
 # - Apply AAP configuration-as-code objects
 # - Expose day-2 operations (restart/status/upgrade/sync_hub_password)
 # -----------------------------------------------------------------------------
 
-- name: Configure AAP hosts
+- name: Prepare optional AAP host OS prerequisites
   hosts: aaps
   become: true
-  gather_facts: false
+  gather_facts: true
 
-  pre_tasks:
-    - name: Bootstrap custom Ansible remote tmp when configured
+  tasks:
+    - name: Register RHEL host with RHSM
       ansible.builtin.include_role:
-        name: lit.foundational.ansible_remote_tmp
+        name: lit.rhel.rhsm
         apply:
-          tags: [always]
-      vars:
-        ansible_remote_tmp_path: "{{ ansible_remote_tmp | default('', true) }}"
-        ansible_remote_tmp_validate_users:
-          - "{{ ansible_user | default('') }}"
-          - "{{ aap_deploy_install_user | default('aap') }}"
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, rhsm]
+      tags:
+        - aap
+        - aap_deploy
+        - aap_os_prep
+        - os_prep
+        - rhsm
       when:
-        - ansible_remote_tmp | default('', true) | trim | length > 0
-      tags:
-        - always
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - >-
+          aap_runbook_manage_rhsm
+          | default((rhsm_method | default('none')) != 'none')
+          | bool
 
-    - name: Gather facts after Ansible remote tmp bootstrap
-      ansible.builtin.setup:
-      tags:
-        - always
-
-    - name: Resolve AAP public DNS precheck hostname
-      ansible.builtin.set_fact:
-        aap_public_dns_precheck_hostname: >-
-          {{
-            (
-              aap_deploy_gateway_main_url
-              | default('', true)
-              | urlsplit('hostname')
-            )
-            if (aap_deploy_gateway_main_url | default('', true) | trim | length > 0)
-            else
-            (
-              aap_cac_gateway_hostname
-              | default('', true)
-              | regex_replace('^https?://', '')
-              | regex_replace('/.*$', '')
-              | regex_replace(':.*$', '')
-            )
-          }}
+    - name: Enable RHEL repositories for AAP host
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, repos]
       tags:
         - aap
         - aap_deploy
-        - dns
+        - aap_os_prep
+        - os_prep
+        - repos
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_repos | default(true) | bool
 
-    - name: Validate AAP public DNS precheck hostname
-      ansible.builtin.assert:
-        that:
-          - aap_public_dns_precheck_hostname | trim | length > 0
-          - aap_public_dns_precheck_hostname is not match('^https?://')
-        fail_msg: >-
-          AAP public DNS precheck requires a plain hostname. Set
-          aap_deploy_gateway_main_url or aap_cac_gateway_hostname to the public
-          AAP FQDN before running the AAP rollout.
-        quiet: true
+    - name: Prepare AAP install user on RHEL host
+      ansible.builtin.include_role:
+        name: lit.rhel.users
+        apply:
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, users]
+      vars:
+        users_accounts:
+          - name: "{{ aap_deploy_install_user }}"
+            gid: "{{ aap_deploy_install_user }}"
+            groups:
+              - "{{ aap_deploy_install_user }}"
+              - wheel
+            home: "{{ aap_deploy_install_user_home }}"
+            shell: "{{ aap_deploy_install_user_shell }}"
+            create_home: true
+            passwordless_sudo: true
       tags:
         - aap
         - aap_deploy
-        - dns
+        - aap_os_prep
+        - os_prep
+        - users
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_install_user | default(true) | bool
 
-    - name: Resolve expected AAP public DNS addresses from inventory
-      ansible.builtin.set_fact:
-        aap_public_dns_expected_addresses: >-
-          {{
-            (
-              net_ifaces
-              | default([], true)
-              | selectattr('role', 'equalto', 'uplink')
-              | map(attribute='ipv4')
-              | map('regex_replace', '/.*$', '')
-              | list
-            )
-            | default([], true)
-          }}
+    - name: Prepare Podman on AAP host
+      ansible.builtin.include_role:
+        name: lit.rhel.podman
+        apply:
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, podman]
       tags:
         - aap
         - aap_deploy
-        - dns
+        - aap_os_prep
+        - os_prep
+        - podman
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_podman | default(true) | bool
 
-    - name: Validate AAP public DNS before AAP preparation
-      ansible.builtin.command:
-        argv:
-          - getent
-          - ahostsv4
-          - "{{ aap_public_dns_precheck_hostname }}"
-      register: aap_public_dns_precheck_getent
-      changed_when: false
-      failed_when: false
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Build AAP public DNS address list
-      ansible.builtin.set_fact:
-        aap_public_dns_precheck_addresses: >-
-          {{
-            aap_public_dns_precheck_getent.stdout_lines
-            | default([], true)
-            | map('split')
-            | map(attribute=0)
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-        aap_public_dns_precheck_usable_addresses: >-
-          {{
-            aap_public_dns_precheck_getent.stdout_lines
-            | default([], true)
-            | map('split')
-            | map(attribute=0)
-            | reject('equalto', '')
-            | reject('match', '^(fe80:|127\.|::1$)')
-            | unique
-            | list
-          }}
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Require usable AAP public DNS before AAP preparation
-      ansible.builtin.assert:
-        that:
-          - aap_public_dns_precheck_addresses | length > 0
-          - aap_public_dns_precheck_usable_addresses | length > 0
-          - >-
-            (
-              aap_public_dns_precheck_usable_addresses
-              | select('match', '^[0-9]+\.')
-              | list
-              | length
-            ) > 0
-          - >-
-            (aap_public_dns_expected_addresses | length == 0)
-            or
-            (
-              aap_public_dns_precheck_usable_addresses
-              | intersect(aap_public_dns_expected_addresses)
-              | length
-            ) > 0
-        fail_msg: >-
-          AAP public hostname '{{ aap_public_dns_precheck_hostname }}' does not
-          resolve to the expected IPv4 target address from the managed host.
-          Resolved addresses:
-          {{ aap_public_dns_precheck_addresses | default([]) | join(', ') | default('none', true) }}.
-          Expected addresses:
-          {{ aap_public_dns_expected_addresses | default([]) | join(', ') | default('none', true) }}.
-          Fix DNS before running the AAP rollout.
-        quiet: true
-      tags:
-        - aap
-        - aap_deploy
-        - dns
+- name: Deploy and configure AAP
+  hosts: aaps
+  become: true
+  gather_facts: true
 
   tasks:
     - name: Prepare AAP prerequisites and artifacts
       ansible.builtin.include_role:
         name: lit.supplementary.aap_prepare
         apply:
-          tags: [aap, aap_prepare, aap_deploy, aap_cac, artifacts]
+          tags: [aap, aap_prepare, aap_deploy, aap_cac, artifacts, dns]
       tags:
         - aap
         - aap_prepare
         - aap_deploy
         - aap_cac
         - artifacts
-
-    - name: Stage additional configured artifacts
-      ansible.builtin.include_role:
-        name: lit.supplementary.artifacts
-        apply:
-          tags: [aap, aap_deploy, artifacts]
-      when: artifacts_items | default([]) | length > 0
-      tags:
-        - aap
-        - aap_deploy
-        - artifacts
+        - dns
 
     - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
       ansible.builtin.import_tasks: tasks/aap_seed_passwords_vault.yml
@@ -252,8 +167,8 @@
       ansible.builtin.include_role:
         name: lit.supplementary.aap
         apply:
-          tags: [aap, aap_deploy, aap_cac, aap_ops]
-      tags: [aap, aap_deploy, aap_cac, aap_ops]
+          tags: [aap, aap_deploy, aap_cac]
+      tags: [aap, aap_deploy, aap_cac]
 
     - name: Deploy AAP
       ansible.builtin.include_role:
@@ -314,11 +229,3 @@
         - roles
         - schedules
         - ee_builder
-
-    # Day-2 operations (default action is none; enables `-t aap_ops -e aap_ops_action=...`)
-    - name: AAP ops
-      ansible.builtin.include_role:
-        name: lit.supplementary.aap_ops
-        apply:
-          tags: [aap, aap_ops]
-      tags: [aap, aap_ops]

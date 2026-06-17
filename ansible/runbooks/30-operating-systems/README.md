@@ -6,6 +6,7 @@ application use.
 Use this area for:
 
 - RHEL and Ubuntu base configuration
+- Ansible runtime prerequisites such as custom `ansible_remote_tmp` paths
 - OS registration and repository setup
 - package baselines
 - OS hardening

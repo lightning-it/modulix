@@ -22,13 +22,6 @@ elif [[ "${REPO_ROOT}" == "/opt/modulix/ansible" ]]; then
 else
   auto_collections="true"
 fi
-if [[ -n "${ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS+x}" ]]; then
-  collection_overlays="${ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS}"
-elif [[ "${REPO_ROOT}" == "/opt/modulix/ansible" ]]; then
-  collection_overlays="false"
-else
-  collection_overlays="true"
-fi
 default_collections_requirements="${REPO_ROOT}/collections/requirements.yml"
 default_collections_requirements_rh="${REPO_ROOT}/collections/requirements-rh.yml"
 collections_requirements="${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}"
@@ -57,7 +50,6 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
-  ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=true|false   (default: false in /opt/modulix/ansible RPM mode, true otherwise)
   ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
   ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
   ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
@@ -113,7 +105,6 @@ validate_choice "ANSIBLE_TOOLBOX_NAV_EE_ENABLED" "${nav_ee_enabled}" "true false
 validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_AUTH" "${nav_skip_auth}" "true false"
 validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK" "${nav_skip_cert_check}" "true false"
 validate_choice "ANSIBLE_TOOLBOX_AUTO_COLLECTIONS" "${auto_collections}" "auto true false"
-validate_choice "ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS" "${collection_overlays}" "true false"
 validate_choice "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE" "${nav_container_engine}" "auto podman docker"
 
 if [[ -n "${nav_pull_policy}" ]]; then
@@ -281,15 +272,9 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
 export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
-legacy_collections_path_default="/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections"
 collections_path_without_overlays="${REPO_ROOT}/collections:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
-collections_path_with_overlays="${REPO_ROOT}/collections-dev:${collections_path_without_overlays}"
-if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" || "${ANSIBLE_COLLECTIONS_PATH}" == "${legacy_collections_path_default}" ]]; then
-  if [[ "${collection_overlays}" == "true" ]]; then
-    export ANSIBLE_COLLECTIONS_PATH="${collections_path_with_overlays}"
-  else
-    export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
-  fi
+if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
+  export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
 else
   export ANSIBLE_COLLECTIONS_PATH
 fi
