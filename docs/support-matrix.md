@@ -31,6 +31,6 @@ This matrix defines supported execution modes for ModuLix automation.
 - RH-certified/AAP profile is selected automatically when
   `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`
   is present.
-- Local overlays for development: `ansible/scripts/install-local-collections`
-  into `ansible/collections-dev`.
-- Effective search precedence: `collections-dev` -> `collections` -> EE/system paths.
+- Local collection development: `ansible/scripts/install-local-collections`
+  installs source-built collections into `ansible/collections`.
+- Effective search precedence: `collections` -> EE/system paths.

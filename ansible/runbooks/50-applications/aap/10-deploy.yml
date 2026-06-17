@@ -171,6 +171,35 @@
         - aap_deploy
         - repos
 
+    - name: Prepare AAP install user on RHEL host
+      ansible.builtin.include_role:
+        name: lit.rhel.users
+        apply:
+          tags: [aap, aap_deploy, users]
+      vars:
+        users_accounts:
+          - name: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+            gid: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+            groups:
+              - wheel
+            home: >-
+              {{
+                aap_deploy_install_user_home
+                | default(
+                    (aap_deploy_install_dir | default('/opt/aap', true))
+                    ~ '/'
+                    ~ (aap_deploy_install_user | default('svc_aap', true)),
+                    true
+                  )
+              }}
+            shell: "{{ aap_deploy_install_user_shell | default('/bin/bash', true) }}"
+            create_home: true
+            passwordless_sudo: true
+      tags:
+        - aap
+        - aap_deploy
+        - users
+
     - name: Prepare Podman on AAP host
       ansible.builtin.include_role:
         name: lit.rhel.podman

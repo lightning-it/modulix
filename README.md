@@ -34,7 +34,7 @@ repositories. Sanitized inventory examples live in the public
 
 When developing local Ansible collections from sibling repos (for example
 `ansible-collection-supplementary`, `ansible-collection-foundational`), install
-them as local overlays before running runbooks:
+them into the workspace collection path before running runbooks:
 
 ```bash
 cd ansible
@@ -44,8 +44,9 @@ cd ansible
 What this does:
 
 - Builds local `ansible-collection-*` sources into tarballs.
-- Installs them into `ansible/collections-dev`.
-- Ensures local overlays take precedence over `ansible/collections` during runs.
+- Installs them into `ansible/collections`.
+- Keeps one active workspace collection tree, so stale generated copies do not
+  shadow current source work.
 
 ## Operator Documentation
 

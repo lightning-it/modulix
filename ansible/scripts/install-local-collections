@@ -6,7 +6,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 SOURCE_ROOT="${SOURCE_ROOT:-${SOURCE_ROOT_DEFAULT}}"
-TARGET_PATH="${TARGET_PATH:-${REPO_ROOT}/collections-dev}"
+TARGET_PATH="${TARGET_PATH:-${REPO_ROOT}/collections}"
 ANSIBLE_NAV="${REPO_ROOT}/scripts/ansible-nav"
 INSTALL_DEPS="${INSTALL_DEPS:-true}"
 REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements.yml}"
@@ -51,7 +51,7 @@ usage() {
 Usage:
   scripts/install-local-collections [options] [collection ...]
 
-Build local ansible collection tarballs and install them into collections-dev
+Build local ansible collection tarballs and install them into collections
 without interactive prompts.
 
 Collection arguments:
@@ -65,7 +65,7 @@ Options:
                            - <name> (direct repo dirs with galaxy.yml)
                          (default: ../../ from modulix/ansible)
   --target-path <path>   Install path for collections
-                         (default: ./collections-dev)
+                         (default: ./collections)
   --requirements-file <path>
                          Optional workspace requirements overlay file.
                          Local lit.* entries are ignored by this script.

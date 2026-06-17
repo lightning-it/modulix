@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 requirements_file="${RH_COLLECTIONS_REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements-rh.yml}"
-target_path="${RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
+target_path="${RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections}"
 strict="${RH_COLLECTIONS_STRICT:-true}"
 ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-}"
 ah_server_published="${AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED:-https://console.redhat.com/api/automation-hub/content/published/}"

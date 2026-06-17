@@ -14,8 +14,8 @@ This document defines the canonical execution contract for ModuLix automation re
 - Runs inside toolbox container image:
   - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.8.4`
 - `ansible-navigator run` is always executed with `--ee true`.
-- Connected runs resolve collections from `ANSIBLE_COLLECTIONS_PATH` with local
-  project overlays first.
+- Connected runs resolve collections from `ANSIBLE_COLLECTIONS_PATH` with the
+  project collection path first.
 - `ansible/scripts/ansible-nav-local run` bootstraps collections by default
   (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
 - Default requirements profile: `ansible/collections/requirements.yml`.
@@ -40,17 +40,15 @@ Supported wrapper options (environment variables):
 - `ANSIBLE_TOOLBOX_MOUNT_SSH=auto|true|false`
 - `ANSIBLE_TOOLBOX_SSH_SOURCE=/path/to/.ssh`
 - `ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT=auto|true|false`
-- `ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=true|false`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto|always|never`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT=true|false`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS=./collections/requirements-rh.yml`
-- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=./collections-dev`
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=./collections`
 - `RH_COLLECTIONS_USE=true|false`
 
 `ANSIBLE_TOOLBOX_RUNTIME_MODE=disconnected` changes runtime defaults only:
 
 - `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`
-- `ANSIBLE_TOOLBOX_COLLECTION_OVERLAYS=false`
 - `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=never`
 - `ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true`
 
