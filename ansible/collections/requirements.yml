@@ -17,7 +17,7 @@ collections:
   - name: lit.supplementary
     version: "1.30.0"
   - name: lit.foundational
-    version: "1.19.0"
+    version: "1.20.0"
   - name: lit.rhel
     version: "1.16.3"
   - name: lit.ubuntu
