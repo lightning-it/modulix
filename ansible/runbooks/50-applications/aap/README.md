@@ -8,6 +8,30 @@ inventory-owned values.
 - `10-deploy.yml`: prepare and deploy AAP, then apply configuration-as-code.
 - `20-ops.yml`: run explicit day-2 AAP operations with `aap_ops_action`.
 
+## OS Preparation Boundary
+
+`10-deploy.yml` has two plays:
+
+- optional AAP host OS preparation
+- AAP artifact staging, deployment, and configuration-as-code
+
+The OS preparation play is for lab and self-managed hosts. Customer-owned
+baseline, Satellite, repository, user, or Podman preparation can disable it
+from inventory:
+
+```yaml
+aap_runbook_os_prep_enabled: false
+```
+
+Each OS preparation piece can also be controlled separately:
+
+```yaml
+aap_runbook_manage_rhsm: false
+aap_runbook_manage_repos: false
+aap_runbook_manage_install_user: false
+aap_runbook_manage_podman: false
+```
+
 ## Artifact Staging
 
 `10-deploy.yml` stages AAP artifacts with `lit.supplementary.aap_prepare`

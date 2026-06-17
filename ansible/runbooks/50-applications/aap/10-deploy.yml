@@ -3,196 +3,111 @@
 # Ansible Automation Platform (AAP) hosts
 #
 # Purpose:
-# - Enable required repos
-# - Apply host firewall policy when provided
-# - Install AAP packages
+# - Optionally prepare host OS prerequisites
+# - Stage AAP artifacts
+# - Install AAP with the containerized installer
 # - Apply AAP configuration-as-code objects
 # - Expose day-2 operations (restart/status/upgrade/sync_hub_password)
 # -----------------------------------------------------------------------------
 
-- name: Configure AAP hosts
+- name: Prepare optional AAP host OS prerequisites
   hosts: aaps
   become: true
   gather_facts: true
-
-  pre_tasks:
-    - name: Resolve AAP gateway URL precheck hostname
-      ansible.builtin.set_fact:
-        aap_gateway_url_precheck_hostname: >-
-          {{
-            (
-              aap_deploy_gateway_main_url
-              | default('', true)
-              | urlsplit('hostname')
-            )
-            if (aap_deploy_gateway_main_url | default('', true) | trim | length > 0)
-            else
-            (
-              aap_cac_gateway_hostname
-              | default('', true)
-              | regex_replace('^https?://', '')
-              | regex_replace('/.*$', '')
-              | regex_replace(':.*$', '')
-            )
-          }}
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Validate AAP gateway URL precheck hostname
-      ansible.builtin.assert:
-        that:
-          - aap_gateway_url_precheck_hostname | trim | length > 0
-          - aap_gateway_url_precheck_hostname is not match('^https?://')
-        fail_msg: >-
-          AAP gateway URL precheck requires a resolvable hostname. Set
-          aap_deploy_gateway_main_url or aap_cac_gateway_hostname to the AAP
-          gateway FQDN before running the AAP rollout.
-        quiet: true
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Resolve AAP gateway URL before AAP preparation
-      ansible.builtin.command:
-        argv:
-          - getent
-          - ahostsv4
-          - "{{ aap_gateway_url_precheck_hostname }}"
-      register: aap_gateway_url_precheck_getent
-      changed_when: false
-      failed_when: false
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Build AAP gateway URL address lists
-      ansible.builtin.set_fact:
-        aap_gateway_url_precheck_addresses: >-
-          {{
-            aap_gateway_url_precheck_getent.stdout_lines
-            | default([], true)
-            | map('split')
-            | map(attribute=0)
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-        aap_gateway_url_local_addresses: >-
-          {{
-            ansible_all_ipv4_addresses
-            | default([], true)
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-      tags:
-        - aap
-        - aap_deploy
-        - dns
-
-    - name: Require AAP gateway URL to resolve to this host
-      ansible.builtin.assert:
-        that:
-          - aap_gateway_url_precheck_addresses | length > 0
-          - aap_gateway_url_local_addresses | length > 0
-          - >-
-            (
-              aap_gateway_url_precheck_addresses
-              | intersect(aap_gateway_url_local_addresses)
-              | length
-            ) > 0
-        fail_msg: >-
-          AAP gateway hostname '{{ aap_gateway_url_precheck_hostname }}' must
-          resolve to one of this host's IPv4 addresses before rollout.
-          Resolved:
-          {{ aap_gateway_url_precheck_addresses | default([]) | join(', ') | default('none', true) }}.
-          Local:
-          {{ aap_gateway_url_local_addresses | default([]) | join(', ') | default('none', true) }}.
-        quiet: true
-      tags:
-        - aap
-        - aap_deploy
-        - dns
 
   tasks:
     - name: Register RHEL host with RHSM
       ansible.builtin.include_role:
         name: lit.rhel.rhsm
         apply:
-          tags: [aap, aap_deploy, rhsm]
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, rhsm]
       tags:
         - aap
         - aap_deploy
+        - aap_os_prep
+        - os_prep
         - rhsm
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - >-
+          aap_runbook_manage_rhsm
+          | default((rhsm_method | default('none')) != 'none')
+          | bool
 
     - name: Enable RHEL repositories for AAP host
       ansible.builtin.include_role:
         name: lit.rhel.repos
         apply:
-          tags: [aap, aap_deploy, repos]
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, repos]
       tags:
         - aap
         - aap_deploy
+        - aap_os_prep
+        - os_prep
         - repos
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_repos | default(true) | bool
 
     - name: Prepare AAP install user on RHEL host
       ansible.builtin.include_role:
         name: lit.rhel.users
         apply:
-          tags: [aap, aap_deploy, users]
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, users]
       vars:
         users_accounts:
-          - name: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
-            gid: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+          - name: "{{ aap_deploy_install_user }}"
+            gid: "{{ aap_deploy_install_user }}"
             groups:
+              - "{{ aap_deploy_install_user }}"
               - wheel
-            home: >-
-              {{
-                aap_deploy_install_user_home
-                | default(
-                    (
-                      '/appl/home/' ~ (aap_deploy_install_user | default('svc_aap', true))
-                      if (aap_deploy_install_dir | default('/opt/aap', true) | string).startswith('/appl/')
-                      else (
-                        aap_deploy_install_dir | default('/opt/aap', true) | regex_replace('/+$', '')
-                      ) ~ '/' ~ (aap_deploy_install_user | default('svc_aap', true))
-                    ),
-                    true
-                  )
-              }}
-            shell: "{{ aap_deploy_install_user_shell | default('/bin/bash', true) }}"
+            home: "{{ aap_deploy_install_user_home }}"
+            shell: "{{ aap_deploy_install_user_shell }}"
             create_home: true
             passwordless_sudo: true
       tags:
         - aap
         - aap_deploy
+        - aap_os_prep
+        - os_prep
         - users
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_install_user | default(true) | bool
 
     - name: Prepare Podman on AAP host
       ansible.builtin.include_role:
         name: lit.rhel.podman
         apply:
-          tags: [aap, aap_deploy, podman]
+          tags: [aap, aap_deploy, aap_os_prep, os_prep, podman]
       tags:
         - aap
         - aap_deploy
+        - aap_os_prep
+        - os_prep
         - podman
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_podman | default(true) | bool
 
+- name: Deploy and configure AAP
+  hosts: aaps
+  become: true
+  gather_facts: true
+
+  tasks:
     - name: Prepare AAP prerequisites and artifacts
       ansible.builtin.include_role:
         name: lit.supplementary.aap_prepare
         apply:
-          tags: [aap, aap_prepare, aap_deploy, aap_cac, artifacts]
+          tags: [aap, aap_prepare, aap_deploy, aap_cac, artifacts, dns]
       tags:
         - aap
         - aap_prepare
         - aap_deploy
         - aap_cac
         - artifacts
+        - dns
 
     - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
       ansible.builtin.import_tasks: tasks/aap_seed_passwords_vault.yml
