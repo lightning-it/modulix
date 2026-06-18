@@ -1,0 +1,22 @@
+---
+- name: Bootstrap vSphere Linux templates through VMware Tools
+  hosts: all
+  connection: local
+  gather_facts: false
+  serial: 1
+
+  pre_tasks:
+    - name: Require --limit
+      ansible.builtin.fail:
+        msg: "This runbook cannot be run with no --limit. Use --limit rhel-10-minimal or --limit template-ubuntu."
+      when: ansible_limit is not defined
+      run_once: true
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing."
+      when: ansible_limit is defined
+      run_once: true
+
+  roles:
+    - role: lit.foundational.vmware_vsphere_guest_bootstrap
