@@ -49,6 +49,21 @@
         - aap_runbook_os_prep_enabled | default(true) | bool
         - aap_runbook_manage_repos | default(true) | bool
 
+    - name: Install AAP host prerequisite packages
+      ansible.builtin.package:
+        name: "{{ aap_runbook_host_packages | default(['acl', 'ansible-core', 'rsync']) }}"
+        state: present
+      tags:
+        - aap
+        - aap_deploy
+        - aap_os_prep
+        - os_prep
+        - packages
+      when:
+        - aap_runbook_os_prep_enabled | default(true) | bool
+        - aap_runbook_manage_host_packages | default(true) | bool
+        - (aap_runbook_host_packages | default(['acl', 'ansible-core', 'rsync'])) | length > 0
+
     - name: Prepare AAP install user on RHEL host
       ansible.builtin.include_role:
         name: lit.rhel.users
