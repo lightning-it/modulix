@@ -8,7 +8,7 @@
   pre_tasks:
     - name: Require --limit
       ansible.builtin.fail:
-        msg: "This runbook cannot be run with no --limit. Use --limit rhel-10-minimal or --limit template-ubuntu."
+        msg: "This runbook cannot be run with no --limit. Use --limit template-rhel-10-minimal or --limit template-ubuntu-latest-server."
       when: ansible_limit is not defined
       run_once: true
 
