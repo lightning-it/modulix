@@ -16,6 +16,7 @@ packaging/rpm/.rpmbuild/
 packaging/rpm/dist/
 ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz
 ansible/.artifacts/
+ansible/.tmp/
 ansible/.runtime/
 ansible/.ansible-runner/
 ansible/.toolbox-podman/
