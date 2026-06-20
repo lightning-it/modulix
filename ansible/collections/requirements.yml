@@ -3,7 +3,7 @@ collections:
   - name: ansible.posix
     version: "2.2.0"
   - name: community.vmware
-    version: "6.2.0"
+    version: "5.10.0"
   - name: vmware.vmware
     version: "2.9.0"
   - name: community.crypto
@@ -11,7 +11,7 @@ collections:
   - name: community.hashi_vault
     version: "7.1.0"
   - name: community.general
-    version: "13.1.0"
+    version: "11.4.9"
   - name: fedora.linux_system_roles
     version: "1.125.4"
   - name: lit.supplementary
@@ -22,3 +22,5 @@ collections:
     version: "1.17.1"
   - name: lit.ubuntu
     version: "1.0.0"
+  - name: lit.ocp
+    version: "1.3.15"

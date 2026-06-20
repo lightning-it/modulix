@@ -160,7 +160,7 @@ find_container_api_socket() {
 
 find_inventory_source() {
   local from_env="${ANSIBLE_TOOLBOX_INVENTORY_SOURCE:-${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}}"
-  local inventory_file="${ANSIBLE_TOOLBOX_INVENTORY_FILE:-${INVENTORY_FILE:-}}"
+  local inventory_file="${ANSIBLE_TOOLBOX_INVENTORY_FILE:-${INVENTORY_FILE:-${INVENTORY:-}}}"
   local source_from_inventory_file
   local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory/inventories"
 
@@ -560,11 +560,16 @@ ssh_agent_mounted=false
 inventory_source=""
 mounted_source_result=""
 run_ee_tar=""
+secrets_dir=""
 mapped_file_for_container_result=""
 
 cleanup() {
   if [[ -n "${run_ee_tar}" ]]; then
     rm -f -- "${run_ee_tar}"
+  fi
+  if [[ -n "${secrets_dir}" ]]; then
+    chmod -R u+w -- "${secrets_dir}" 2>/dev/null || true
+    rm -rf -- "${secrets_dir}"
   fi
 }
 trap cleanup EXIT
@@ -598,8 +603,15 @@ add_env_if_set VAULT_TOKEN
 add_env_if_set RH_AUTOMATION_HUB_TOKEN
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
-  map_file_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}" "/runner/secrets/ansible-vault-pass.txt"
-  vault_pass_file_in_container="${mapped_file_for_container_result}"
+  if [[ "${ANSIBLE_VAULT_PASSWORD_FILE}" == /runner/* ]]; then
+    vault_pass_file_in_container="${ANSIBLE_VAULT_PASSWORD_FILE}"
+  else
+    secrets_dir="$(mktemp -d "${TMPDIR:-/tmp}/modulix-ansible-secrets.XXXXXX")"
+    install -m 0444 "${ANSIBLE_VAULT_PASSWORD_FILE}" "${secrets_dir}/ansible-vault-pass.txt"
+    chmod 0555 "${secrets_dir}"
+    add_mount "${secrets_dir}" "/runner/secrets" "ro"
+    vault_pass_file_in_container="/runner/secrets/ansible-vault-pass.txt"
+  fi
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
 
@@ -721,7 +733,7 @@ if [[ "${run_rh_collection_preflight}" == true ]]; then
     /runner/project/scripts/install-rh-collections
 fi
 
-if [[ -n "${run_ee_tar}" ]]; then
+if [[ -n "${run_ee_tar}" || -n "${secrets_dir}" ]]; then
   "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
 else
   exec "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"

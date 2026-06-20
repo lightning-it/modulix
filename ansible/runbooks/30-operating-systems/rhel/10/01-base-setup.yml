@@ -292,6 +292,17 @@
     _sshd_port_desired: "{{ sshd_port | default(22) | int }}"
 
   pre_tasks:
+    - name: Base setup - bootstrap custom Ansible remote tmp
+      ansible.builtin.include_role:
+        name: lit.foundational.ansible_remote_tmp
+        apply:
+          tags: [ansible_remote_tmp]
+      vars:
+        ansible_remote_tmp_path: "{{ ansible_remote_tmp | default('', true) }}"
+      when:
+        - ansible_remote_tmp | default('', true) | trim | length > 0
+      tags: [ansible_remote_tmp, always]
+
     - name: Base setup - reset SSH connection
       ansible.builtin.meta: reset_connection
 

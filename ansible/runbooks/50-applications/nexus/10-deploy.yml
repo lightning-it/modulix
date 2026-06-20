@@ -1,10 +1,10 @@
 ---
-- name: Configure Nexus
+- name: Deploy Nexus
   become: true
-  hosts: nexus
+  hosts: "{{ nexus_target | default('nexus') }}"
   gather_facts: true
   roles:
-    - name: Execute role sonatype_nexus
-      role: sonatype_nexus
+    - role: lit.supplementary.nexus
       tags:
-        - sonatype_nexus
+        - nexus
+        - nexus_deploy

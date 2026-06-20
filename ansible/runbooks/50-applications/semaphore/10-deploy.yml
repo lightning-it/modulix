@@ -1,0 +1,24 @@
+---
+- name: Deploy Semaphore on Ubuntu app hosts
+  hosts: "{{ semaphore_target | default('semaphore_hosts') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lit.ubuntu.netplan
+      when: semaphore_configure_netplan | default(true) | bool
+      tags:
+        - network
+        - netplan
+        - semaphore
+
+    - role: lit.supplementary.semaphore_deploy
+      tags:
+        - semaphore
+        - semaphore_deploy
+
+    - role: lit.supplementary.semaphore_cac
+      when: semaphore_cac_enabled | default(true) | bool
+      tags:
+        - semaphore
+        - semaphore_cac

@@ -10,3 +10,7 @@ Use this area for:
 
 Do not put operating system configuration or application deployment workflows
 here. Those belong in `30-operating-systems/` and `50-applications/`.
+
+Guides:
+
+- [vSphere VM and template runbooks](virtualization/vsphere/README.md)

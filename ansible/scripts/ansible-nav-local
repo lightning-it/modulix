@@ -31,6 +31,15 @@ automation_hub_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL:-}"
 automation_hub_url_published="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED:-https://console.redhat.com/api/automation-hub/content/published/}"
 automation_hub_url_validated="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED:-https://console.redhat.com/api/automation-hub/content/validated/}"
 automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
+cleanup_files=()
+
+cleanup() {
+  local file
+  for file in "${cleanup_files[@]}"; do
+    rm -f -- "${file}" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
@@ -98,6 +107,26 @@ add_ee_volume_if_present() {
   esac
 
   cmd+=(--eev "${source}:${target}:ro")
+}
+
+stage_secret_file_for_ee() {
+  local var_name="$1"
+  local source="${!var_name:-}"
+  local staged_dir=""
+  local staged_file=""
+
+  if [[ "${nav_ee_enabled}" != "true" || -z "${source}" || ! -f "${source}" ]]; then
+    return 0
+  fi
+
+  staged_dir="${ANSIBLE_HOME}/ee-secrets"
+  mkdir -p "${staged_dir}"
+  chmod 0755 "${staged_dir}"
+  staged_file="$(mktemp "${staged_dir}/${var_name}.XXXXXX")"
+  cp -- "${source}" "${staged_file}"
+  chmod 0444 "${staged_file}"
+  cleanup_files+=("${staged_file}")
+  export "${var_name}=${staged_file}"
 }
 
 validate_choice "ANSIBLE_TOOLBOX_NAV_MODE" "${nav_mode}" "stdout interactive"
@@ -328,7 +357,9 @@ case "${subcommand}" in
     if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
       cmd+=(--eev "/opt/modulix:/opt/modulix:Z")
     fi
+    stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
+    add_ee_volume_if_present "/runner/.ssh" "/runner/.ssh" dir
     add_ee_volume_if_present "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")

@@ -1,0 +1,12 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu - CIS Hardening
+#
+# Purpose:
+# - Run all supported Ubuntu ansible-lockdown CIS hardening runbooks
+# - Keep version selection in inventory opt-in groups such as ubuntu24_cis_targets
+# -----------------------------------------------------------------------------
+
+- name: Ubuntu 24 CIS hardening
+  ansible.builtin.import_playbook: 24/90-cis-hardening.yml
+
