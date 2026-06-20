@@ -16,7 +16,7 @@
 #
 # Notes / Decisions:
 # - CoreDNS provides internal DNS for service endpoints (authoritative and/or forwarding).
-# - DHCP is containerized through dhcp_kube_deploy and requires an explicit
+# - DHCP is containerized through dhcp_deploy and requires an explicit
 #   production validation gate because DHCP depends on L2/broadcast behavior.
 #
 # - NGINX:
@@ -76,9 +76,9 @@
     _wunderbox_dhcp_requested: >-
       {{
         (
-          wunderbox_service_dhcp_kube_deploy
+          wunderbox_service_dhcp_deploy
           | default(
-              _wunderbox_services_cfg.dhcp_kube_deploy
+              _wunderbox_services_cfg.dhcp_deploy
               | default(_wunderbox_services_cfg.dhcp | default('disabled'))
             )
           | string
@@ -91,14 +91,28 @@
     - name: Require DHCP production validation before enabling DHCP
       ansible.builtin.assert:
         that:
-          - wunderbox_dhcp_production_validated | default(false) | bool
+          - >-
+            dhcp_deploy_production_ready
+            | default(wunderbox_dhcp_production_validated | default(false))
+            | bool
+          - dhcp_deploy_production_evidence.rhel_first_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.ubuntu_target_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.l2_broadcast_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.lease_persistence_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.reboot_recovery_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.renewal_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.backup_failover_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.no_rogue_dhcp_validated | default(false) | bool
+          - dhcp_deploy_production_evidence_reference | default('', true) | trim | length > 0
         fail_msg: >-
-          Wunderbox DHCP requires explicit production network validation first.
-          Set wunderbox_dhcp_production_validated=true only after the RHEL-first
-          and Ubuntu validation gate has passed.
+          Wunderbox DHCP requires explicit production network validation first:
+          RHEL-first validation, target Ubuntu validation, L2/broadcast,
+          lease persistence, reboot recovery, renewal, backup/failover, and
+          no-rogue-DHCP evidence. Set the dhcp_deploy_production_* vars
+          only after the validation record exists.
         quiet: true
       when: _wunderbox_dhcp_requested | bool
-      tags: [dhcp, dhcp_kube_deploy]
+      tags: [dhcp, dhcp_deploy]
 
     # Repositories
     - name: Enable required repos
@@ -169,13 +183,13 @@
       tags: [dns, coredns, coredns_validate]
 
     # DHCP service (Podman kube-play)
-    - name: Deploy DHCP kube
+    - name: Deploy DHCP Podman kube-play
       ansible.builtin.include_role:
-        name: lit.supplementary.dhcp_kube_deploy
+        name: lit.supplementary.dhcp_deploy
         apply:
-          tags: [dhcp, dhcp_kube_deploy]
+          tags: [dhcp, dhcp_deploy]
       when: _wunderbox_dhcp_requested | bool
-      tags: [dhcp, dhcp_kube_deploy]
+      tags: [dhcp, dhcp_deploy]
 
     # NGINX runtime deployment
     - name: Deploy Nginx
