@@ -27,6 +27,7 @@ Application-stack runbooks:
 
 Workbench runbooks:
 
-- `workbench/10-setup.yml`: legacy RHEL Workbench setup.
-- `workbench/20-ubuntu-setup.yml`: Ubuntu Workbench baseline, GUI/RDP, and
+- `workbench/10-rhel-setup.yml`: RHEL Workbench Podman, Packer, GUI/RDP, and
   developer tooling setup.
+- `workbench/20-ubuntu-setup.yml`: Ubuntu Workbench baseline, Podman, Packer,
+  GUI/RDP, and developer tooling setup.
