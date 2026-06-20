@@ -93,6 +93,7 @@ Typical source and final names:
 | RHEL 9 | `rhel-9-minimal` | `template-rhel-9-minimal` |
 | RHEL 10 | `rhel-10-minimal` | `template-rhel-10-minimal` |
 | Ubuntu 24.04 | `template-ubuntu-24-source` | `template-ubuntu-24-server` |
+| Ubuntu 26.04 | `template-ubuntu-26-source` | `template-ubuntu-26-server` |
 
 Do not clone from a source whose installed OS does not match the final template
 name. Replace or rebuild the source first.
