@@ -1,0 +1,16 @@
+---
+- name: Deploy Keycloak
+  become: true
+  hosts: "{{ keycloak_target | default('keycloak') }}"
+  gather_facts: true
+  roles:
+    - role: lit.supplementary.keycloak_deploy
+      tags:
+        - keycloak
+        - keycloak_deploy
+
+    - role: lit.supplementary.keycloak_cac
+      when: keycloak_cac_enabled | default(true) | bool
+      tags:
+        - keycloak
+        - keycloak_cac

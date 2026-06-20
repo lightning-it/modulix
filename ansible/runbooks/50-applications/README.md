@@ -6,7 +6,9 @@ network, operating system, and platform capabilities.
 Use this area for:
 
 - AAP
+- AIO Semaphore stacks
 - HashiCorp Vault
+- Nessus
 - Nexus
 - Semaphore
 - GitHub and GitLab runners
@@ -14,7 +16,14 @@ Use this area for:
 - identity and integration services
 
 Private end-to-end workflows that combine multiple layers belong in
-`modulix-operations-*` repositories.
+`modulix-operations-*` repositories. Use Wunderbox for the broader application
+platform stack.
+
+Application-stack runbooks:
+
+- `aio/10-deploy.yml`: Ubuntu Semaphore plus PostgreSQL AIO.
+- `wunderbox/10-deploy.yml`: Wunderbox platform applications such as Vault,
+  Nessus, Nexus, Forgejo, Keycloak, CoreDNS, and DHCP.
 
 Workbench runbooks:
 

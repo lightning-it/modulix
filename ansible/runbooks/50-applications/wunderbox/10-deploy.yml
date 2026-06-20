@@ -7,15 +7,17 @@
 # - Apply wunderbox firewall policy
 # - Install & configure core services on wunderboxes:
 #   - CoreDNS (internal DNS service provider)
-#   - DHCP (internal DHCP provider, system service)
+#   - DHCP (internal DHCP provider, Podman kube-play)
 #   - HashiCorp Vault (secrets & bootstrap control-plane)
 #   - MinIO (S3 backend for Terraform/Terragrunt state + buckets)
 #   - Sonatype Nexus Repository Manager
+#   - Nessus, Forgejo, Keycloak, and other product/application services
 #   - NGINX (internal reverse proxy/gateway for stable service endpoints)
 #
 # Notes / Decisions:
 # - CoreDNS provides internal DNS for service endpoints (authoritative and/or forwarding).
-# - DHCP is NOT container-based here: it runs as a system service (bind to specific interface).
+# - DHCP is containerized through dhcp_kube_deploy and requires an explicit
+#   production validation gate because DHCP depends on L2/broadcast behavior.
 #
 # - NGINX:
 #   - Internal-only (no internet). Publishes stable internal FQDN endpoints on 443.
@@ -71,9 +73,33 @@
         )
       }}
     _enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']
+    _wunderbox_dhcp_requested: >-
+      {{
+        (
+          wunderbox_service_dhcp_kube_deploy
+          | default(
+              _wunderbox_services_cfg.dhcp_kube_deploy
+              | default(_wunderbox_services_cfg.dhcp | default('disabled'))
+            )
+          | string
+          | lower
+        ) in _enabled_values
+      }}
 
 
   tasks:
+    - name: Require DHCP production validation before enabling DHCP
+      ansible.builtin.assert:
+        that:
+          - wunderbox_dhcp_production_validated | default(false) | bool
+        fail_msg: >-
+          Wunderbox DHCP requires explicit production network validation first.
+          Set wunderbox_dhcp_production_validated=true only after the RHEL-first
+          and Ubuntu validation gate has passed.
+        quiet: true
+      when: _wunderbox_dhcp_requested | bool
+      tags: [dhcp, dhcp_kube_deploy]
+
     # Repositories
     - name: Enable required repos
       ansible.builtin.include_role:
@@ -116,19 +142,40 @@
         ) in _enabled_values
       tags: [dns, coredns, coredns_deploy]
 
-    # DHCP service (system service)
-    - name: Deploy DHCP
+    - name: Configure CoreDNS
       ansible.builtin.include_role:
-        name: lit.supplementary.dhcp_deploy
+        name: lit.supplementary.coredns_config
         apply:
-          tags: [dhcp, dhcp_deploy]
+          tags: [dns, coredns, coredns_config]
       when: >-
         (
-          wunderbox_service_dhcp
-          | default(_wunderbox_services_cfg.dhcp | default('disabled'))
+          wunderbox_service_coredns_config
+          | default(_wunderbox_services_cfg.coredns_config | default('disabled'))
           | string | lower
         ) in _enabled_values
-      tags: [dhcp, dhcp_deploy]
+      tags: [dns, coredns, coredns_config]
+
+    - name: Validate CoreDNS
+      ansible.builtin.include_role:
+        name: lit.supplementary.coredns_validate
+        apply:
+          tags: [dns, coredns, coredns_validate]
+      when: >-
+        (
+          wunderbox_service_coredns_validate
+          | default(_wunderbox_services_cfg.coredns_validate | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [dns, coredns, coredns_validate]
+
+    # DHCP service (Podman kube-play)
+    - name: Deploy DHCP kube
+      ansible.builtin.include_role:
+        name: lit.supplementary.dhcp_kube_deploy
+        apply:
+          tags: [dhcp, dhcp_kube_deploy]
+      when: _wunderbox_dhcp_requested | bool
+      tags: [dhcp, dhcp_kube_deploy]
 
     # NGINX runtime deployment
     - name: Deploy Nginx
@@ -269,6 +316,34 @@
           | string | lower
         ) in _enabled_values
       tags: [nexus]
+
+    # Nessus runtime deployment
+    - name: Deploy Nessus
+      ansible.builtin.include_role:
+        name: lit.supplementary.nessus_deploy
+        apply:
+          tags: [nessus, nessus_deploy]
+      when: >-
+        (
+          wunderbox_service_nessus_deploy
+          | default(_wunderbox_services_cfg.nessus_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [nessus, nessus_deploy]
+
+    # Nessus configuration-as-code
+    - name: Configure Nessus objects
+      ansible.builtin.include_role:
+        name: lit.supplementary.nessus_cac
+        apply:
+          tags: [nessus, nessus_cac]
+      when: >-
+        (
+          wunderbox_service_nessus_cac
+          | default(_wunderbox_services_cfg.nessus_cac | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [nessus, nessus_cac]
 
     # Shared PostgreSQL runtime service
     - name: Deploy shared PostgreSQL service

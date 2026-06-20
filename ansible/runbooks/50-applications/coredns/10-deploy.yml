@@ -1,0 +1,22 @@
+---
+- name: Deploy CoreDNS
+  become: true
+  hosts: "{{ coredns_target | default('coredns') }}"
+  gather_facts: true
+  roles:
+    - role: lit.supplementary.coredns_deploy
+      tags:
+        - coredns
+        - coredns_deploy
+
+    - role: lit.supplementary.coredns_config
+      when: coredns_config_enabled | default(false) | bool
+      tags:
+        - coredns
+        - coredns_config
+
+    - role: lit.supplementary.coredns_validate
+      when: coredns_validate_enabled | default(true) | bool
+      tags:
+        - coredns
+        - coredns_validate

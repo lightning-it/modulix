@@ -1,0 +1,10 @@
+---
+- name: Deploy DHCP kube
+  become: true
+  hosts: "{{ dhcp_target | default('dhcp') }}"
+  gather_facts: true
+  roles:
+    - role: lit.supplementary.dhcp_kube_deploy
+      tags:
+        - dhcp
+        - dhcp_kube_deploy
