@@ -51,7 +51,7 @@ jobs:
       image: quay.io/fedora/fedora:45
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -59,7 +59,7 @@ jobs:
         run: dnf -y install git rpm-build gzip
 
       - name: Refresh checkout with git metadata
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
