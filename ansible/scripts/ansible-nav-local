@@ -359,6 +359,7 @@ case "${subcommand}" in
     fi
     stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
+    add_ee_volume_if_present "/runner/.ssh" "/runner/.ssh" dir
     add_ee_volume_if_present "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
