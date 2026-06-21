@@ -6,9 +6,9 @@
 # - Require --limit (fail fast)
 # - Bootstrap managed local users when the normal deploy user is not reachable yet
 # - Reconnect through the managed deploy user and re-apply users idempotently
+# - Apply host networking from inventory when netplan inputs are present
 #
-# Keep this conservative: networking and application runtime setup stay in their
-# dedicated runbooks.
+# Keep this conservative: application runtime setup stays in application runbooks.
 # -----------------------------------------------------------------------------
 
 - name: PreCheck (require --limit)
@@ -145,6 +145,20 @@
       tags: [always]
 
   tasks:
+    - name: Configure netplan
+      ansible.builtin.include_role:
+        name: lit.ubuntu.netplan
+      when: >-
+        ubuntu_base_configure_netplan
+        | default(
+            (net_ifaces | default([]) | length > 0)
+            or (netplan_ethernets | default({}) | length > 0)
+            or (netplan_config_files_absent | default([]) | length > 0)
+            or (netplan_runtime_networkd_files_absent | default([]) | length > 0)
+          )
+        | bool
+      tags: [network, networking, netplan]
+
     - name: Users
       ansible.builtin.include_role:
         name: lit.ubuntu.users

@@ -27,28 +27,6 @@
       - "y"
 
   tasks:
-    - name: Configure Ubuntu netplan
-      ansible.builtin.include_role:
-        name: lit.ubuntu.netplan
-        apply:
-          tags:
-            - network
-            - netplan
-            - aio
-      when: >-
-        ansible_os_family | default('') == 'Debian'
-        and
-        (
-          aio_service_netplan
-          | default(_aio_services_cfg.netplan | default('enabled'))
-          | string
-          | lower
-        ) in _enabled_values
-      tags:
-        - network
-        - netplan
-        - aio
-
     - name: Deploy shared PostgreSQL
       ansible.builtin.include_role:
         name: lit.supplementary.postgres_deploy

@@ -86,6 +86,23 @@
         ) in _enabled_values
       }}
 
+    nginx_config_service_vhosts_extra:
+      - name: grafana
+        server_name: "{{ grafana_deploy_public_fqdn | default('grafana.' ~ inventory_hostname, true) }}"
+        upstream_url: >-
+          http://{{ grafana_deploy_host_ip | default('127.0.0.1', true) }}:{{
+            grafana_deploy_port | default(3002, true)
+          }}
+        force_https: true
+        enabled_when_service: grafana_deploy
+      - name: checkmk
+        server_name: "{{ checkmk_deploy_public_fqdn | default('checkmk.' ~ inventory_hostname, true) }}"
+        upstream_url: >-
+          http://{{ checkmk_deploy_host_ip | default('127.0.0.1', true) }}:{{
+            checkmk_deploy_port | default(5000, true)
+          }}
+        force_https: true
+        enabled_when_service: checkmk_deploy
 
   tasks:
     - name: Require DHCP production validation before enabling DHCP
@@ -511,7 +528,18 @@
                 | string | lower
               ) in _enabled_values
             }}
-          url: "{{ coredns_deploy_health_url | default('http://' ~ coredns_deploy_host_ip ~ ':' ~ (coredns_deploy_host_health_port | string) ~ '/health') }}"
+          url: >-
+            {{
+              coredns_deploy_health_url
+              | default(
+                  'http://'
+                  ~ coredns_deploy_host_ip
+                  ~ ':'
+                  ~ (coredns_deploy_host_health_port | string)
+                  ~ '/health',
+                  true
+                )
+            }}
           status_code: [200]
         - name: NGINX
           enabled: >-
@@ -595,6 +623,52 @@
             }}
           url: "{{ keycloak_deploy_health_url | default(keycloak_deploy_api_url ~ '/realms/master') }}"
           status_code: [200]
+        - name: Grafana
+          enabled: >-
+            {{
+              (
+                wunderbox_service_grafana_deploy
+                | default(_wunderbox_services_cfg.grafana_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: >-
+            {{
+              grafana_deploy_health_url
+              | default(
+                  'http://'
+                  ~ (grafana_deploy_host_ip | default('127.0.0.1', true))
+                  ~ ':'
+                  ~ (grafana_deploy_port | default(3002, true) | string)
+                  ~ '/api/health',
+                  true
+                )
+            }}
+          status_code: [200]
+        - name: Checkmk
+          enabled: >-
+            {{
+              (
+                wunderbox_service_checkmk_deploy
+                | default(_wunderbox_services_cfg.checkmk_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: >-
+            {{
+              checkmk_deploy_health_url
+              | default(
+                  'http://'
+                  ~ (checkmk_deploy_host_ip | default('127.0.0.1', true))
+                  ~ ':'
+                  ~ (checkmk_deploy_port | default(5000, true) | string)
+                  ~ '/'
+                  ~ (checkmk_deploy_site_name | default('monitoring', true))
+                  ~ '/check_mk/',
+                  true
+                )
+            }}
+          status_code: [200, 302]
       loop_control:
         label: "{{ item.name }} {{ item.url }}"
       when: item.enabled | bool
