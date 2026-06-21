@@ -60,7 +60,15 @@
     _bootstrap_configured: >-
       {{
         (bootstrap_user_effective | default('') | length > 0)
-        and (linux_bootstrap_password | default('') | length > 0)
+        and (
+          (linux_bootstrap_password | default('') | length > 0)
+          or
+          (
+            linux_bootstrap_private_key_file
+            | default(ansible_private_key_file | default(''))
+            | length
+          ) > 0
+        )
       }}
 
     bootstrap_user_effective: >-
@@ -75,6 +83,12 @@
           | default(omit)
       }}
 
+    bootstrap_private_key_file_effective: >-
+      {{
+        linux_bootstrap_private_key_file
+          | default(ansible_private_key_file | default(omit))
+      }}
+
   pre_tasks:
     - name: Check reachability on desired SSH port (normal path)
       ansible.builtin.ping:
@@ -83,6 +97,12 @@
       register: ping_normal
       vars:
         ansible_port: "{{ _probe_port_normal }}"
+      tags: [bootstrap]
+
+    - name: Derive normal reachability flag
+      ansible.builtin.set_fact:
+        _normal_ok: "{{ (ping_normal.ping | default('')) == 'pong' }}"
+      changed_when: false
       tags: [bootstrap]
 
     - name: Check reachability on bootstrap SSH port
@@ -94,16 +114,20 @@
         ansible_port: "{{ _probe_port_bootstrap }}"
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective }}"
-      when: _bootstrap_configured | bool
+        ansible_private_key_file: "{{ bootstrap_private_key_file_effective }}"
+      when:
+        - _bootstrap_configured | bool
+        - (ping_normal.ping | default('')) != 'pong'
       tags: [bootstrap]
 
     - name: Derive reachability flags
       ansible.builtin.set_fact:
-        _normal_ok: "{{ not (ping_normal is failed or (ping_normal.unreachable | default(false))) }}"
         _bootstrap_ok: >-
           {{
             _bootstrap_configured | bool
-            and not (ping_bootstrap is failed or (ping_bootstrap.unreachable | default(false)))
+            and not (_normal_ok | bool)
+            and ping_bootstrap is defined
+            and (ping_bootstrap.ping | default('')) == 'pong'
           }}
       changed_when: false
       tags: [bootstrap]
@@ -164,6 +188,7 @@
       vars:
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
+        ansible_private_key_file: "{{ bootstrap_private_key_file_effective }}"
         ansible_port: "{{ _probe_port_bootstrap }}"
       block:
         - name: Bootstrap - ensure users exist

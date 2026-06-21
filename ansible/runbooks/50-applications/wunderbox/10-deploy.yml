@@ -485,3 +485,117 @@
           | string | lower
         ) in _enabled_values
       tags: [nexus, sonatype_nexus_config]
+
+    - name: Verify Wunderbox service endpoints
+      ansible.builtin.uri:
+        url: "{{ item.url }}"
+        method: GET
+        validate_certs: "{{ item.validate_certs | default(true) }}"
+        status_code: "{{ item.status_code }}"
+        headers: "{{ item.headers | default({}) }}"
+        timeout: 10
+      delegate_to: localhost
+      become: false
+      register: _wunderbox_online_check
+      until: _wunderbox_online_check.status in item.status_code
+      retries: 12
+      delay: 5
+      changed_when: false
+      loop:
+        - name: CoreDNS
+          enabled: >-
+            {{
+              (
+                wunderbox_service_coredns
+                | default(_wunderbox_services_cfg.coredns | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ coredns_deploy_health_url | default('http://' ~ coredns_deploy_host_ip ~ ':' ~ (coredns_deploy_host_health_port | string) ~ '/health') }}"
+          status_code: [200]
+        - name: NGINX
+          enabled: >-
+            {{
+              (
+                wunderbox_service_nginx_deploy
+                | default(_wunderbox_services_cfg.nginx_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ nginx_deploy_health_url | default('http://' ~ nginx_deploy_host_ip ~ '/') }}"
+          status_code: [200]
+        - name: Vault
+          enabled: >-
+            {{
+              (
+                wunderbox_service_vault_deploy
+                | default(_wunderbox_services_cfg.vault_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ vault_deploy_health_url | default(vault_address ~ '/v1/sys/health') }}"
+          validate_certs: "{{ vault_validate_certs | default(false) }}"
+          status_code: [200, 429, 472, 473, 501, 503]
+        - name: MinIO
+          enabled: >-
+            {{
+              (
+                wunderbox_service_minio_deploy
+                | default(_wunderbox_services_cfg.minio_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ minio_deploy_health_url | default(minio_deploy_api_url ~ '/minio/health/ready') }}"
+          status_code: [200]
+        - name: Nexus
+          enabled: >-
+            {{
+              (
+                wunderbox_service_nexus_deploy
+                | default(_wunderbox_services_cfg.nexus_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ nexus_api_base_url }}/service/rest/v1/status"
+          validate_certs: "{{ nexus_validate_certs | default(false) }}"
+          headers:
+            Host: "{{ nexus_api_host_header | default(nexus_nexus_hostname | default(inventory_hostname)) }}"
+          status_code: [200]
+        - name: Nessus
+          enabled: >-
+            {{
+              (
+                wunderbox_service_nessus_deploy
+                | default(_wunderbox_services_cfg.nessus_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ nessus_deploy_health_url | default(nessus_deploy_api_url ~ '/server/status') }}"
+          validate_certs: "{{ nessus_deploy_validate_certs | default(false) }}"
+          status_code: [200, 401, 403]
+        - name: Forgejo
+          enabled: >-
+            {{
+              (
+                wunderbox_service_forgejo_deploy
+                | default(_wunderbox_services_cfg.forgejo_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ forgejo_deploy_health_url | default(forgejo_deploy_api_url ~ '/api/healthz') }}"
+          status_code: [200]
+        - name: Keycloak
+          enabled: >-
+            {{
+              (
+                wunderbox_service_keycloak_deploy
+                | default(_wunderbox_services_cfg.keycloak_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ keycloak_deploy_health_url | default(keycloak_deploy_api_url ~ '/realms/master') }}"
+          status_code: [200]
+      loop_control:
+        label: "{{ item.name }} {{ item.url }}"
+      when: item.enabled | bool
+      tags: [wunderbox_verify]

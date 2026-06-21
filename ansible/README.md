@@ -70,7 +70,7 @@ RPM baseline mode (`/opt/modulix/ansible` in image):
 
 ```bash
 INVENTORY_DIR=/path/to/inventories
-VAULT_PASS_FILE=/path/to/.vault-pass.txt
+VAULT_PASS_FILE=~/modulix-env/.vault-pass.txt
 RUN_EE_IMAGE=localhost/ee-wunder-ansible-ubi9-certified:local
 
 podman run --rm -it \
@@ -309,7 +309,9 @@ Recommended flow:
 - `vault_config` creates AppRole roles and stores credentials in Vault KV at:
   - `stage-2c/<inventory_hostname>/nexus/approle-kv`
   - `stage-2c/<inventory_hostname>/nexus/approle-pki`
-- `nexus` reads AppRole credentials from those KV paths at runtime. It needs `VAULT_TOKEN` with read access.
+- `nexus` reads AppRole credentials from those KV paths at runtime. It needs
+  the vaulted `vault_token` inventory variable, or `VAULT_TOKEN` as a local
+  override, with read access.
 
 Best practice: use a short-lived, least-privilege token for KV read + PKI issue, not a root token.
 
@@ -317,7 +319,7 @@ Best practice: use a short-lived, least-privilege token for KV read + PKI issue,
 
 - Required at runtime, depending on runbook:
   - `ANSIBLE_VAULT_PASSWORD_FILE`
-  - `VAULT_TOKEN`
+  - vaulted `vault_token`, or `VAULT_TOKEN` as a local override
 - Do not commit secret values to the repository.
 
 ## Related Docs
