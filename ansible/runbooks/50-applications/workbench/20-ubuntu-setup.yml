@@ -5,7 +5,7 @@
 # Purpose:
 # - Prepare Ubuntu workbench hosts with OS baseline and update policy
 # - Configure local users and network policy from inventory
-# - Install developer tools, VS Code, Firefox, GUI, and XRDP
+# - Install Podman, developer tools, VS Code, Firefox, GUI, and XRDP
 #
 # Notes:
 # - Keep environment values in inventory.
@@ -25,7 +25,7 @@
           - ansible_distribution == "Ubuntu"
         fail_msg: >-
           This runbook is for Ubuntu workbenches only. Use
-          runbooks/50-applications/workbench/10-setup.yml for the legacy RHEL
+          runbooks/50-applications/workbench/10-rhel-setup.yml for the RHEL
           workbench path.
       tags: [always]
 
@@ -45,7 +45,16 @@
     - role: lit.ubuntu.netplan
       tags: [networking, netplan, baseline]
 
+    - role: lit.ubuntu.podman
+      tags: [packages, podman, containers]
+
+    - role: lit.ubuntu.incus
+      when: incus_enabled | default(true) | bool
+      tags: [incus, virtualization]
+
     - role: lit.ubuntu.developer_tools
+      vars:
+        developer_tools_packer_enabled: true
       tags: [packages, developer_tools]
 
     - role: lit.ubuntu.vscode_deploy

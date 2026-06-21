@@ -27,26 +27,6 @@
       - "y"
 
   tasks:
-    - name: Configure Ubuntu netplan
-      ansible.builtin.include_role:
-        name: lit.ubuntu.netplan
-        apply:
-          tags:
-            - network
-            - netplan
-            - aio
-      when: >-
-        (
-          aio_service_netplan
-          | default(_aio_services_cfg.netplan | default('enabled'))
-          | string
-          | lower
-        ) in _enabled_values
-      tags:
-        - network
-        - netplan
-        - aio
-
     - name: Deploy shared PostgreSQL
       ansible.builtin.include_role:
         name: lit.supplementary.postgres_deploy
@@ -75,6 +55,26 @@
         - postgres_deploy
         - aio
 
+    - name: Deploy Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_deploy
+        apply:
+          tags:
+            - nginx
+            - nginx_deploy
+            - aio
+      when: >-
+        (
+          aio_service_nginx_deploy
+          | default(_aio_services_cfg.nginx_deploy | default('enabled'))
+          | string
+          | lower
+        ) in _enabled_values
+      tags:
+        - nginx
+        - nginx_deploy
+        - aio
+
     - name: Deploy Semaphore
       ansible.builtin.include_role:
         name: lit.supplementary.semaphore_deploy
@@ -93,6 +93,26 @@
       tags:
         - semaphore
         - semaphore_deploy
+        - aio
+
+    - name: Configure Nginx
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+        apply:
+          tags:
+            - nginx
+            - nginx_config
+            - aio
+      when: >-
+        (
+          aio_service_nginx_config
+          | default(_aio_services_cfg.nginx_config | default('enabled'))
+          | string
+          | lower
+        ) in _enabled_values
+      tags:
+        - nginx
+        - nginx_config
         - aio
 
     - name: Configure Semaphore CaC

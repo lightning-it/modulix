@@ -4,6 +4,7 @@ These runbooks manage vSphere VM lifecycle objects from inventory.
 
 Use this area for:
 
+- building a vSphere source image from ISO through Packer
 - cloning a VM from an existing vSphere template
 - destroying a single inventory-defined VM
 - normalizing Linux VM/template objects through VMware Tools
@@ -16,6 +17,8 @@ template and put it in a template group such as `vmware_templates`.
 
 Supported target patterns:
 
+- Source image target: set the Packer build variables in inventory and run
+  `15-source-image-build.yml` to create or refresh the source object.
 - Clone target: set `vmware_vsphere_template` to an existing source template.
   Run `20-vm-template.yml` first, then `30-template-bootstrap.yml`.
 - Existing target: omit `vmware_vsphere_template` when the VM/template object
@@ -29,7 +32,27 @@ powers the VM off, and marks it as a vSphere template.
 
 ## Inventory Contract
 
-At minimum, template host inventory needs:
+At minimum, source image inventory needs:
+
+```yaml
+vmware_vsphere_packer_build_project_dir: /runner/project/packer-vsphere-template-sources
+vmware_vsphere_packer_build_kind: rhel
+vmware_vsphere_packer_build_source_vm_name: rhel-8-minimal
+vmware_vsphere_packer_build_rhel_major: "8"
+vmware_vsphere_packer_build_installer_password: "{{ common_password_install }}"
+
+vmware_vsphere_packer_build_vars:
+  rhel8_iso_path: "[datastore1] iso/rhel-8.10-x86_64-dvd.iso"
+  rhel8_iso_checksum: "sha256:REPLACE-ME"
+```
+
+The source build role reuses the shared vSphere inventory values such as
+`vmware_vsphere_hostname`, `vmware_vsphere_username`,
+`vmware_vsphere_password`, `vmware_vsphere_datacenter`,
+`vmware_vsphere_vmware_guest_cluster`, `vmware_vsphere_vmware_guest_datastore`,
+`vmware_vsphere_folder_name`, and `vmware_vsphere_network`.
+
+At minimum, final template host inventory needs:
 
 ```yaml
 vmware_vsphere_vm_name: template-example-linux
@@ -103,6 +126,15 @@ name. Replace or rebuild the source first.
 Run from `modulix-automation/ansible` with the environment inventory passed on
 the command line.
 
+Build or refresh the source image first:
+
+```bash
+./scripts/ansible-nav run \
+  runbooks/10-compute/virtualization/vsphere/15-source-image-build.yml \
+  -i "${INVENTORY_FILE}" \
+  --limit "${TEMPLATE_HOST}"
+```
+
 Create a missing clone target:
 
 ```bash
@@ -170,8 +202,8 @@ The target is ready when vCenter reports it as powered off and
 
 ## Common Failure Modes
 
-- Source template is missing: import or create the source object first, then
-  rerun `20-vm-template.yml`.
+- Source template is missing: build or refresh the source object with
+  `15-source-image-build.yml`, then rerun `20-vm-template.yml`.
 - Source template has the wrong OS version: stop and replace the source; do not
   create a misleading target name.
 - VMware Tools guest operations fail authentication: repair
