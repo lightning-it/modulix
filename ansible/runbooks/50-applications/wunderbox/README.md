@@ -10,12 +10,11 @@ inventory variables.
 
 - Core platform: repositories, firewall, CoreDNS, DHCP, and NGINX.
 - Secret and state services: HashiCorp Vault and MinIO.
-- Application services: Nexus, Nessus, PostgreSQL, Semaphore, Forgejo, and
-  Keycloak.
+- Application services: Nexus, Nessus, Forgejo, and Keycloak.
 - Monitoring and logging services may be exposed through the same gateway when
   inventory enables Grafana or Checkmk.
 - Day-2 configuration roles such as Vault config, MinIO config/bootstrap,
-  Nessus CaC, Semaphore CaC, Forgejo CaC, Keycloak CaC, and Nexus initial
+  Nessus CaC, Forgejo CaC, Keycloak CaC, and Nexus initial
   config.
 
 ## Run
@@ -40,10 +39,10 @@ services:
     minio_config: enabled
     nexus_deploy: enabled
     nessus_deploy: enabled
-    postgres_deploy: enabled
-    semaphore_deploy: enabled
     forgejo_deploy: enabled
     keycloak_deploy: enabled
+    loki_deploy: enabled
+    alloy_deploy: enabled
     grafana_deploy: enabled
     checkmk_deploy: enabled
 ```
@@ -65,7 +64,6 @@ hostnames and credentials must come from inventory, HC Vault, or Ansible Vault.
 | MinIO console | `https://minio-console.example.invalid` | MinIO root or delegated user from Vault-backed vars |
 | Nexus | `https://nexus.example.invalid` | Nexus admin/user credentials from Vault-backed vars |
 | Nessus | `https://nessus.example.invalid` | Nessus admin credentials from Vault-backed vars |
-| Semaphore | `https://semaphore.example.invalid` | Semaphore admin/user credentials from Vault-backed vars |
 | Forgejo | `https://forgejo.example.invalid` | Forgejo admin/user credentials from Vault-backed vars |
 | Keycloak | `https://keycloak.example.invalid` | Realm user or admin credentials from Vault-backed vars |
 | Grafana | `https://grafana.example.invalid` | Grafana admin credentials from Vault-backed vars |

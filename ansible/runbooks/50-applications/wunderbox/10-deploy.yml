@@ -86,24 +86,6 @@
         ) in _enabled_values
       }}
 
-    nginx_config_service_vhosts_extra:
-      - name: grafana
-        server_name: "{{ grafana_deploy_public_fqdn | default('grafana.' ~ inventory_hostname, true) }}"
-        upstream_url: >-
-          http://{{ grafana_deploy_host_ip | default('127.0.0.1', true) }}:{{
-            grafana_deploy_port | default(3002, true)
-          }}
-        force_https: true
-        enabled_when_service: grafana_deploy
-      - name: checkmk
-        server_name: "{{ checkmk_deploy_public_fqdn | default('checkmk.' ~ inventory_hostname, true) }}"
-        upstream_url: >-
-          http://{{ checkmk_deploy_host_ip | default('127.0.0.1', true) }}:{{
-            checkmk_deploy_port | default(5000, true)
-          }}
-        force_https: true
-        enabled_when_service: checkmk_deploy
-
   tasks:
     - name: Require DHCP production validation before enabling DHCP
       ansible.builtin.assert:
@@ -390,34 +372,6 @@
         ) in _enabled_values
       tags: [postgres, postgres_deploy]
 
-    # Semaphore runtime deployment
-    - name: Deploy Semaphore
-      ansible.builtin.include_role:
-        name: lit.supplementary.semaphore_deploy
-        apply:
-          tags: [semaphore, semaphore_deploy]
-      when: >-
-        (
-          wunderbox_service_semaphore_deploy
-          | default(_wunderbox_services_cfg.semaphore_deploy | default('disabled'))
-          | string | lower
-        ) in _enabled_values
-      tags: [semaphore, semaphore_deploy]
-
-    # Semaphore configuration-as-code
-    - name: Configure Semaphore objects
-      ansible.builtin.include_role:
-        name: lit.supplementary.semaphore_cac
-        apply:
-          tags: [semaphore, semaphore_cac]
-      when: >-
-        (
-          wunderbox_service_semaphore_cac
-          | default(_wunderbox_services_cfg.semaphore_cac | default('disabled'))
-          | string | lower
-        ) in _enabled_values
-      tags: [semaphore, semaphore_cac]
-
     # Forgejo runtime deployment
     - name: Deploy Forgejo
       ansible.builtin.include_role:
@@ -474,6 +428,59 @@
         ) in _enabled_values
       tags: [keycloak, keycloak_cac]
 
+    # Monitoring and logging runtime deployment
+    - name: Deploy Loki
+      ansible.builtin.include_role:
+        name: lit.supplementary.loki_deploy
+        apply:
+          tags: [loki, loki_deploy, logging]
+      when: >-
+        (
+          wunderbox_service_loki_deploy
+          | default(_wunderbox_services_cfg.loki_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [loki, loki_deploy, logging]
+
+    - name: Deploy Alloy
+      ansible.builtin.include_role:
+        name: lit.supplementary.alloy_deploy
+        apply:
+          tags: [alloy, alloy_deploy, logging]
+      when: >-
+        (
+          wunderbox_service_alloy_deploy
+          | default(_wunderbox_services_cfg.alloy_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [alloy, alloy_deploy, logging]
+
+    - name: Deploy Grafana
+      ansible.builtin.include_role:
+        name: lit.supplementary.grafana_deploy
+        apply:
+          tags: [grafana, grafana_deploy, logging]
+      when: >-
+        (
+          wunderbox_service_grafana_deploy
+          | default(_wunderbox_services_cfg.grafana_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [grafana, grafana_deploy, logging]
+
+    - name: Deploy Checkmk
+      ansible.builtin.include_role:
+        name: lit.supplementary.checkmk_deploy
+        apply:
+          tags: [checkmk, checkmk_deploy, monitoring]
+      when: >-
+        (
+          wunderbox_service_checkmk_deploy
+          | default(_wunderbox_services_cfg.checkmk_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [checkmk, checkmk_deploy, monitoring]
+
     # NGINX configuration after backend services exist
     - name: Configure Nginx
       ansible.builtin.include_role:
@@ -487,6 +494,94 @@
           | string | lower
         ) in _enabled_values
       tags: [nginx, nginx_config]
+
+    - name: Retire Semaphore from Wunderbox when disabled
+      when:
+        - (
+            wunderbox_service_semaphore_deploy
+            | default(_wunderbox_services_cfg.semaphore_deploy | default('disabled'))
+            | string | lower
+          ) not in _enabled_values
+      tags: [semaphore, semaphore_retire, nginx_config]
+      block:
+        - name: Stop and disable retired Semaphore kube units
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+            enabled: false
+          failed_when: false
+          loop:
+            - podman-kube@-etc-podman-pods-semaphore.yml.service
+            - podman-kube@-etc-podman-pods-semaphore-postgres.yml.service
+
+        - name: Clear retired Semaphore kube unit failure state
+          ansible.builtin.command:
+            argv:
+              - systemctl
+              - reset-failed
+              - "{{ item }}"
+          changed_when: false
+          failed_when: false
+          loop:
+            - podman-kube@-etc-podman-pods-semaphore.yml.service
+            - podman-kube@-etc-podman-pods-semaphore-postgres.yml.service
+
+        - name: Check retired Semaphore containers
+          ansible.builtin.command:
+            argv:
+              - podman
+              - container
+              - exists
+              - "{{ item }}"
+          register: _wunderbox_semaphore_container_exists
+          changed_when: false
+          failed_when: false
+          loop:
+            - semaphore
+            - semaphore-semaphore
+            - semaphore-postgres
+            - semaphore-postgres-postgres
+
+        - name: Remove retired Semaphore containers
+          ansible.builtin.command:
+            argv:
+              - podman
+              - rm
+              - -f
+              - "{{ item }}"
+          register: _wunderbox_semaphore_container_remove
+          changed_when: _wunderbox_semaphore_container_remove.rc == 0
+          failed_when: false
+          loop: >-
+            {{
+              _wunderbox_semaphore_container_exists.results
+              | selectattr('rc', 'equalto', 0)
+              | map(attribute='item')
+              | list
+            }}
+
+        - name: Remove retired Semaphore manifests and vhost
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          register: _wunderbox_semaphore_retired_files
+          loop:
+            - /etc/podman/pods/semaphore.yml
+            - /etc/podman/pods/semaphore-postgres.yml
+            - /srv/nginx/config/conf.d/semaphore.conf
+
+        - name: Reload nginx after retiring Semaphore vhost
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - nginx
+              - nginx
+              - -s
+              - reload
+          changed_when: true
+          failed_when: false
+          when: _wunderbox_semaphore_retired_files.changed
 
     # Nexus API configuration phase (separate from runtime deploy)
     - name: Configure Nexus API
@@ -510,9 +605,8 @@
         validate_certs: "{{ item.validate_certs | default(true) }}"
         status_code: "{{ item.status_code }}"
         headers: "{{ item.headers | default({}) }}"
+        follow_redirects: "{{ item.follow_redirects | default('safe') }}"
         timeout: 10
-      delegate_to: localhost
-      become: false
       register: _wunderbox_online_check
       until: _wunderbox_online_check.status in item.status_code
       retries: 12
@@ -551,7 +645,8 @@
               ) in _enabled_values
             }}
           url: "{{ nginx_deploy_health_url | default('http://' ~ nginx_deploy_host_ip ~ '/') }}"
-          status_code: [200]
+          follow_redirects: none
+          status_code: [200, 301, 302]
         - name: Vault
           enabled: >-
             {{
@@ -622,6 +717,28 @@
               ) in _enabled_values
             }}
           url: "{{ keycloak_deploy_health_url | default(keycloak_deploy_api_url ~ '/realms/master') }}"
+          status_code: [200]
+        - name: Loki
+          enabled: >-
+            {{
+              (
+                wunderbox_service_loki_deploy
+                | default(_wunderbox_services_cfg.loki_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ loki_deploy_ready_url | default('http://127.0.0.1:3100/ready') }}"
+          status_code: [200]
+        - name: Alloy
+          enabled: >-
+            {{
+              (
+                wunderbox_service_alloy_deploy
+                | default(_wunderbox_services_cfg.alloy_deploy | default('disabled'))
+                | string | lower
+              ) in _enabled_values
+            }}
+          url: "{{ alloy_deploy_ready_url | default('http://127.0.0.1:12345/-/ready') }}"
           status_code: [200]
         - name: Grafana
           enabled: >-
