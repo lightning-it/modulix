@@ -73,7 +73,7 @@ If the vulnerability is confirmed, we will:
 
 - prepare and review a fix in a private branch,
 - ship a patch or minor release depending on impact,
-- reference the fix in the changelog and/or release notes,
+- reference the fix in GitHub Release notes,
 - optionally credit you by name or pseudonym if you wish.
 
 If the report is determined to be a false positive or out of scope, we will
