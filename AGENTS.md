@@ -15,6 +15,30 @@ Do not treat downstream synced copies as the source of truth.
 - When adding or changing a package version, prefer wiring it into existing
   Renovate management instead of maintaining it manually.
 
+## Ansible Collection Requirements
+
+- Keep `ansible/collections/requirements.yml` fully resolvable with
+  `ansible-galaxy collection install`; do not commit a requirements file that
+  only works with a pre-populated local collection cache.
+- When a Lightning IT collection version is released as a GitHub Release asset
+  but is not available from the configured Galaxy sources, pin the immutable
+  release tarball URL with `type: url` instead of using the unresolved
+  `namespace.collection` name.
+- Before changing collection pins, check transitive dependency constraints from
+  collections such as `fedora.linux_system_roles`. Keep direct pins compatible
+  with those constraints.
+- After changing `ansible/collections/requirements.yml`, verify dependency
+  resolution inside the toolbox wrapper with an isolated target path, for
+  example:
+
+```bash
+cd ansible
+./scripts/ansible-nav exec -- ansible-galaxy collection install \
+  --force \
+  --collections-path /tmp/modulix-collections-check \
+  -r /runner/project/collections/requirements.yml
+```
+
 ## Mandatory validation gate (containerized)
 
 Before finishing any change in this repository, run a full validation pass in
