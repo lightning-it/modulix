@@ -6,10 +6,7 @@
 # - Run all supported ansible-lockdown CIS hardening runbooks
 # - Keep target selection in inventory opt-in groups
 # -----------------------------------------------------------------------------
-
 - name: RHEL CIS hardening
   ansible.builtin.import_playbook: rhel/90-cis-hardening.yml
-
 - name: Ubuntu CIS hardening
   ansible.builtin.import_playbook: ubuntu/90-cis-hardening.yml
-

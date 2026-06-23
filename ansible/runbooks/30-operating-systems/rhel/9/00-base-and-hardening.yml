@@ -8,10 +8,7 @@
 #
 # Use --limit to target the intended host or group.
 # -----------------------------------------------------------------------------
-
 - name: RHEL9 base setup
   ansible.builtin.import_playbook: 01-base-setup.yml
-
 - name: RHEL9 CIS hardening
   ansible.builtin.import_playbook: 90-cis-hardening.yml
-
