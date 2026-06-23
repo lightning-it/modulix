@@ -8,10 +8,7 @@
 #
 # Use --limit to target the intended host or group.
 # -----------------------------------------------------------------------------
-
 - name: Ubuntu 24 base setup
   ansible.builtin.import_playbook: 01-base-setup.yml
-
 - name: Ubuntu 24 CIS hardening
   ansible.builtin.import_playbook: 90-cis-hardening.yml
-

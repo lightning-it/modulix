@@ -46,6 +46,10 @@
       tags: [networking, netplan, baseline]
 
     - role: lit.ubuntu.podman
+      vars:
+        podman_user_socket_enabled: true
+        podman_user_socket_users: >-
+          {{ developer_tools_ssh_agent_users | default([]) }}
       tags: [packages, podman, containers]
 
     - role: lit.ubuntu.incus
