@@ -52,6 +52,10 @@ modulix_aap_set_defaults() {
   : "${ANSIBLE_TOOLBOX_RUNTIME_MODE:=disconnected}"
   : "${ANSIBLE_VAULT_PASSWORD_FILE:=${AAP_SECRETS_DIR}/.vault-pass.txt}"
   : "${ANSIBLE_COLLECTIONS_PATH:=/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
+  : "${AAP_PODMAN_STORAGE_CONF:=${AAP_APPL_ROOT}/etc/containers-storage.conf}"
+  : "${AAP_PODMAN_ROOT_GRAPHROOT:=/appl/podman/root-storage}"
+  : "${AAP_PODMAN_ROOT_RUNROOT:=/appl/podman/root-run}"
+  : "${CONTAINERS_STORAGE_CONF:=${AAP_PODMAN_STORAGE_CONF}}"
 
   if [[ -z "${VAULT_TOKEN:-}" && -r "${AAP_SECRETS_DIR}/.vault-token" ]]; then
     VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
@@ -69,7 +73,33 @@ modulix_aap_set_defaults() {
   export INVENTORY_REL INVENTORY_FILE
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
   export ANSIBLE_TOOLBOX_RUNTIME_MODE ANSIBLE_VAULT_PASSWORD_FILE ANSIBLE_COLLECTIONS_PATH
+  export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT
+  export CONTAINERS_STORAGE_CONF
   export VAULT_TOKEN
+}
+
+modulix_write_podman_storage_conf() {
+  mkdir -p \
+    "$(dirname "${AAP_PODMAN_STORAGE_CONF}")" \
+    "${AAP_PODMAN_ROOT_GRAPHROOT}" \
+    "${AAP_PODMAN_ROOT_RUNROOT}" \
+    /appl/tmp
+
+  cat >"${AAP_PODMAN_STORAGE_CONF}" <<EOF
+[storage]
+driver = "overlay"
+graphroot = "${AAP_PODMAN_ROOT_GRAPHROOT}"
+runroot = "${AAP_PODMAN_ROOT_RUNROOT}"
+tmp_dir = "/appl/tmp"
+
+[storage.options]
+EOF
+
+  if [[ -x /usr/bin/fuse-overlayfs ]]; then
+    printf 'mount_program = "/usr/bin/fuse-overlayfs"\n' >>"${AAP_PODMAN_STORAGE_CONF}"
+  fi
+
+  chmod 0644 "${AAP_PODMAN_STORAGE_CONF}"
 }
 
 modulix_resolve_aap_artifacts() {

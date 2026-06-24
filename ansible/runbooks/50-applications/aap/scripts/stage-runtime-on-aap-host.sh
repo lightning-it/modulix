@@ -22,6 +22,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 modulix_aap_set_defaults
 
 mkdir -p "${AAP_APPL_ROOT}/src" /appl/tmp /appl/ansible-tmp
+modulix_write_podman_storage_conf
 
 if [[ ! -f "${AUTOMATION_ANSIBLE_DIR}/ansible.cfg" ]]; then
   rm -rf "${AUTOMATION_DIR}"

@@ -214,7 +214,11 @@ ssh "${ssh_opts[@]}" "${remote}" \
      /appl/modulix-aap/scripts \
      /appl/modulix-aap/src
    sudo install -d -m 1777 /appl/tmp /appl/ansible-tmp
-   sudo install -d -m 0755 /appl/home /appl/podman'
+   sudo install -d -m 0755 \
+     /appl/home \
+     /appl/podman \
+     /appl/podman/root-storage \
+     /appl/podman/root-run'
 
 printf 'Transferring offline payload to %s.\n' "${AAP_FQDN}"
 scp "${ssh_opts[@]}" \
