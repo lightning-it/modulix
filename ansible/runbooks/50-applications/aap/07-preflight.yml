@@ -251,11 +251,34 @@
         headers:
           X-Vault-Token: "{{ aap_preflight_vault_token_effective }}"
         validate_certs: "{{ aap_preflight_vault_validate_certs_effective }}"
-        status_code: 200
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
         return_content: false
+      register: aap_preflight_vault_token_check
+      failed_when: false
       delegate_to: localhost
       become: false
       no_log: true
+      when: aap_preflight_vault_enabled | bool
+      tags:
+        - aap
+        - aap_preflight
+        - vault
+
+    - name: Assert Vault token lookup succeeded
+      ansible.builtin.assert:
+        that:
+          - aap_preflight_vault_token_check.status | default(0) | int == 200
+        fail_msg: >-
+          Vault token lookup failed for {{ aap_preflight_vault_addr_effective
+          }}/v1/auth/token/lookup-self with HTTP {{
+          aap_preflight_vault_token_check.status | default('unknown') }}.
+          Refresh the token on Machine A, rerun the transfer, or verify the
+          token can call auth/token/lookup-self.
+        quiet: true
       when: aap_preflight_vault_enabled | bool
       tags:
         - aap
@@ -272,8 +295,15 @@
         headers:
           X-Vault-Token: "{{ aap_preflight_vault_token_effective }}"
         validate_certs: "{{ aap_preflight_vault_validate_certs_effective }}"
-        status_code: 200
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+          - 404
         return_content: false
+      register: aap_preflight_vault_path_checks
+      failed_when: false
       delegate_to: localhost
       become: false
       no_log: true
@@ -283,6 +313,26 @@
       when:
         - aap_preflight_vault_enabled | bool
         - item | string | trim | length > 0
+      tags:
+        - aap
+        - aap_preflight
+        - vault
+
+    - name: Assert required Vault KV paths are readable
+      ansible.builtin.assert:
+        that:
+          - item.status | default(0) | int == 200
+        fail_msg: >-
+          Vault KV path is not readable: {{
+          aap_preflight_vault_mount_effective }}/data/{{ item.item }} returned
+          HTTP {{ item.status | default('unknown') }}.
+        quiet: true
+      loop: "{{ aap_preflight_vault_path_checks.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item | default('unknown') }}"
+      when:
+        - aap_preflight_vault_enabled | bool
+        - not item.skipped | default(false)
       tags:
         - aap
         - aap_preflight
