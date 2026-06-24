@@ -41,6 +41,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${script_dir}/aap-local-lib.sh"
 modulix_aap_set_defaults
+modulix_write_podman_storage_conf
 
 cd "${AUTOMATION_ANSIBLE_DIR}"
 modulix_resolve_aap_artifacts
