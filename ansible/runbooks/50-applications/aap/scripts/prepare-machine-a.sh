@@ -17,13 +17,10 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 modulix_aap_set_defaults
 
 required_vars=(
-  AAP_BASELINE_SSH_KEY
-  AAP_BOOTSTRAP_SSH_KEY
   AUTOMATION_REPO_URL
   MACHINE_A_APPL_ROOT
   MACHINE_A_EXPORT_ROOT
   MACHINE_A_SECRETS_DIR
-  MACHINE_A_SSH_KEY
 )
 
 for var_name in "${required_vars[@]}"; do
@@ -42,20 +39,27 @@ install -d -m 0750 \
   "${MACHINE_A_EXPORT_ROOT}/artifacts/aap" \
   "${MACHINE_A_EXPORT_ROOT}/src"
 
-if [[ -s "${AAP_BASELINE_SSH_KEY}" && ! -s "${MACHINE_A_SSH_KEY}" ]]; then
-  install -m 0600 "${AAP_BASELINE_SSH_KEY}" "${MACHINE_A_SSH_KEY}"
-fi
+if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+  if [[ -z "${AAP_BASELINE_SSH_KEY:-}" || -z "${AAP_BOOTSTRAP_SSH_KEY:-}" || -z "${MACHINE_A_SSH_KEY:-}" ]]; then
+    printf 'SSH key auth is enabled, but key variables are incomplete.\n' >&2
+    exit 1
+  fi
 
-if [[ ! -s "${AAP_BOOTSTRAP_SSH_KEY}" ]]; then
-  printf 'AAP bootstrap SSH key not found: %s\n' "${AAP_BOOTSTRAP_SSH_KEY}" >&2
-  printf 'Run the RHEL 10 baseline substrate step first, or set AAP_BOOTSTRAP_SSH_KEY explicitly.\n' >&2
-  exit 1
-fi
+  if [[ -s "${AAP_BASELINE_SSH_KEY}" && ! -s "${MACHINE_A_SSH_KEY}" ]]; then
+    install -m 0600 "${AAP_BASELINE_SSH_KEY}" "${MACHINE_A_SSH_KEY}"
+  fi
 
-if [[ ! -s "${MACHINE_A_SSH_KEY}" ]]; then
-  ssh-keygen -t ed25519 -f "${MACHINE_A_SSH_KEY}" -N ''
+  if [[ ! -s "${AAP_BOOTSTRAP_SSH_KEY}" ]]; then
+    printf 'AAP bootstrap SSH key not found: %s\n' "${AAP_BOOTSTRAP_SSH_KEY}" >&2
+    printf 'Run the RHEL 10 baseline substrate step first, or set AAP_BOOTSTRAP_SSH_KEY explicitly.\n' >&2
+    exit 1
+  fi
+
+  if [[ ! -s "${MACHINE_A_SSH_KEY}" ]]; then
+    ssh-keygen -t ed25519 -f "${MACHINE_A_SSH_KEY}" -N ''
+  fi
+  chmod 0600 "${MACHINE_A_SSH_KEY}"
 fi
-chmod 0600 "${MACHINE_A_SSH_KEY}"
 
 if [[ -n "${VAULT_TOKEN:-}" ]]; then
   printf '%s' "${VAULT_TOKEN}" >"${MACHINE_A_SECRETS_DIR}/.vault-token"

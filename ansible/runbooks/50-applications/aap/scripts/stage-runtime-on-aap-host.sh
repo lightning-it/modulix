@@ -39,7 +39,10 @@ podman image exists "${MODULIX_RUN_EE_IMAGE}"
 
 test -f "${ANSIBLE_VAULT_PASSWORD_FILE}" ||
   openssl rand -base64 32 >"${ANSIBLE_VAULT_PASSWORD_FILE}"
-chmod 0600 "${ANSIBLE_VAULT_PASSWORD_FILE}" "${AAP_SSH_KEY}"
+chmod 0600 "${ANSIBLE_VAULT_PASSWORD_FILE}"
+if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+  chmod 0600 "${AAP_SSH_KEY}"
+fi
 
 cd "${AUTOMATION_ANSIBLE_DIR}"
 modulix_write_aap_inventory

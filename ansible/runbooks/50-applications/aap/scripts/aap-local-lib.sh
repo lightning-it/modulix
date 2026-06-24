@@ -5,9 +5,15 @@ modulix_aap_set_defaults() {
   : "${AAP_USER:=svc_ansible}"
   : "${AAP_INSTALL_USER:=svc_aap}"
   : "${AAP_ANSIBLE_BECOME_FLAGS:=}"
+  : "${AAP_SSH_KEY_AUTH_ENABLED:=true}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
-  : "${AAP_BASELINE_SSH_KEY:=${HOME}/sources/modulix-automation/ansible/.tmp/${AAP_SHORTNAME}-secrets/svc_ansible_aap}"
-  : "${AAP_BOOTSTRAP_SSH_KEY:=${AAP_BASELINE_SSH_KEY}}"
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+    : "${AAP_BASELINE_SSH_KEY:=${HOME}/sources/modulix-automation/ansible/.tmp/${AAP_SHORTNAME}-secrets/svc_ansible_aap}"
+    : "${AAP_BOOTSTRAP_SSH_KEY:=${AAP_BASELINE_SSH_KEY}}"
+  else
+    : "${AAP_BASELINE_SSH_KEY:=}"
+    : "${AAP_BOOTSTRAP_SSH_KEY:=}"
+  fi
   : "${AAP_VAULT_HOST_KEY:=${AAP_FQDN}}"
   : "${AAP_VAULT_ADMIN_PASSWORDS_KV_PATH:=${AAP_VAULT_HOST_KEY}/aap/deploy/admin_passwords}"
   : "${AAP_VAULT_DEFAULTS_KV_PATH:=defaults}"
@@ -15,14 +21,26 @@ modulix_aap_set_defaults() {
   : "${AAP_APPL_ROOT:=/appl/modulix-aap}"
   : "${AAP_ENV_FILE:=${AAP_APPL_ROOT}/etc/aap-local.env}"
   : "${AAP_SECRETS_DIR:=${AAP_APPL_ROOT}/secrets}"
-  : "${AAP_SSH_KEY:=${AAP_SECRETS_DIR}/svc_ansible_aap}"
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+    : "${AAP_SSH_KEY:=${AAP_SECRETS_DIR}/svc_ansible_aap}"
+  else
+    : "${AAP_SSH_KEY:=}"
+  fi
   : "${MACHINE_A_APPL_ROOT:=${HOME}/appl/modulix-aap}"
   : "${MACHINE_A_EXPORT_ROOT:=${HOME}/appl/modulix-aap-export}"
   : "${MACHINE_A_ENV_FILE:=${MACHINE_A_APPL_ROOT}/etc/aap-local.env}"
   : "${MACHINE_A_SECRETS_DIR:=${MACHINE_A_APPL_ROOT}/secrets}"
-  : "${MACHINE_A_SSH_KEY:=${MACHINE_A_SECRETS_DIR}/svc_ansible_aap}"
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+    : "${MACHINE_A_SSH_KEY:=${MACHINE_A_SECRETS_DIR}/svc_ansible_aap}"
+  else
+    : "${MACHINE_A_SSH_KEY:=}"
+  fi
   : "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS:=${MACHINE_A_SECRETS_DIR}/bootstrap_known_hosts}"
-  : "${AAP_SSH_KEY_CONTAINER:=/runner/secrets/$(basename "${AAP_SSH_KEY}")}"
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+    : "${AAP_SSH_KEY_CONTAINER:=/runner/secrets/$(basename "${AAP_SSH_KEY}")}"
+  else
+    : "${AAP_SSH_KEY_CONTAINER:=}"
+  fi
   : "${AUTOMATION_DIR:=${AAP_APPL_ROOT}/src/modulix-automation}"
   : "${AUTOMATION_ANSIBLE_DIR:=${AUTOMATION_DIR}/ansible}"
   : "${AAP_ARTIFACT_DIR:=${AUTOMATION_ANSIBLE_DIR}/.artifacts}"
@@ -40,6 +58,7 @@ modulix_aap_set_defaults() {
   fi
 
   export AAP_SHORTNAME AAP_USER AAP_INSTALL_USER AAP_ANSIBLE_BECOME_FLAGS
+  export AAP_SSH_KEY_AUTH_ENABLED
   export AAP_BOOTSTRAP_USER AAP_BASELINE_SSH_KEY AAP_BOOTSTRAP_SSH_KEY
   export AAP_VAULT_HOST_KEY AAP_VAULT_ADMIN_PASSWORDS_KV_PATH AAP_VAULT_DEFAULTS_KV_PATH
   export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_ENV_FILE
@@ -134,13 +153,18 @@ ansible_user: ${AAP_USER}
 ansible_connection: ssh
 ansible_become: true
 ansible_become_method: sudo
-ansible_ssh_private_key_file: ${AAP_SSH_KEY_CONTAINER}
 ansible_ssh_common_args: >-
-  -o IdentitiesOnly=yes
   -o UserKnownHostsFile=/appl/tmp/modulix-known_hosts
   -o StrictHostKeyChecking=accept-new
 ansible_remote_tmp: /appl/ansible-tmp
 YAML
+
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+    sed -i '/^ansible_ssh_common_args: >-/a\  -o IdentitiesOnly=yes' \
+      "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/host_vars/${AAP_INVENTORY_HOST}/connection.yml"
+    printf 'ansible_ssh_private_key_file: %s\n' "${AAP_SSH_KEY_CONTAINER}" \
+      >>"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/host_vars/${AAP_INVENTORY_HOST}/connection.yml"
+  fi
 
   if [[ -n "${AAP_ANSIBLE_BECOME_FLAGS}" ]]; then
     printf 'ansible_become_flags: "%s"\n' "${AAP_ANSIBLE_BECOME_FLAGS}" \
