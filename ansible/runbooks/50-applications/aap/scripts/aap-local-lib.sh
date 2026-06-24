@@ -55,6 +55,7 @@ modulix_aap_set_defaults() {
   : "${AAP_PODMAN_STORAGE_CONF:=${AAP_APPL_ROOT}/etc/containers-storage.conf}"
   : "${AAP_PODMAN_ROOT_GRAPHROOT:=/appl/podman/root-storage}"
   : "${AAP_PODMAN_ROOT_RUNROOT:=/appl/podman/root-run}"
+  : "${AAP_PODMAN_TMPDIR:=/appl/tmp}"
 
   if [[ -z "${VAULT_TOKEN:-}" && -r "${AAP_SECRETS_DIR}/.vault-token" ]]; then
     VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
@@ -72,7 +73,7 @@ modulix_aap_set_defaults() {
   export INVENTORY_REL INVENTORY_FILE
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
   export ANSIBLE_TOOLBOX_RUNTIME_MODE ANSIBLE_VAULT_PASSWORD_FILE ANSIBLE_COLLECTIONS_PATH
-  export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT
+  export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT AAP_PODMAN_TMPDIR
   export VAULT_TOKEN
 }
 
@@ -81,14 +82,13 @@ modulix_write_podman_storage_conf() {
     "$(dirname "${AAP_PODMAN_STORAGE_CONF}")" \
     "${AAP_PODMAN_ROOT_GRAPHROOT}" \
     "${AAP_PODMAN_ROOT_RUNROOT}" \
-    /appl/tmp
+    "${AAP_PODMAN_TMPDIR}"
 
   cat >"${AAP_PODMAN_STORAGE_CONF}" <<EOF
 [storage]
 driver = "overlay"
 graphroot = "${AAP_PODMAN_ROOT_GRAPHROOT}"
 runroot = "${AAP_PODMAN_ROOT_RUNROOT}"
-tmp_dir = "/appl/tmp"
 
 [storage.options]
 EOF
@@ -99,6 +99,7 @@ EOF
 
   chmod 0644 "${AAP_PODMAN_STORAGE_CONF}"
   export CONTAINERS_STORAGE_CONF="${AAP_PODMAN_STORAGE_CONF}"
+  export TMPDIR="${AAP_PODMAN_TMPDIR}"
 }
 
 modulix_resolve_aap_artifacts() {
