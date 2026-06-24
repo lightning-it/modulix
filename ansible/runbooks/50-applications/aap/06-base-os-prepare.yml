@@ -171,6 +171,28 @@
         - os_prep
         - users
 
+    - name: Allow Ansible login user to become AAP install user
+      ansible.builtin.copy:
+        dest: >-
+          /etc/sudoers.d/91-aap-install-user-{{
+            ansible_user | regex_replace('[^A-Za-z0-9_-]', '_')
+          }}
+        owner: root
+        group: root
+        mode: '0440'
+        content: |
+          {{ ansible_user }} ALL=({{ aap_runbook_install_user_effective }}) NOPASSWD: ALL
+        validate: /usr/sbin/visudo -cf %s
+      when:
+        - aap_runbook_allow_ansible_user_sudo_to_install_user | default(false) | bool
+        - ansible_user | default('', true) | trim | length > 0
+        - ansible_user != aap_runbook_install_user_effective
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - sudoers
+
     - name: Prepare Podman on AAP host
       ansible.builtin.include_role:
         name: lit.rhel.podman

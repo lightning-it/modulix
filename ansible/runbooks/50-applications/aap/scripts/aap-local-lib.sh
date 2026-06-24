@@ -240,6 +240,7 @@ aap_runbook_manage_rhsm: false
 aap_runbook_manage_repos: false
 aap_runbook_os_prep_enabled: false
 aap_runbook_manage_podman: true
+aap_runbook_allow_ansible_user_sudo_to_install_user: true
 
 ansible_remote_tmp: /appl/ansible-tmp
 ansible_remote_tmp_bootstrap_raw: ${AAP_REMOTE_TMP_BOOTSTRAP_RAW:-true}
