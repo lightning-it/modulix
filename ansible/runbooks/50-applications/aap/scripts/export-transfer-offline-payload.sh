@@ -176,7 +176,7 @@ else
   printf 'Pulling execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
   podman pull "${MODULIX_RUN_EE_IMAGE}"
 fi
-podman run --rm "${MODULIX_RUN_EE_IMAGE}" ansible-galaxy collection list
+podman image inspect "${MODULIX_RUN_EE_IMAGE}" >/dev/null
 
 printf 'Saving execution environment archive: %s\n' "${machine_a_ee_archive_path}"
 podman save --format oci-archive \
