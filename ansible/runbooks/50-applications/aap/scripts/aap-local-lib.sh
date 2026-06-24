@@ -242,6 +242,7 @@ aap_runbook_os_prep_enabled: false
 aap_runbook_manage_podman: true
 
 ansible_remote_tmp: /appl/ansible-tmp
+ansible_remote_tmp_bootstrap_raw: ${AAP_REMOTE_TMP_BOOTSTRAP_RAW:-true}
 aap_deploy_manage_install_tmp_dir: true
 aap_deploy_install_tmp_dir: /appl/tmp
 aap_deploy_install_environment:
