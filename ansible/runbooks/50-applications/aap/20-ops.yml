@@ -20,9 +20,58 @@
           tags: [aap, aap_ops]
       tags: [aap, aap_ops]
 
+    - name: Collect EDA diagnostics
+      when: (aap_ops_action | default('status')) == 'eda_diagnostics'
+      block:
+        - name: Check EDA API status
+          ansible.builtin.uri:
+            url: "https://{{ ansible_host | default(inventory_hostname) }}/api/eda/v1/status/"
+            method: GET
+            validate_certs: false
+            return_content: true
+            status_code:
+              - 200
+              - 401
+              - 403
+              - 404
+              - 500
+              - 502
+              - 503
+          register: aap_eda_diagnostics_status
+          failed_when: false
+
+        - name: Read AAP installer log tail
+          ansible.builtin.command:
+            cmd: tail -n 80 /appl/aap/logs/aap_install.log
+          register: aap_eda_diagnostics_install_log
+          changed_when: false
+          failed_when: false
+
+        - name: List install user containers
+          ansible.builtin.shell:
+            cmd: |
+              set -euo pipefail
+              export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+              podman ps
+            executable: /bin/bash
+          become: true
+          become_user: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+          register: aap_eda_diagnostics_podman_ps
+          changed_when: false
+          failed_when: false
+
+        - name: Show EDA diagnostics
+          ansible.builtin.debug:
+            msg:
+              eda_status_code: "{{ aap_eda_diagnostics_status.status | default('unavailable') }}"
+              eda_status_body: "{{ aap_eda_diagnostics_status.content | default('') }}"
+              install_log_tail: "{{ aap_eda_diagnostics_install_log.stdout_lines | default([]) }}"
+              podman_ps: "{{ aap_eda_diagnostics_podman_ps.stdout_lines | default([]) }}"
+
     - name: Run AAP day-2 operation
       ansible.builtin.include_role:
         name: lit.supplementary.aap_ops
         apply:
           tags: [aap, aap_ops]
       tags: [aap, aap_ops]
+      when: (aap_ops_action | default('status')) != 'eda_diagnostics'

@@ -1,0 +1,170 @@
+---
+# -----------------------------------------------------------------------------
+# Bootstrap an AAP host for local execution from a workstation/controller.
+#
+# Purpose:
+# - Prepare the minimal substrate needed before the disconnected AAP payload is
+#   transferred and before Ansible runs locally on the AAP host through the EE.
+# -----------------------------------------------------------------------------
+
+- name: Bootstrap AAP local-execution host substrate
+  hosts: aaps
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  vars:
+    aap_bootstrap_local_execution_user: svc_ansible
+    aap_bootstrap_local_execution_ssh_key_src: ""
+    aap_bootstrap_local_execution_ssh_key_dest: /appl/modulix-aap/secrets/svc_ansible_aap
+    aap_bootstrap_local_execution_packages:
+      - podman
+      - git
+      - openssl
+      - python3
+      - sudo
+    aap_bootstrap_local_execution_directories:
+      - { path: /appl/tmp, mode: "1777" }
+      - { path: /appl/ansible-tmp, mode: "1777" }
+      - { path: /appl/home, mode: "0755" }
+      - { path: /appl/podman, mode: "0755" }
+      - { path: /appl/modulix-aap/etc, mode: "0750" }
+      - { path: /appl/modulix-aap/secrets, mode: "0750" }
+      - { path: /appl/modulix-aap/artifacts, mode: "0750" }
+      - { path: /appl/modulix-aap/inbox, mode: "0750" }
+      - { path: /appl/modulix-aap/src, mode: "0750" }
+
+  pre_tasks:
+    - name: Bootstrap custom Ansible remote tmp
+      ansible.builtin.include_role:
+        name: lit.foundational.ansible_remote_tmp
+        apply:
+          tags: [ansible_remote_tmp]
+      vars:
+        ansible_remote_tmp_path: "{{ ansible_remote_tmp | default('', true) }}"
+      when:
+        - ansible_remote_tmp | default('', true) | trim | length > 0
+      tags:
+        - aap
+        - aap_bootstrap
+        - ansible_remote_tmp
+        - always
+
+    - name: Reset SSH connection after remote tmp bootstrap
+      ansible.builtin.meta: reset_connection
+
+  tasks:
+    - name: Validate local-execution bootstrap inputs
+      ansible.builtin.assert:
+        that:
+          - aap_bootstrap_local_execution_user | string | trim | length > 0
+          - aap_bootstrap_local_execution_ssh_key_src | string | trim | length > 0
+        fail_msg: >-
+          Set aap_bootstrap_local_execution_user and
+          aap_bootstrap_local_execution_ssh_key_src.
+        quiet: true
+      tags:
+        - aap
+        - aap_bootstrap
+        - assert
+
+    - name: Ensure AAP host packages are installed
+      ansible.builtin.package:
+        name: "{{ aap_bootstrap_local_execution_packages }}"
+        state: present
+      tags:
+        - aap
+        - aap_bootstrap
+        - packages
+
+    - name: Ensure AAP filesystem directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop: "{{ aap_bootstrap_local_execution_directories }}"
+      loop_control:
+        label: "{{ item.path }}"
+      tags:
+        - aap
+        - aap_bootstrap
+        - filesystem
+
+    - name: Ensure Ansible SSH user exists
+      ansible.builtin.user:
+        name: "{{ aap_bootstrap_local_execution_user }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+      tags:
+        - aap
+        - aap_bootstrap
+        - users
+
+    - name: Allow Ansible SSH user passwordless sudo
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/90-{{ aap_bootstrap_local_execution_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        content: "{{ aap_bootstrap_local_execution_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        validate: /usr/sbin/visudo -cf %s
+      tags:
+        - aap
+        - aap_bootstrap
+        - sudo
+
+    - name: Install Ansible SSH private key on the host for local EE execution
+      ansible.builtin.copy:
+        src: "{{ aap_bootstrap_local_execution_ssh_key_src }}"
+        dest: "{{ aap_bootstrap_local_execution_ssh_key_dest }}"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      tags:
+        - aap
+        - aap_bootstrap
+        - ssh
+
+    - name: Read Ansible SSH public key
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -y
+          - -f
+          - "{{ aap_bootstrap_local_execution_ssh_key_dest }}"
+      register: aap_bootstrap_local_execution_public_key
+      changed_when: false
+      tags:
+        - aap
+        - aap_bootstrap
+        - ssh
+
+    - name: Install authorized key for Ansible SSH user
+      ansible.posix.authorized_key:
+        user: "{{ aap_bootstrap_local_execution_user }}"
+        key: "{{ aap_bootstrap_local_execution_public_key.stdout }}"
+        state: present
+      tags:
+        - aap
+        - aap_bootstrap
+        - ssh
+
+    - name: Verify Podman and local-execution substrate
+      ansible.builtin.shell: |
+        set -euo pipefail
+        command -v podman
+        podman --version
+        test -d /appl/tmp
+        test -d /appl/ansible-tmp
+        test -d /appl/home
+        test -d /appl/podman
+        test -s "{{ aap_bootstrap_local_execution_ssh_key_dest }}"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      tags:
+        - aap
+        - aap_bootstrap
+        - verify
