@@ -39,6 +39,7 @@ done
 
 machine_a_ee_archive_path="${MACHINE_A_MODULIX_RUN_EE_ARCHIVE_PATH:-${MACHINE_A_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}}"
 machine_a_source_archive_path="${MACHINE_A_APPL_ROOT}/artifacts/modulix-automation.tar.gz"
+machine_a_ssh_key_basename="$(basename "${MACHINE_A_SSH_KEY}")"
 bootstrap_known_hosts="${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}"
 
 ssh_opts=(
@@ -227,12 +228,14 @@ if [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
 fi
 
 printf 'Installing transferred payload into remote staging paths.\n'
-ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" <<'REMOTE_PAYLOAD'
+ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" "${machine_a_ssh_key_basename}" <<'REMOTE_PAYLOAD'
 set -euo pipefail
 modulix_run_ee_archive="$1"
+machine_a_ssh_key_basename="$2"
 
    install -m 0600 /appl/modulix-aap/inbox/aap-local.env /appl/modulix-aap/etc/aap-local.env
-   install -m 0600 /appl/modulix-aap/inbox/svc_ansible_aap /appl/modulix-aap/secrets/svc_ansible_aap
+   . /appl/modulix-aap/etc/aap-local.env
+   install -m 0600 "/appl/modulix-aap/inbox/${machine_a_ssh_key_basename}" "${AAP_SSH_KEY}"
    if [ -s /appl/modulix-aap/inbox/.vault-token ]; then
      install -m 0600 /appl/modulix-aap/inbox/.vault-token /appl/modulix-aap/secrets/.vault-token
    fi

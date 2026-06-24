@@ -143,7 +143,7 @@ ansible_remote_tmp: /appl/ansible-tmp
 YAML
 
   if [[ -n "${AAP_ANSIBLE_BECOME_FLAGS}" ]]; then
-    printf 'ansible_become_flags: %s\n' "${AAP_ANSIBLE_BECOME_FLAGS}" \
+    printf 'ansible_become_flags: "%s"\n' "${AAP_ANSIBLE_BECOME_FLAGS}" \
       >>"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/host_vars/${AAP_INVENTORY_HOST}/connection.yml"
   fi
 
