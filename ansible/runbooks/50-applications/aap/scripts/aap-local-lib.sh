@@ -8,6 +8,11 @@ modulix_aap_set_defaults() {
   : "${AAP_SSH_KEY_AUTH_ENABLED:=true}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
+        "${AAP_USER}" == "svc_ansible" &&
+        "${AAP_BOOTSTRAP_USER}" != "svc_ansible" ]]; then
+    AAP_USER="${AAP_BOOTSTRAP_USER}"
+  fi
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
         "${AAP_USER}" == "root" &&
         "${AAP_BOOTSTRAP_USER}" == "root" &&
         -n "${SUDO_USER:-}" &&
@@ -136,6 +141,14 @@ modulix_resolve_aap_artifacts() {
 }
 
 modulix_ansible_ee() {
+  local -a ssh_agent_args=()
+  if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
+    ssh_agent_args=(
+      -e SSH_AUTH_SOCK=/runner/ssh-agent
+      -v "${SSH_AUTH_SOCK}:/runner/ssh-agent"
+    )
+  fi
+
   podman run --rm \
     --network=host \
     --security-opt label=disable \
@@ -159,6 +172,7 @@ modulix_ansible_ee() {
     -v "${AUTOMATION_ANSIBLE_DIR}:/runner/project" \
     -v "${AAP_SECRETS_DIR}:/runner/secrets:ro" \
     -v /appl/tmp:/appl/tmp \
+    "${ssh_agent_args[@]}" \
     -w /runner/project \
     "${MODULIX_RUN_EE_IMAGE}" \
     "$@"
