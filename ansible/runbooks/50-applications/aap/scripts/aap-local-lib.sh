@@ -4,6 +4,7 @@ modulix_aap_set_defaults() {
   : "${AAP_SHORTNAME:=${AAP_FQDN%%.*}}"
   : "${AAP_USER:=svc_ansible}"
   : "${AAP_INSTALL_USER:=svc_aap}"
+  : "${AAP_ANSIBLE_BECOME_FLAGS:=}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
   : "${AAP_BASELINE_SSH_KEY:=${HOME}/sources/modulix-automation/ansible/.tmp/${AAP_SHORTNAME}-secrets/svc_ansible_aap}"
   : "${AAP_BOOTSTRAP_SSH_KEY:=${AAP_BASELINE_SSH_KEY}}"
@@ -38,7 +39,7 @@ modulix_aap_set_defaults() {
     VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
   fi
 
-  export AAP_SHORTNAME AAP_USER AAP_INSTALL_USER
+  export AAP_SHORTNAME AAP_USER AAP_INSTALL_USER AAP_ANSIBLE_BECOME_FLAGS
   export AAP_BOOTSTRAP_USER AAP_BASELINE_SSH_KEY AAP_BOOTSTRAP_SSH_KEY
   export AAP_VAULT_HOST_KEY AAP_VAULT_ADMIN_PASSWORDS_KV_PATH AAP_VAULT_DEFAULTS_KV_PATH
   export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_ENV_FILE
@@ -140,6 +141,11 @@ ansible_ssh_common_args: >-
   -o StrictHostKeyChecking=accept-new
 ansible_remote_tmp: /appl/ansible-tmp
 YAML
+
+  if [[ -n "${AAP_ANSIBLE_BECOME_FLAGS}" ]]; then
+    printf 'ansible_become_flags: %s\n' "${AAP_ANSIBLE_BECOME_FLAGS}" \
+      >>"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/host_vars/${AAP_INVENTORY_HOST}/connection.yml"
+  fi
 
   cat >"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap.yml" <<YAML
 ---
