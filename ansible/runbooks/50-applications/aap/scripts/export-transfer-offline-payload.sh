@@ -242,7 +242,7 @@ printf 'Installing transferred payload into remote staging paths.\n'
 ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" "${machine_a_ssh_key_basename}" <<'REMOTE_PAYLOAD'
 set -euo pipefail
 modulix_run_ee_archive="$1"
-machine_a_ssh_key_basename="$2"
+machine_a_ssh_key_basename="${2:-}"
 
    install -m 0600 /appl/modulix-aap/inbox/aap-local.env /appl/modulix-aap/etc/aap-local.env
    . /appl/modulix-aap/etc/aap-local.env
