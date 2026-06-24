@@ -226,6 +226,7 @@ scp "${ssh_opts[@]}" \
   "${machine_a_source_archive_path}" \
   "${machine_a_ee_archive_path}" \
   "${script_dir}/aap-local-lib.sh" \
+  "${script_dir}/run-aap-playbooks.sh" \
   "${script_dir}/stage-runtime-on-aap-host.sh" \
   "${aap_artifact_files[@]}" \
   "${remote}:${AAP_APPL_ROOT}/inbox/"
@@ -257,6 +258,7 @@ machine_a_ssh_key_basename="${2:-}"
      install -m 0600 /appl/modulix-aap/inbox/.vault-token /appl/modulix-aap/secrets/.vault-token
    fi
    install -m 0644 /appl/modulix-aap/inbox/aap-local-lib.sh /appl/modulix-aap/scripts/aap-local-lib.sh
+   install -m 0755 /appl/modulix-aap/inbox/run-aap-playbooks.sh /appl/modulix-aap/scripts/run-aap-playbooks.sh
    install -m 0755 /appl/modulix-aap/inbox/stage-runtime-on-aap-host.sh /appl/modulix-aap/scripts/stage-runtime-on-aap-host.sh
    mv -f "/appl/modulix-aap/inbox/${modulix_run_ee_archive}" /appl/modulix-aap/artifacts/
    mv -f /appl/modulix-aap/inbox/modulix-automation.tar.gz /appl/modulix-aap/artifacts/
