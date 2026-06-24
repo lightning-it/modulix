@@ -1,0 +1,152 @@
+---
+# -----------------------------------------------------------------------------
+# Ansible Automation Platform (AAP) temporary self-signed TLS files
+#
+# Purpose:
+# - Generate controller-local temporary TLS files for disconnected/lab AAP
+#   installs when customer PKI or Vault PKI is not available yet.
+# - The AAP deploy role consumes these files through
+#   aap_deploy_tls_customer_files and stages them on the managed host.
+# -----------------------------------------------------------------------------
+
+- name: Generate temporary AAP self-signed TLS files
+  hosts: aaps
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  vars:
+    aap_tls_selfsigned_enabled: true
+    aap_tls_selfsigned_output_dir: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls"
+    aap_tls_selfsigned_ca_key_path: "{{ aap_tls_selfsigned_output_dir }}/aap-selfsigned-ca.key"
+    aap_tls_selfsigned_ca_csr_path: "{{ aap_tls_selfsigned_output_dir }}/aap-selfsigned-ca.csr"
+    aap_tls_selfsigned_ca_cert_path: "{{ aap_tls_selfsigned_output_dir }}/aap-selfsigned-ca.crt"
+    aap_tls_selfsigned_key_path: "{{ aap_tls_selfsigned_output_dir }}/aap.key"
+    aap_tls_selfsigned_csr_path: "{{ aap_tls_selfsigned_output_dir }}/aap.csr"
+    aap_tls_selfsigned_cert_path: "{{ aap_tls_selfsigned_output_dir }}/aap.crt"
+    aap_tls_selfsigned_ca_common_name: "AAP Self-Signed CA"
+    aap_tls_selfsigned_common_name: "{{ ansible_host | default(inventory_hostname) }}"
+    aap_tls_selfsigned_dns_names:
+      - "{{ ansible_host | default(inventory_hostname) }}"
+    aap_tls_selfsigned_ca_days: 3650
+    aap_tls_selfsigned_cert_days: 825
+    aap_tls_selfsigned_key_size: 4096
+    aap_tls_selfsigned_force: false
+
+  tasks:
+    - name: Skip temporary self-signed TLS generation when disabled
+      ansible.builtin.debug:
+        msg: "AAP temporary self-signed TLS generation skipped."
+      changed_when: false
+      when: not (aap_tls_selfsigned_enabled | bool)
+
+    - name: Ensure temporary TLS output directory exists
+      ansible.builtin.file:
+        path: "{{ aap_tls_selfsigned_output_dir }}"
+        state: directory
+        mode: "0750"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Generate temporary AAP self-signed CA private key
+      community.crypto.openssl_privatekey:
+        path: "{{ aap_tls_selfsigned_ca_key_path }}"
+        size: "{{ aap_tls_selfsigned_key_size }}"
+        type: RSA
+        mode: "0600"
+        force: "{{ aap_tls_selfsigned_force | bool }}"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Generate temporary AAP service private key
+      community.crypto.openssl_privatekey:
+        path: "{{ aap_tls_selfsigned_key_path }}"
+        size: "{{ aap_tls_selfsigned_key_size }}"
+        type: RSA
+        mode: "0600"
+        force: "{{ aap_tls_selfsigned_force | bool }}"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Generate temporary AAP self-signed CA certificate signing request
+      community.crypto.openssl_csr:
+        path: "{{ aap_tls_selfsigned_ca_csr_path }}"
+        privatekey_path: "{{ aap_tls_selfsigned_ca_key_path }}"
+        common_name: "{{ aap_tls_selfsigned_ca_common_name }}"
+        basic_constraints:
+          - "CA:TRUE"
+        basic_constraints_critical: true
+        key_usage:
+          - keyCertSign
+          - cRLSign
+        key_usage_critical: true
+        mode: "0644"
+        force: "{{ aap_tls_selfsigned_force | bool }}"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Generate temporary AAP self-signed CA certificate
+      community.crypto.x509_certificate:
+        path: "{{ aap_tls_selfsigned_ca_cert_path }}"
+        csr_path: "{{ aap_tls_selfsigned_ca_csr_path }}"
+        privatekey_path: "{{ aap_tls_selfsigned_ca_key_path }}"
+        provider: selfsigned
+        selfsigned_not_after: "+{{ aap_tls_selfsigned_ca_days }}d"
+        selfsigned_create_subject_key_identifier: create_if_not_provided
+        mode: "0644"
+        force: "{{ aap_tls_selfsigned_force | bool }}"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Generate temporary AAP certificate signing request
+      community.crypto.openssl_csr:
+        path: "{{ aap_tls_selfsigned_csr_path }}"
+        privatekey_path: "{{ aap_tls_selfsigned_key_path }}"
+        common_name: "{{ aap_tls_selfsigned_common_name }}"
+        subject_alt_name: >-
+          {{
+            aap_tls_selfsigned_dns_names
+            | map('regex_replace', '^(.*)$', 'DNS:\\1')
+            | list
+          }}
+        mode: "0644"
+        force: "{{ aap_tls_selfsigned_force | bool }}"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Generate temporary AAP service certificate signed by temporary CA
+      community.crypto.x509_certificate:
+        path: "{{ aap_tls_selfsigned_cert_path }}"
+        csr_path: "{{ aap_tls_selfsigned_csr_path }}"
+        ownca_path: "{{ aap_tls_selfsigned_ca_cert_path }}"
+        ownca_privatekey_path: "{{ aap_tls_selfsigned_ca_key_path }}"
+        provider: ownca
+        ownca_not_after: "+{{ aap_tls_selfsigned_cert_days }}d"
+        ownca_create_subject_key_identifier: create_if_not_provided
+        ownca_create_authority_key_identifier: true
+        mode: "0644"
+        force: "{{ aap_tls_selfsigned_force | bool }}"
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Inspect generated temporary AAP certificate
+      community.crypto.x509_certificate_info:
+        path: "{{ aap_tls_selfsigned_cert_path }}"
+      register: aap_tls_selfsigned_cert_info
+      delegate_to: localhost
+      when: aap_tls_selfsigned_enabled | bool
+
+    - name: Assert generated temporary AAP certificate has expected SANs
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              aap_tls_selfsigned_dns_names
+              | map('regex_replace', '^(.*)$', 'DNS:\\1')
+              | list
+              | difference(aap_tls_selfsigned_cert_info.subject_alt_name | default([]))
+              | length
+            ) == 0
+        fail_msg: "Generated temporary AAP certificate is missing expected DNS SANs."
+        quiet: true
+      when: aap_tls_selfsigned_enabled | bool
