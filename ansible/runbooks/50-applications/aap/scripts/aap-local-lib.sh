@@ -12,10 +12,15 @@ modulix_aap_set_defaults() {
   : "${AAP_VAULT_DEFAULTS_KV_PATH:=defaults}"
   : "${AAP_INVENTORY_HOST:=${AAP_SHORTNAME}}"
   : "${AAP_APPL_ROOT:=/appl/modulix-aap}"
-  : "${AAP_EXPORT_ROOT:=/appl/modulix-aap-export}"
   : "${AAP_ENV_FILE:=${AAP_APPL_ROOT}/etc/aap-local.env}"
   : "${AAP_SECRETS_DIR:=${AAP_APPL_ROOT}/secrets}"
   : "${AAP_SSH_KEY:=${AAP_SECRETS_DIR}/svc_ansible_aap}"
+  : "${MACHINE_A_APPL_ROOT:=${HOME}/appl/modulix-aap}"
+  : "${MACHINE_A_EXPORT_ROOT:=${HOME}/appl/modulix-aap-export}"
+  : "${MACHINE_A_ENV_FILE:=${MACHINE_A_APPL_ROOT}/etc/aap-local.env}"
+  : "${MACHINE_A_SECRETS_DIR:=${MACHINE_A_APPL_ROOT}/secrets}"
+  : "${MACHINE_A_SSH_KEY:=${MACHINE_A_SECRETS_DIR}/svc_ansible_aap}"
+  : "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS:=${MACHINE_A_SECRETS_DIR}/bootstrap_known_hosts}"
   : "${AAP_SSH_KEY_CONTAINER:=/runner/secrets/$(basename "${AAP_SSH_KEY}")}"
   : "${AUTOMATION_DIR:=${AAP_APPL_ROOT}/src/modulix-automation}"
   : "${AUTOMATION_ANSIBLE_DIR:=${AUTOMATION_DIR}/ansible}"
@@ -29,15 +34,22 @@ modulix_aap_set_defaults() {
   : "${ANSIBLE_VAULT_PASSWORD_FILE:=${AAP_SECRETS_DIR}/.vault-pass.txt}"
   : "${ANSIBLE_COLLECTIONS_PATH:=/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
 
+  if [[ -z "${VAULT_TOKEN:-}" && -r "${AAP_SECRETS_DIR}/.vault-token" ]]; then
+    VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
+  fi
+
   export AAP_SHORTNAME AAP_USER AAP_INSTALL_USER
   export AAP_BOOTSTRAP_USER AAP_BASELINE_SSH_KEY AAP_BOOTSTRAP_SSH_KEY
   export AAP_VAULT_HOST_KEY AAP_VAULT_ADMIN_PASSWORDS_KV_PATH AAP_VAULT_DEFAULTS_KV_PATH
-  export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_EXPORT_ROOT AAP_ENV_FILE
+  export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_ENV_FILE
   export AAP_SECRETS_DIR AAP_SSH_KEY AAP_SSH_KEY_CONTAINER
+  export MACHINE_A_APPL_ROOT MACHINE_A_EXPORT_ROOT MACHINE_A_ENV_FILE
+  export MACHINE_A_SECRETS_DIR MACHINE_A_SSH_KEY MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
   export AUTOMATION_DIR AUTOMATION_ANSIBLE_DIR AAP_ARTIFACT_DIR
   export INVENTORY_REL INVENTORY_FILE
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
   export ANSIBLE_TOOLBOX_RUNTIME_MODE ANSIBLE_VAULT_PASSWORD_FILE ANSIBLE_COLLECTIONS_PATH
+  export VAULT_TOKEN
 }
 
 modulix_resolve_aap_artifacts() {

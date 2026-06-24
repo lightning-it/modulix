@@ -106,7 +106,7 @@
         subject_alt_name: >-
           {{
             aap_tls_selfsigned_dns_names
-            | map('regex_replace', '^(.*)$', 'DNS:\\1')
+            | map('regex_replace', '^', 'DNS:')
             | list
           }}
         mode: "0644"
@@ -142,7 +142,7 @@
           - >-
             (
               aap_tls_selfsigned_dns_names
-              | map('regex_replace', '^(.*)$', 'DNS:\\1')
+              | map('regex_replace', '^', 'DNS:')
               | list
               | difference(aap_tls_selfsigned_cert_info.subject_alt_name | default([]))
               | length

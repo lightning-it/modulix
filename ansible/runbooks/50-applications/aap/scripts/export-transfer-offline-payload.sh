@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-env_file="${1:-/appl/modulix-aap/etc/aap-local.env}"
+env_file="${1:-${HOME}/appl/modulix-aap/etc/aap-local.env}"
 
 if [[ ! -r "${env_file}" ]]; then
   printf 'AAP local env file not readable: %s\n' "${env_file}" >&2
@@ -20,12 +20,13 @@ required_vars=(
   AAP_APPL_ROOT
   AAP_BOOTSTRAP_SSH_KEY
   AAP_BOOTSTRAP_USER
-  AAP_ENV_FILE
-  AAP_EXPORT_ROOT
   AAP_FQDN
   AAP_SSH_KEY
+  MACHINE_A_APPL_ROOT
+  MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
+  MACHINE_A_EXPORT_ROOT
+  MACHINE_A_SSH_KEY
   MODULIX_RUN_EE_ARCHIVE
-  MODULIX_RUN_EE_ARCHIVE_PATH
   MODULIX_RUN_EE_IMAGE
 )
 
@@ -36,7 +37,9 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
-bootstrap_known_hosts="${AAP_APPL_ROOT}/secrets/bootstrap_known_hosts"
+machine_a_ee_archive_path="${MACHINE_A_MODULIX_RUN_EE_ARCHIVE_PATH:-${MACHINE_A_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}}"
+machine_a_source_archive_path="${MACHINE_A_APPL_ROOT}/artifacts/modulix-automation.tar.gz"
+bootstrap_known_hosts="${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}"
 
 ssh_opts=(
   -i "${AAP_BOOTSTRAP_SSH_KEY}"
@@ -47,29 +50,134 @@ ssh_opts=(
 
 remote="${AAP_BOOTSTRAP_USER}@${AAP_FQDN}"
 
-mapfile -t aap_artifact_files < <(
-  find "${AAP_EXPORT_ROOT}/artifacts/aap" -maxdepth 1 -type f \
-    \( -name 'ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz' -o -name 'manifest*.zip' \) |
+artifact_dir="${MACHINE_A_EXPORT_ROOT}/artifacts/aap"
+mkdir -p "${artifact_dir}"
+
+modulix_aap_download_artifact() {
+  local label="$1"
+  local url="$2"
+  local dest="$3"
+  local checksum="${4:-}"
+
+  if [[ -z "${url}" ]]; then
+    return 0
+  fi
+
+  if [[ ! -s "${dest}" || "${AAP_ARTIFACT_DOWNLOAD_FORCE:-false}" == "true" ]]; then
+    printf 'Downloading %s artifact: %s\n' "${label}" "${dest}"
+    curl -fL --retry 3 --retry-delay 5 \
+      -o "${dest}" \
+      "${url}"
+  else
+    printf 'Using existing %s artifact: %s\n' "${label}" "${dest}"
+  fi
+
+  if [[ -n "${checksum}" ]]; then
+    printf '%s  %s\n' "${checksum#sha256:}" "${dest}" | sha256sum -c -
+  fi
+}
+
+modulix_aap_download_artifact \
+  "AAP setup bundle" \
+  "${AAP_BUNDLE_URL:-}" \
+  "${artifact_dir}/${AAP_BUNDLE_FILENAME:-ansible-automation-platform-containerized-setup-bundle-2.7-1.1-x86_64.tar.gz}" \
+  "${AAP_BUNDLE_SHA256:-}"
+
+modulix_aap_download_artifact \
+  "AAP manifest" \
+  "${AAP_MANIFEST_URL:-}" \
+  "${artifact_dir}/${AAP_MANIFEST_FILENAME:-manifest.zip}" \
+  "${AAP_MANIFEST_SHA256:-}"
+
+mapfile -t aap_bundle_files < <(
+  find "${artifact_dir}" -maxdepth 1 -type f \
+    -name 'ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz' |
+    sort -V
+)
+mapfile -t aap_manifest_files < <(
+  find "${artifact_dir}" -maxdepth 1 -type f \
+    -name 'manifest*.zip' |
     sort -V
 )
 
-if [[ "${#aap_artifact_files[@]}" -lt 2 ]]; then
-  printf 'Expected AAP setup bundle and manifest in %s/artifacts/aap, found %s file(s).\n' \
-    "${AAP_EXPORT_ROOT}" "${#aap_artifact_files[@]}" >&2
+if [[ "${#aap_bundle_files[@]}" -ne 1 || "${#aap_manifest_files[@]}" -ne 1 ]]; then
+  printf 'Expected exactly one AAP setup bundle and one manifest in %s.\n' \
+    "${artifact_dir}" >&2
+  printf 'Found %s setup bundle file(s) and %s manifest file(s).\n' \
+    "${#aap_bundle_files[@]}" "${#aap_manifest_files[@]}" >&2
+  printf 'Copy exactly one file matching each pattern before rerunning:\n' >&2
+  printf '  %s/ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz\n' "${artifact_dir}" >&2
+  printf '  %s/manifest*.zip\n' "${artifact_dir}" >&2
+  printf 'Or set AAP_BUNDLE_URL and AAP_MANIFEST_URL in %s.\n' "${env_file}" >&2
   exit 1
 fi
 
-printf 'Pulling execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
-podman pull "${MODULIX_RUN_EE_IMAGE}"
+aap_artifact_files=("${aap_bundle_files[0]}" "${aap_manifest_files[0]}")
+aap_bundle_file="${aap_bundle_files[0]}"
+aap_manifest_file="${aap_manifest_files[0]}"
+
+bundle_min_size_bytes="${AAP_BUNDLE_MIN_SIZE_BYTES:-100000000}"
+bundle_size_bytes="$(stat -c '%s' "${aap_bundle_file}")"
+manifest_size_bytes="$(stat -c '%s' "${aap_manifest_file}")"
+
+if (( bundle_size_bytes < bundle_min_size_bytes )); then
+  printf 'AAP setup bundle is too small: %s (%s bytes, minimum %s bytes).\n' \
+    "${aap_bundle_file}" "${bundle_size_bytes}" "${bundle_min_size_bytes}" >&2
+  printf 'This usually means the file is not the real Red Hat containerized setup bundle.\n' >&2
+  exit 1
+fi
+
+if (( manifest_size_bytes <= 0 )); then
+  printf 'AAP manifest is empty: %s\n' "${aap_manifest_file}" >&2
+  exit 1
+fi
+
+if [[ -n "${AAP_BUNDLE_SHA256:-}" ]]; then
+  printf '%s  %s\n' "${AAP_BUNDLE_SHA256#sha256:}" "${aap_bundle_file}" | sha256sum -c -
+fi
+
+if [[ -n "${AAP_MANIFEST_SHA256:-}" ]]; then
+  printf '%s  %s\n' "${AAP_MANIFEST_SHA256#sha256:}" "${aap_manifest_file}" | sha256sum -c -
+fi
+
+if ! tar -tzf "${aap_bundle_file}" >/dev/null; then
+  printf 'AAP setup bundle is not a readable tar.gz archive: %s\n' "${aap_bundle_file}" >&2
+  exit 1
+fi
+
+if ! python3 - "${aap_manifest_file}" <<'PY'
+import sys
+import zipfile
+
+path = sys.argv[1]
+try:
+    with zipfile.ZipFile(path) as archive:
+        bad_member = archive.testzip()
+except zipfile.BadZipFile:
+    raise SystemExit(1)
+
+raise SystemExit(1 if bad_member else 0)
+PY
+then
+  printf 'AAP manifest is not a readable zip archive: %s\n' "${aap_manifest_file}" >&2
+  exit 1
+fi
+
+if podman image exists "${MODULIX_RUN_EE_IMAGE}" && [[ "${AAP_EE_PULL_FORCE:-false}" != "true" ]]; then
+  printf 'Using local execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
+else
+  printf 'Pulling execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
+  podman pull "${MODULIX_RUN_EE_IMAGE}"
+fi
 podman run --rm "${MODULIX_RUN_EE_IMAGE}" ansible-galaxy collection list
 
-printf 'Saving execution environment archive: %s\n' "${MODULIX_RUN_EE_ARCHIVE_PATH}"
+printf 'Saving execution environment archive: %s\n' "${machine_a_ee_archive_path}"
 podman save --format oci-archive \
-  -o "${MODULIX_RUN_EE_ARCHIVE_PATH}" \
+  -o "${machine_a_ee_archive_path}" \
   "${MODULIX_RUN_EE_IMAGE}"
 
 printf 'Creating automation source archive.\n'
-tar -C "${AAP_EXPORT_ROOT}/src" \
+tar -C "${MACHINE_A_EXPORT_ROOT}/src" \
   --exclude='modulix-automation/.git' \
   --exclude='modulix-automation/.artifacts' \
   --exclude='modulix-automation/ansible/.artifacts' \
@@ -81,7 +189,7 @@ tar -C "${AAP_EXPORT_ROOT}/src" \
   --exclude='modulix-automation/ansible/manifest*.zip' \
   --exclude='modulix-automation/packaging/rpm/.rpmbuild' \
   --exclude='modulix-automation/packaging/rpm/dist' \
-  -czf "${AAP_APPL_ROOT}/artifacts/modulix-automation.tar.gz" \
+  -czf "${machine_a_source_archive_path}" \
   modulix-automation
 
 printf 'AAP artifacts selected for transfer:\n'
@@ -103,14 +211,20 @@ ssh "${ssh_opts[@]}" "${remote}" \
 
 printf 'Transferring offline payload to %s.\n' "${AAP_FQDN}"
 scp "${ssh_opts[@]}" \
-  "${AAP_ENV_FILE}" \
-  "${AAP_APPL_ROOT}/artifacts/modulix-automation.tar.gz" \
-  "${MODULIX_RUN_EE_ARCHIVE_PATH}" \
-  "${AAP_SSH_KEY}" \
+  "${env_file}" \
+  "${machine_a_source_archive_path}" \
+  "${machine_a_ee_archive_path}" \
+  "${MACHINE_A_SSH_KEY}" \
   "${script_dir}/aap-local-lib.sh" \
   "${script_dir}/stage-runtime-on-aap-host.sh" \
   "${aap_artifact_files[@]}" \
   "${remote}:${AAP_APPL_ROOT}/inbox/"
+
+if [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
+  scp "${ssh_opts[@]}" \
+    "${MACHINE_A_SECRETS_DIR}/.vault-token" \
+    "${remote}:${AAP_APPL_ROOT}/inbox/.vault-token"
+fi
 
 printf 'Installing transferred payload into remote staging paths.\n'
 ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" <<'REMOTE_PAYLOAD'
@@ -119,6 +233,9 @@ modulix_run_ee_archive="$1"
 
    install -m 0600 /appl/modulix-aap/inbox/aap-local.env /appl/modulix-aap/etc/aap-local.env
    install -m 0600 /appl/modulix-aap/inbox/svc_ansible_aap /appl/modulix-aap/secrets/svc_ansible_aap
+   if [ -s /appl/modulix-aap/inbox/.vault-token ]; then
+     install -m 0600 /appl/modulix-aap/inbox/.vault-token /appl/modulix-aap/secrets/.vault-token
+   fi
    install -m 0644 /appl/modulix-aap/inbox/aap-local-lib.sh /appl/modulix-aap/scripts/aap-local-lib.sh
    install -m 0755 /appl/modulix-aap/inbox/stage-runtime-on-aap-host.sh /appl/modulix-aap/scripts/stage-runtime-on-aap-host.sh
    mv -f "/appl/modulix-aap/inbox/${modulix_run_ee_archive}" /appl/modulix-aap/artifacts/

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-env_file="${1:-/appl/modulix-aap/etc/aap-local.env}"
+env_file="${1:-${HOME}/appl/modulix-aap/etc/aap-local.env}"
 
 if [[ ! -r "${env_file}" ]]; then
   printf 'AAP local env file not readable: %s\n' "${env_file}" >&2
@@ -17,13 +17,13 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 modulix_aap_set_defaults
 
 required_vars=(
-  AAP_APPL_ROOT
   AAP_BASELINE_SSH_KEY
   AAP_BOOTSTRAP_SSH_KEY
-  AAP_EXPORT_ROOT
-  AAP_SECRETS_DIR
-  AAP_SSH_KEY
   AUTOMATION_REPO_URL
+  MACHINE_A_APPL_ROOT
+  MACHINE_A_EXPORT_ROOT
+  MACHINE_A_SECRETS_DIR
+  MACHINE_A_SSH_KEY
 )
 
 for var_name in "${required_vars[@]}"; do
@@ -33,17 +33,17 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
-sudo install -d -m 0750 -o "$(id -un)" -g "$(id -gn)" \
-  "${AAP_APPL_ROOT}" \
-  "${AAP_APPL_ROOT}/etc" \
-  "${AAP_SECRETS_DIR}" \
-  "${AAP_APPL_ROOT}/artifacts" \
-  "${AAP_EXPORT_ROOT}" \
-  "${AAP_EXPORT_ROOT}/artifacts/aap" \
-  "${AAP_EXPORT_ROOT}/src"
+install -d -m 0750 \
+  "${MACHINE_A_APPL_ROOT}" \
+  "${MACHINE_A_APPL_ROOT}/etc" \
+  "${MACHINE_A_SECRETS_DIR}" \
+  "${MACHINE_A_APPL_ROOT}/artifacts" \
+  "${MACHINE_A_EXPORT_ROOT}" \
+  "${MACHINE_A_EXPORT_ROOT}/artifacts/aap" \
+  "${MACHINE_A_EXPORT_ROOT}/src"
 
-if [[ -s "${AAP_BASELINE_SSH_KEY}" && ! -s "${AAP_SSH_KEY}" ]]; then
-  install -m 0600 "${AAP_BASELINE_SSH_KEY}" "${AAP_SSH_KEY}"
+if [[ -s "${AAP_BASELINE_SSH_KEY}" && ! -s "${MACHINE_A_SSH_KEY}" ]]; then
+  install -m 0600 "${AAP_BASELINE_SSH_KEY}" "${MACHINE_A_SSH_KEY}"
 fi
 
 if [[ ! -s "${AAP_BOOTSTRAP_SSH_KEY}" ]]; then
@@ -52,14 +52,44 @@ if [[ ! -s "${AAP_BOOTSTRAP_SSH_KEY}" ]]; then
   exit 1
 fi
 
-if [[ ! -s "${AAP_SSH_KEY}" ]]; then
-  ssh-keygen -t ed25519 -f "${AAP_SSH_KEY}" -N ''
+if [[ ! -s "${MACHINE_A_SSH_KEY}" ]]; then
+  ssh-keygen -t ed25519 -f "${MACHINE_A_SSH_KEY}" -N ''
 fi
-chmod 0600 "${AAP_SSH_KEY}"
+chmod 0600 "${MACHINE_A_SSH_KEY}"
 
-if [[ ! -d "${AAP_EXPORT_ROOT}/src/modulix-automation" ]]; then
-  git clone "${AUTOMATION_REPO_URL}" "${AAP_EXPORT_ROOT}/src/modulix-automation"
+if [[ -n "${VAULT_TOKEN:-}" ]]; then
+  printf '%s' "${VAULT_TOKEN}" >"${MACHINE_A_SECRETS_DIR}/.vault-token"
+elif [[ -r "${HOME}/.vault-token" ]]; then
+  tr -d '\r\n' <"${HOME}/.vault-token" >"${MACHINE_A_SECRETS_DIR}/.vault-token"
 fi
-git -C "${AAP_EXPORT_ROOT}/src/modulix-automation" pull --ff-only
+if [[ -f "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
+  chmod 0600 "${MACHINE_A_SECRETS_DIR}/.vault-token"
+fi
 
-printf 'Machine A AAP staging is ready: %s\n' "${AAP_APPL_ROOT}"
+if [[ -n "${AAP_AUTOMATION_SOURCE_DIR:-}" ]]; then
+  if [[ ! -f "${AAP_AUTOMATION_SOURCE_DIR}/ansible/ansible.cfg" ]]; then
+    printf 'AAP automation source directory is not a modulix-automation checkout: %s\n' \
+      "${AAP_AUTOMATION_SOURCE_DIR}" >&2
+    exit 1
+  fi
+  mkdir -p "${MACHINE_A_EXPORT_ROOT}/src/modulix-automation"
+  rsync -a --delete \
+    --exclude='.git' \
+    --exclude='.artifacts' \
+    --exclude='ansible/.artifacts' \
+    --exclude='ansible/.tmp' \
+    --exclude='ansible/ansible-navigator.log' \
+    --exclude='ansible/venv-*' \
+    --exclude='ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz' \
+    --exclude='ansible/manifest*.zip' \
+    --exclude='packaging/rpm/.rpmbuild' \
+    --exclude='packaging/rpm/dist' \
+    "${AAP_AUTOMATION_SOURCE_DIR}/" \
+    "${MACHINE_A_EXPORT_ROOT}/src/modulix-automation/"
+elif [[ ! -d "${MACHINE_A_EXPORT_ROOT}/src/modulix-automation" ]]; then
+  git clone "${AUTOMATION_REPO_URL}" "${MACHINE_A_EXPORT_ROOT}/src/modulix-automation"
+else
+  git -C "${MACHINE_A_EXPORT_ROOT}/src/modulix-automation" pull --ff-only
+fi
+
+printf 'Machine A AAP staging is ready: %s\n' "${MACHINE_A_APPL_ROOT}"

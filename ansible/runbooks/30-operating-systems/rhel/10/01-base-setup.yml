@@ -345,6 +345,50 @@
       when: virtual_guest_enabled | default(true) | bool
       tags: [virtual_guest, base_config]
 
+    - name: Grow root LVM filesystem to fill the VM disk
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        root_source="$(findmnt -n -o SOURCE /)"
+        root_lv="${root_source}"
+
+        if ! lvs "${root_lv}" >/dev/null 2>&1; then
+          printf 'Root filesystem is not on an LVM LV: %s\n' "${root_source}"
+          exit 0
+        fi
+
+        root_vg="$(lvs --noheadings -o vg_name "${root_lv}" | awk '{print $1}')"
+        root_pv="$(pvs --noheadings -o pv_name --select "vg_name=${root_vg}" | awk 'NR == 1 {print $1}')"
+
+        if [ -z "${root_pv}" ]; then
+          printf 'No PV found for VG %s\n' "${root_vg}" >&2
+          exit 1
+        fi
+
+        part_num="$(lsblk -no PARTN "${root_pv}" | awk 'NR == 1 {print $1}')"
+        parent_name="$(lsblk -no PKNAME "${root_pv}" | awk 'NR == 1 {print $1}')"
+
+        if [ -n "${part_num}" ] && [ -n "${parent_name}" ]; then
+          growpart "/dev/${parent_name}" "${part_num}" || true
+        fi
+
+        pvresize_output="$(pvresize "${root_pv}" 2>&1 || true)"
+        printf '%s\n' "${pvresize_output}"
+
+        free_extents="$(vgs --noheadings -o vg_free_count "${root_vg}" | awk '{print $1}')"
+        if [ "${free_extents:-0}" -gt 0 ]; then
+          lvextend -r -l +100%FREE "${root_lv}"
+          printf 'CHANGED: grew %s using %s free extents\n' "${root_lv}" "${free_extents}"
+        else
+          printf 'Root LV already consumes all free VG extents.\n'
+        fi
+      args:
+        executable: /bin/bash
+      register: rhel10_root_lvm_grow
+      changed_when: "'CHANGED:' in rhel10_root_lvm_grow.stdout"
+      when: rhel_root_lvm_grow_enabled | default(false) | bool
+      tags: [storage, base_config]
+
     - name: Baseline
       ansible.builtin.include_role:
         name: lit.rhel.baseline

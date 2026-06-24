@@ -184,6 +184,44 @@
         - os_prep
         - podman
 
+    - name: Clean stale install-user runtime before first AAP install
+      ansible.builtin.shell: |
+        set -euo pipefail
+        install_marker="{{ aap_deploy_installed_marker_path | default('/appl/aap/.aap_containerized_installed', true) }}"
+        install_user="{{ aap_runbook_install_user_effective }}"
+
+        if [ -f "${install_marker}" ]; then
+          echo "installed-marker-present"
+          exit 0
+        fi
+
+        if ! pgrep -u "${install_user}" >/dev/null 2>&1; then
+          echo "no-stale-runtime"
+          exit 0
+        fi
+
+        loginctl terminate-user "${install_user}" 2>/dev/null || true
+        pkill -u "${install_user}" 2>/dev/null || true
+        sleep 2
+
+        if pgrep -a -u "${install_user}"; then
+          echo "stale-runtime-still-running" >&2
+          exit 1
+        fi
+
+        echo "stale-runtime-cleaned"
+      args:
+        executable: /bin/bash
+      register: aap_runbook_install_user_runtime_cleanup
+      changed_when: "'stale-runtime-cleaned' in aap_runbook_install_user_runtime_cleanup.stdout"
+      when:
+        - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - runtime
+
     - name: Verify AAP base OS substrate
       ansible.builtin.shell: |
         set -euo pipefail
