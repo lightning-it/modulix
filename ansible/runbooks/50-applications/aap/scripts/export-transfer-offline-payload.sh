@@ -18,14 +18,11 @@ modulix_aap_set_defaults
 
 required_vars=(
   AAP_APPL_ROOT
-  AAP_BOOTSTRAP_SSH_KEY
   AAP_BOOTSTRAP_USER
   AAP_FQDN
-  AAP_SSH_KEY
   MACHINE_A_APPL_ROOT
   MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
   MACHINE_A_EXPORT_ROOT
-  MACHINE_A_SSH_KEY
   MODULIX_RUN_EE_ARCHIVE
   MODULIX_RUN_EE_IMAGE
 )
@@ -39,14 +36,24 @@ done
 
 machine_a_ee_archive_path="${MACHINE_A_MODULIX_RUN_EE_ARCHIVE_PATH:-${MACHINE_A_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}}"
 machine_a_source_archive_path="${MACHINE_A_APPL_ROOT}/artifacts/modulix-automation.tar.gz"
+machine_a_ssh_key_basename=""
+if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+  if [[ -z "${AAP_BOOTSTRAP_SSH_KEY:-}" || -z "${AAP_SSH_KEY:-}" || -z "${MACHINE_A_SSH_KEY:-}" ]]; then
+    printf 'SSH key auth is enabled, but key variables are incomplete.\n' >&2
+    exit 1
+  fi
+  machine_a_ssh_key_basename="$(basename "${MACHINE_A_SSH_KEY}")"
+fi
 bootstrap_known_hosts="${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}"
 
 ssh_opts=(
-  -i "${AAP_BOOTSTRAP_SSH_KEY}"
-  -o IdentitiesOnly=yes
   -o UserKnownHostsFile="${bootstrap_known_hosts}"
   -o StrictHostKeyChecking=accept-new
 )
+
+if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+  ssh_opts=(-i "${AAP_BOOTSTRAP_SSH_KEY}" -o IdentitiesOnly=yes "${ssh_opts[@]}")
+fi
 
 remote="${AAP_BOOTSTRAP_USER}@${AAP_FQDN}"
 
@@ -214,11 +221,16 @@ scp "${ssh_opts[@]}" \
   "${env_file}" \
   "${machine_a_source_archive_path}" \
   "${machine_a_ee_archive_path}" \
-  "${MACHINE_A_SSH_KEY}" \
   "${script_dir}/aap-local-lib.sh" \
   "${script_dir}/stage-runtime-on-aap-host.sh" \
   "${aap_artifact_files[@]}" \
   "${remote}:${AAP_APPL_ROOT}/inbox/"
+
+if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
+  scp "${ssh_opts[@]}" \
+    "${MACHINE_A_SSH_KEY}" \
+    "${remote}:${AAP_APPL_ROOT}/inbox/"
+fi
 
 if [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
   scp "${ssh_opts[@]}" \
@@ -227,12 +239,16 @@ if [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
 fi
 
 printf 'Installing transferred payload into remote staging paths.\n'
-ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" <<'REMOTE_PAYLOAD'
+ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" "${machine_a_ssh_key_basename}" <<'REMOTE_PAYLOAD'
 set -euo pipefail
 modulix_run_ee_archive="$1"
+machine_a_ssh_key_basename="$2"
 
    install -m 0600 /appl/modulix-aap/inbox/aap-local.env /appl/modulix-aap/etc/aap-local.env
-   install -m 0600 /appl/modulix-aap/inbox/svc_ansible_aap /appl/modulix-aap/secrets/svc_ansible_aap
+   . /appl/modulix-aap/etc/aap-local.env
+   if [ -n "${machine_a_ssh_key_basename}" ]; then
+     install -m 0600 "/appl/modulix-aap/inbox/${machine_a_ssh_key_basename}" "${AAP_SSH_KEY}"
+   fi
    if [ -s /appl/modulix-aap/inbox/.vault-token ]; then
      install -m 0600 /appl/modulix-aap/inbox/.vault-token /appl/modulix-aap/secrets/.vault-token
    fi
