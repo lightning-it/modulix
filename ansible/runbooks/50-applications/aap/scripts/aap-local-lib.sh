@@ -7,6 +7,14 @@ modulix_aap_set_defaults() {
   : "${AAP_ANSIBLE_BECOME_FLAGS:=}"
   : "${AAP_SSH_KEY_AUTH_ENABLED:=true}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
+        "${AAP_USER}" == "root" &&
+        "${AAP_BOOTSTRAP_USER}" == "root" &&
+        -n "${SUDO_USER:-}" &&
+        "${SUDO_USER}" != "root" ]]; then
+    AAP_BOOTSTRAP_USER="${SUDO_USER}"
+    AAP_USER="${SUDO_USER}"
+  fi
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
     : "${AAP_BASELINE_SSH_KEY:=${HOME}/sources/modulix-automation/ansible/.tmp/${AAP_SHORTNAME}-secrets/svc_ansible_aap}"
     : "${AAP_BOOTSTRAP_SSH_KEY:=${AAP_BASELINE_SSH_KEY}}"
