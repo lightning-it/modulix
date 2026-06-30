@@ -1,0 +1,193 @@
+---
+# -----------------------------------------------------------------------------
+# AAP local-execution controller
+#
+# Purpose:
+# - Let Machine A drive the AAP local-execution workflow with Ansible inventory
+#   variables instead of hand-maintained shell env files.
+# - Keep the existing shell helpers as narrow execution adapters while the
+#   rollout logic is moved into runbooks over time.
+# -----------------------------------------------------------------------------
+
+- name: Control AAP local-execution workflow from Machine A
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_local_action: prepare_machine_a
+    aap_local_run_playbook_args: []
+
+    machine_a_appl_root: "{{ lookup('ansible.builtin.env', 'HOME') }}/appl/modulix-aap"
+    machine_a_export_root: "{{ lookup('ansible.builtin.env', 'HOME') }}/appl/modulix-aap-export"
+    machine_a_env_file: "{{ machine_a_appl_root }}/etc/aap-local.env"
+    machine_a_secrets_dir: "{{ machine_a_appl_root }}/secrets"
+    machine_a_bootstrap_known_hosts: "{{ machine_a_secrets_dir }}/bootstrap_known_hosts"
+
+    aap_appl_root: /appl/modulix-aap
+    aap_env_file: "{{ aap_appl_root }}/etc/aap-local.env"
+    aap_secrets_dir: "{{ aap_appl_root }}/secrets"
+    aap_automation_dir: "{{ aap_appl_root }}/src/modulix-automation"
+    aap_automation_ansible_dir: "{{ aap_automation_dir }}/ansible"
+    aap_scripts_dir: "{{ playbook_dir }}/scripts"
+    aap_local_env_mode: "0600"
+
+    aap_local_allowed_actions:
+      - prepare_machine_a
+      - transfer_payload
+      - stage_runtime
+      - artifacts
+      - base_preflight
+      - tls
+      - deploy
+      - status
+
+    aap_local_remote_playbooks:
+      artifacts:
+        - runbooks/50-applications/aap/05-artifacts.yml
+      base_preflight:
+        - runbooks/50-applications/aap/06-base-os-prepare.yml
+        - runbooks/50-applications/aap/07-preflight.yml
+      tls:
+        - runbooks/50-applications/aap/08-tls-selfsigned.yml
+      deploy:
+        - runbooks/50-applications/aap/10-deploy.yml
+      status:
+        - runbooks/50-applications/aap/20-ops.yml
+
+  pre_tasks:
+    - name: Validate requested local AAP action
+      ansible.builtin.assert:
+        that:
+          - aap_local_action in aap_local_allowed_actions
+        fail_msg: >-
+          Unsupported aap_local_action={{ aap_local_action }}. Supported values:
+          {{ aap_local_allowed_actions | join(', ') }}.
+        quiet: true
+
+    - name: Validate required AAP local inventory values
+      ansible.builtin.assert:
+        that:
+          - aap_fqdn | default('', true) | string | trim | length > 0
+          - aap_bootstrap_user | default('', true) | string | trim | length > 0
+          - aap_user | default('', true) | string | trim | length > 0
+          - modulix_run_ee_image | default('', true) | string | trim | length > 0
+        fail_msg: >-
+          AAP local execution requires aap_fqdn, aap_bootstrap_user, aap_user,
+          and modulix_run_ee_image in inventory.
+        quiet: true
+
+    - name: Ensure Machine A local directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ machine_a_appl_root }}/etc", mode: "0750" }
+        - { path: "{{ machine_a_secrets_dir }}", mode: "0750" }
+        - { path: "{{ machine_a_appl_root }}/artifacts", mode: "0750" }
+        - { path: "{{ machine_a_export_root }}/src", mode: "0750" }
+        - { path: "{{ machine_a_export_root }}/artifacts/aap", mode: "0750" }
+
+    - name: Write AAP local env file from inventory values
+      ansible.builtin.copy:
+        dest: "{{ machine_a_env_file }}"
+        mode: "{{ aap_local_env_mode }}"
+        content: |
+          export AAP_FQDN="{{ aap_fqdn }}"
+          export AAP_SHORTNAME="{{ aap_shortname | default(aap_fqdn.split('.')[0], true) }}"
+          export AAP_INVENTORY_HOST="{{ aap_inventory_host | default(aap_shortname | default(aap_fqdn.split('.')[0], true), true) }}"
+          export AAP_BOOTSTRAP_USER="{{ aap_bootstrap_user | default(aap_user, true) }}"
+          export AAP_USER="{{ aap_user | default(aap_bootstrap_user, true) }}"
+          export AAP_INSTALL_USER="{{ aap_install_user | default('svc_aap', true) }}"
+          export AAP_ANSIBLE_BECOME_FLAGS="{{ aap_ansible_become_flags | default('', true) }}"
+          export AAP_SSH_KEY_AUTH_ENABLED={{ aap_ssh_key_auth_enabled | default(true) | bool | ternary('true', 'false') }}
+          export AAP_REMOTE_TMP_BOOTSTRAP_RAW={{ aap_remote_tmp_bootstrap_raw | default(true) | bool | ternary('true', 'false') }}
+
+          export MACHINE_A_APPL_ROOT="{{ machine_a_appl_root }}"
+          export MACHINE_A_EXPORT_ROOT="{{ machine_a_export_root }}"
+          export MACHINE_A_ENV_FILE="{{ machine_a_env_file }}"
+          export MACHINE_A_SECRETS_DIR="{{ machine_a_secrets_dir }}"
+          export MACHINE_A_BOOTSTRAP_KNOWN_HOSTS="{{ machine_a_bootstrap_known_hosts }}"
+
+          export VAULT_ADDR="{{ vault_addr | default('', true) }}"
+          export VAULT_SKIP_VERIFY={{ vault_skip_verify | default(false) | bool | ternary('true', 'false') }}
+          export VAULT_TOKEN="${VAULT_TOKEN:-}"
+          export VAULT_ENGINE_MOUNT_POINT="{{ vault_engine_mount_point | default('', true) }}"
+          export AAP_VAULT_HOST_KEY="{{ aap_vault_host_key | default(aap_shortname | default(aap_fqdn.split('.')[0], true), true) }}"
+          export AAP_VAULT_ADMIN_PASSWORDS_KV_PATH="{{ aap_vault_admin_passwords_kv_path | default((aap_vault_host_key | default(aap_shortname | default(aap_fqdn.split('.')[0], true), true)) ~ '/aap/deploy/admin_passwords', true) }}"
+          export AAP_VAULT_DEFAULTS_KV_PATH="{{ aap_vault_defaults_kv_path | default((aap_vault_host_key | default(aap_shortname | default(aap_fqdn.split('.')[0], true), true)) ~ '/aap/deploy/defaults', true) }}"
+
+          export AUTOMATION_REPO_URL="{{ automation_repo_url | default('https://github.com/lightning-it/modulix-automation.git', true) }}"
+          export INVENTORY_NAME="{{ inventory_name | default('corp', true) }}"
+          export MODULIX_RUN_EE_IMAGE="{{ modulix_run_ee_image }}"
+          export AAP_EE_TRANSFER_ENABLED={{ aap_ee_transfer_enabled | default(true) | bool | ternary('true', 'false') }}
+          export AAP_AUTOMATION_SOURCE_DIR="{{ aap_automation_source_dir | default('', true) }}"
+
+          export AAP_BUNDLE_FILENAME="{{ aap_bundle_filename | default('ansible-automation-platform-containerized-setup-bundle-2.7-1.2-x86_64.tar.gz', true) }}"
+          export AAP_BUNDLE_SHA256="{{ aap_bundle_sha256 | default('', true) }}"
+          export AAP_BUNDLE_MIN_SIZE_BYTES="{{ aap_bundle_min_size_bytes | default('100000000', true) }}"
+          export AAP_BUNDLE_URL="{{ aap_bundle_url | default('', true) }}"
+          export AAP_MANIFEST_FILENAME="{{ aap_manifest_filename | default('manifest.zip', true) }}"
+          export AAP_MANIFEST_SHA256="{{ aap_manifest_sha256 | default('', true) }}"
+          export AAP_MANIFEST_URL="{{ aap_manifest_url | default('', true) }}"
+
+          export AAP_APPL_ROOT="{{ aap_appl_root }}"
+          export AAP_ENV_FILE="{{ aap_env_file }}"
+          export AAP_SECRETS_DIR="{{ aap_secrets_dir }}"
+          export AUTOMATION_DIR="{{ aap_automation_dir }}"
+          export AUTOMATION_ANSIBLE_DIR="{{ aap_automation_ansible_dir }}"
+
+  tasks:
+    - name: Prepare Machine A staging
+      ansible.builtin.command:
+        argv:
+          - "{{ aap_scripts_dir }}/prepare-machine-a.sh"
+          - "{{ machine_a_env_file }}"
+      changed_when: false
+      when: aap_local_action == 'prepare_machine_a'
+
+    - name: Transfer AAP payload to target host
+      ansible.builtin.command:
+        argv:
+          - "{{ aap_scripts_dir }}/export-transfer-offline-payload.sh"
+          - "{{ machine_a_env_file }}"
+      changed_when: false
+      when: aap_local_action == 'transfer_payload'
+
+    - name: Stage AAP runtime on target host
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -A
+          - -o
+          - "UserKnownHostsFile={{ machine_a_bootstrap_known_hosts }}"
+          - -o
+          - StrictHostKeyChecking=accept-new
+          - "{{ aap_bootstrap_user | default(aap_user, true) }}@{{ aap_fqdn }}"
+          - "sudo --preserve-env=SSH_AUTH_SOCK -n -i {{ aap_appl_root }}/scripts/stage-runtime-on-aap-host.sh"
+      changed_when: false
+      when: aap_local_action == 'stage_runtime'
+
+    - name: Run AAP playbooks on target host
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'ssh',
+              '-A',
+              '-o',
+              'UserKnownHostsFile=' ~ machine_a_bootstrap_known_hosts,
+              '-o',
+              'StrictHostKeyChecking=accept-new',
+              (aap_bootstrap_user | default(aap_user, true)) ~ '@' ~ aap_fqdn,
+              'sudo --preserve-env=SSH_AUTH_SOCK -n -i ' ~ aap_appl_root ~ '/scripts/run-aap-playbooks.sh'
+            ]
+            + aap_local_remote_playbooks[aap_local_action]
+            + (
+              (['--', '-e', 'aap_ops_action=status'] if aap_local_action == 'status' else [])
+              + aap_local_run_playbook_args
+            )
+          }}
+      changed_when: false
+      when: aap_local_action in aap_local_remote_playbooks
