@@ -69,6 +69,7 @@ modulix_aap_set_defaults() {
   : "${AAP_PODMAN_ROOT_GRAPHROOT:=/appl/podman/root-storage}"
   : "${AAP_PODMAN_ROOT_RUNROOT:=/appl/podman/root-run}"
   : "${AAP_PODMAN_TMPDIR:=/appl/tmp}"
+  : "${AAP_EE_TRANSFER_ENABLED:=true}"
 
   if [[ -z "${VAULT_TOKEN:-}" && -r "${AAP_SECRETS_DIR}/.vault-token" ]]; then
     VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
@@ -87,6 +88,7 @@ modulix_aap_set_defaults() {
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
   export ANSIBLE_TOOLBOX_RUNTIME_MODE ANSIBLE_VAULT_PASSWORD_FILE ANSIBLE_COLLECTIONS_PATH
   export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT AAP_PODMAN_TMPDIR
+  export AAP_EE_TRANSFER_ENABLED
   export VAULT_TOKEN
 }
 

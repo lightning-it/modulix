@@ -170,18 +170,23 @@ then
   exit 1
 fi
 
-if podman image exists "${MODULIX_RUN_EE_IMAGE}" && [[ "${AAP_EE_PULL_FORCE:-false}" != "true" ]]; then
-  printf 'Using local execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
-else
-  printf 'Pulling execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
-  podman pull "${MODULIX_RUN_EE_IMAGE}"
-fi
-podman image inspect "${MODULIX_RUN_EE_IMAGE}" >/dev/null
+if [[ "${AAP_EE_TRANSFER_ENABLED}" == "true" ]]; then
+  if podman image exists "${MODULIX_RUN_EE_IMAGE}" && [[ "${AAP_EE_PULL_FORCE:-false}" != "true" ]]; then
+    printf 'Using local execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
+  else
+    printf 'Pulling execution environment: %s\n' "${MODULIX_RUN_EE_IMAGE}"
+    podman pull "${MODULIX_RUN_EE_IMAGE}"
+  fi
+  podman image inspect "${MODULIX_RUN_EE_IMAGE}" >/dev/null
 
-printf 'Saving execution environment archive: %s\n' "${machine_a_ee_archive_path}"
-podman save --format oci-archive \
-  -o "${machine_a_ee_archive_path}" \
-  "${MODULIX_RUN_EE_IMAGE}"
+  printf 'Saving execution environment archive: %s\n' "${machine_a_ee_archive_path}"
+  podman save --format oci-archive \
+    -o "${machine_a_ee_archive_path}" \
+    "${MODULIX_RUN_EE_IMAGE}"
+else
+  printf 'Skipping execution environment archive transfer; AAP host will use registry image: %s\n' \
+    "${MODULIX_RUN_EE_IMAGE}"
+fi
 
 printf 'Creating automation source archive.\n'
 tar -C "${MACHINE_A_EXPORT_ROOT}/src" \
@@ -220,15 +225,21 @@ ssh "${ssh_opts[@]}" "${remote}" \
      /appl/podman/root-storage \
      /appl/podman/root-run'
 
+transfer_files=(
+  "${env_file}"
+  "${machine_a_source_archive_path}"
+  "${script_dir}/aap-local-lib.sh"
+  "${script_dir}/run-aap-playbooks.sh"
+  "${script_dir}/stage-runtime-on-aap-host.sh"
+  "${aap_artifact_files[@]}"
+)
+if [[ "${AAP_EE_TRANSFER_ENABLED}" == "true" ]]; then
+  transfer_files+=("${machine_a_ee_archive_path}")
+fi
+
 printf 'Transferring offline payload to %s.\n' "${AAP_FQDN}"
 scp "${ssh_opts[@]}" \
-  "${env_file}" \
-  "${machine_a_source_archive_path}" \
-  "${machine_a_ee_archive_path}" \
-  "${script_dir}/aap-local-lib.sh" \
-  "${script_dir}/run-aap-playbooks.sh" \
-  "${script_dir}/stage-runtime-on-aap-host.sh" \
-  "${aap_artifact_files[@]}" \
+  "${transfer_files[@]}" \
   "${remote}:${AAP_APPL_ROOT}/inbox/"
 
 if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
@@ -244,10 +255,11 @@ if [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
 fi
 
 printf 'Installing transferred payload into remote staging paths.\n'
-ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" "${machine_a_ssh_key_basename}" <<'REMOTE_PAYLOAD'
+ssh "${ssh_opts[@]}" "${remote}" bash -s -- "${MODULIX_RUN_EE_ARCHIVE}" "${machine_a_ssh_key_basename}" "${AAP_EE_TRANSFER_ENABLED}" <<'REMOTE_PAYLOAD'
 set -euo pipefail
 modulix_run_ee_archive="$1"
 machine_a_ssh_key_basename="${2:-}"
+ee_transfer_enabled="${3:-true}"
 
    install -m 0600 /appl/modulix-aap/inbox/aap-local.env /appl/modulix-aap/etc/aap-local.env
    . /appl/modulix-aap/etc/aap-local.env
@@ -260,7 +272,9 @@ machine_a_ssh_key_basename="${2:-}"
    install -m 0644 /appl/modulix-aap/inbox/aap-local-lib.sh /appl/modulix-aap/scripts/aap-local-lib.sh
    install -m 0755 /appl/modulix-aap/inbox/run-aap-playbooks.sh /appl/modulix-aap/scripts/run-aap-playbooks.sh
    install -m 0755 /appl/modulix-aap/inbox/stage-runtime-on-aap-host.sh /appl/modulix-aap/scripts/stage-runtime-on-aap-host.sh
-   mv -f "/appl/modulix-aap/inbox/${modulix_run_ee_archive}" /appl/modulix-aap/artifacts/
+   if [ "${ee_transfer_enabled}" = "true" ]; then
+     mv -f "/appl/modulix-aap/inbox/${modulix_run_ee_archive}" /appl/modulix-aap/artifacts/
+   fi
    mv -f /appl/modulix-aap/inbox/modulix-automation.tar.gz /appl/modulix-aap/artifacts/
 REMOTE_PAYLOAD
 

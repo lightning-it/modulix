@@ -35,7 +35,11 @@ find "${AAP_APPL_ROOT}/inbox" -maxdepth 1 -type f \
   \( -name 'ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz' -o -name 'manifest*.zip' \) \
   -exec mv {} "${AAP_ARTIFACT_DIR}/" \;
 
-podman load -i "${MODULIX_RUN_EE_ARCHIVE_PATH}"
+if [[ "${AAP_EE_TRANSFER_ENABLED}" == "true" ]]; then
+  podman load -i "${MODULIX_RUN_EE_ARCHIVE_PATH}"
+else
+  podman pull "${MODULIX_RUN_EE_IMAGE}"
+fi
 podman image exists "${MODULIX_RUN_EE_IMAGE}"
 
 test -f "${ANSIBLE_VAULT_PASSWORD_FILE}" ||
