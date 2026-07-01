@@ -880,6 +880,28 @@
         label: "{{ item.path | basename }}"
       when: aap_local_action == 'stage_runtime'
 
+    - name: Check Podman command before staging execution environment
+      ansible.builtin.command:
+        argv:
+          - /bin/bash
+          - -lc
+          - command -v podman
+      register: aap_stage_runtime_podman_check
+      changed_when: false
+      failed_when: false
+      when: aap_local_action == 'stage_runtime'
+
+    - name: Assert Podman is available before staging execution environment
+      ansible.builtin.assert:
+        that:
+          - aap_stage_runtime_podman_check.rc == 0
+        fail_msg: >-
+          Podman is required before aap_action=stage_runtime can load or pull
+          the execution environment. Run the RHEL/AAP baseline preparation, or
+          have the customer-provided package baseline install podman first.
+        quiet: true
+      when: aap_local_action == 'stage_runtime'
+
     - name: Load execution environment archive when transfer is enabled
       ansible.builtin.command:
         argv:

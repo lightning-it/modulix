@@ -176,6 +176,12 @@
       - git
       - openssl
       - python3
+    aap_baseline_required_packages:
+      - sudo
+      - podman
+      - git
+      - openssl
+      - python3
     aap_baseline_owned_directories:
       - "{{ aap_effective_appl_root }}"
       - "{{ aap_effective_appl_root }}/etc"
@@ -294,6 +300,14 @@
       changed_when: false
       failed_when: false
       when: aap_baseline_action == 'verify'
+
+    - name: Install baseline packages when explicitly managed
+      ansible.builtin.dnf:
+        name: "{{ aap_baseline_required_packages }}"
+        state: present
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_manage_packages | default(false) | bool
 
     - name: Ensure AAP owned directories exist
       ansible.builtin.file:
