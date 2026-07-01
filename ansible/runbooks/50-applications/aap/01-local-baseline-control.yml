@@ -15,7 +15,7 @@
   gather_facts: false
 
   vars:
-    aap_baseline_action: verify
+    aap_baseline_action: "{{ aap_action | default('verify', true) }}"
     aap_baseline_allowed_actions:
       - local_setup
       - verify

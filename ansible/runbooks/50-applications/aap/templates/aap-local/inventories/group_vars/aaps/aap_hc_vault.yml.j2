@@ -1,0 +1,101 @@
+---
+vault_address: "{{ '{{' }} lookup('ansible.builtin.env', 'VAULT_ADDR') | default('{{ vault_addr | default('', true) }}', true) {{ '}}' }}"
+vault_engine_mount_point: "{{ '{{' }} lookup('ansible.builtin.env', 'VAULT_ENGINE_MOUNT_POINT') | default('{{ vault_engine_mount_point | default('', true) }}', true) {{ '}}' }}"
+vault_validate_certs: false
+
+aap_vault_host_key: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_VAULT_HOST_KEY') | default('{{ aap_vault_host_key | default(aap_effective_shortname, true) }}', true) {{ '}}' }}"
+hc_vault_aap_admin_passwords_kv_path: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_VAULT_ADMIN_PASSWORDS_KV_PATH') | default(aap_vault_host_key ~ '/aap/deploy/admin_passwords', true) {{ '}}' }}"
+hc_vault_defaults_kv_path: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_VAULT_DEFAULTS_KV_PATH') | default('{{ aap_vault_defaults_kv_path | default('', true) }}', true) {{ '}}' }}"
+
+hc_vault_addr: "{{ '{{' }} vault_address | trim {{ '}}' }}"
+hc_vault_engine_mount_point: "{{ '{{' }} vault_engine_mount_point | trim {{ '}}' }}"
+hc_vault_validate_certs: "{{ '{{' }} vault_validate_certs | bool {{ '}}' }}"
+hc_vault_token: >-
+  {{ '{{' }}
+    vault_token
+    | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | string | trim, true)
+    | string
+    | trim
+  {{ '}}' }}
+hc_vault_role_id: "{{ '{{' }} ansible_hashi_vault_role_id | default(vault_aap_role_id | default('', true), true) | string | trim {{ '}}' }}"
+hc_vault_secret_id: "{{ '{{' }} ansible_hashi_vault_secret_id | default(vault_aap_secret_id | default('', true), true) | string | trim {{ '}}' }}"
+hc_vault_use_token: "{{ '{{' }} hc_vault_token | length > 0 {{ '}}' }}"
+hc_vault_auth_method: "{{ '{{' }} 'token' if (hc_vault_use_token | bool) else 'approle' {{ '}}' }}"
+hc_vault_auth_ok: "{{ '{{' }} (hc_vault_token | length > 0) or ((hc_vault_role_id | length > 0) and (hc_vault_secret_id | length > 0)) {{ '}}' }}"
+
+hc_vault_aap_admin_passwords_secret: >-
+  {{ '{{' }}
+    lookup(
+      'community.hashi_vault.vault_kv2_get',
+      hc_vault_aap_admin_passwords_kv_path,
+      engine_mount_point=hc_vault_engine_mount_point,
+      url=hc_vault_addr,
+      auth_method=hc_vault_auth_method,
+      token=hc_vault_token,
+      role_id=hc_vault_role_id,
+      secret_id=hc_vault_secret_id,
+      validate_certs=hc_vault_validate_certs
+    )['secret']
+    if (hc_vault_auth_ok | bool)
+    else {}
+  {{ '}}' }}
+hc_vault_defaults_secret: >-
+  {{ '{{' }}
+    lookup(
+      'community.hashi_vault.vault_kv2_get',
+      hc_vault_defaults_kv_path,
+      engine_mount_point=hc_vault_engine_mount_point,
+      url=hc_vault_addr,
+      auth_method=hc_vault_auth_method,
+      token=hc_vault_token,
+      role_id=hc_vault_role_id,
+      secret_id=hc_vault_secret_id,
+      validate_certs=hc_vault_validate_certs
+    )['secret']
+    if (hc_vault_auth_ok | bool)
+    else {}
+  {{ '}}' }}
+
+aap_password_seed_enabled: "{{ '{{' }} hc_vault_token | length > 0 {{ '}}' }}"
+aap_password_seed_get_or_create: true
+aap_password_seed_vault_addr: "{{ '{{' }} hc_vault_addr {{ '}}' }}"
+aap_password_seed_vault_token: "{{ '{{' }} hc_vault_token {{ '}}' }}"
+aap_password_seed_vault_kv_mount: "{{ '{{' }} hc_vault_engine_mount_point {{ '}}' }}"
+aap_password_seed_vault_kv_path: "{{ '{{' }} hc_vault_aap_admin_passwords_kv_path {{ '}}' }}"
+aap_password_seed_vault_validate_certs: "{{ '{{' }} hc_vault_validate_certs | bool {{ '}}' }}"
+aap_password_seed_rh_offline_token_key: rh_offline_token
+aap_password_seed_generated_length: 32
+aap_password_seed_generated_chars: "ascii_letters,digits"
+
+aap_defaults_seed_vault_addr: "{{ '{{' }} hc_vault_addr {{ '}}' }}"
+aap_defaults_seed_vault_token: "{{ '{{' }} hc_vault_token {{ '}}' }}"
+aap_defaults_seed_vault_kv_mount: "{{ '{{' }} hc_vault_engine_mount_point {{ '}}' }}"
+aap_defaults_seed_vault_kv_path: "{{ '{{' }} hc_vault_defaults_kv_path {{ '}}' }}"
+aap_defaults_seed_vault_validate_certs: "{{ '{{' }} hc_vault_validate_certs | bool {{ '}}' }}"
+
+aap_username: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_GATEWAY_USERNAME') | default('admin', true) | trim {{ '}}' }}"
+aap_validate_certs: false
+
+aap_gateway_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('gateway_admin_password', '') | string | trim {{ '}}' }}"
+aap_controller_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('controller_admin_password', '') | string | trim {{ '}}' }}"
+aap_hub_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('hub_admin_password', '') | string | trim {{ '}}' }}"
+aap_eda_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('eda_admin_password', '') | string | trim {{ '}}' }}"
+aap_postgresql_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('postgresql_admin_password', '') | string | trim {{ '}}' }}"
+aap_breakglass_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('breakglass_password', '') | string | trim {{ '}}' }}"
+
+aap_password: "{{ '{{' }} aap_gateway_admin_password_input {{ '}}' }}"
+rh_offline_token: >-
+  {{ '{{' }}
+    hc_vault_defaults_secret.get(
+      'rh_offline_token',
+      hc_vault_defaults_secret.get(
+        'offline_token',
+        hc_vault_defaults_secret.get(
+          'token',
+          hc_vault_defaults_secret.get('RH_AUTOMATION_HUB_TOKEN', '')
+        )
+      )
+    )
+    | string
+    | trim
+  {{ '}}' }}

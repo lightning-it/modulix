@@ -1,0 +1,7 @@
+---
+rhel_podman_package_manage: false
+rhel_podman_rootless_storage_manage: true
+rhel_podman_rootless_storage_user: {{ aap_effective_install_user }}
+rhel_podman_rootless_storage_base_path: /appl/podman
+rhel_podman_rootless_storage_path: /appl/podman/storage
+rhel_podman_rootless_storage_conf_path: /appl/home/{{ aap_effective_install_user }}/.config/containers/storage.conf
