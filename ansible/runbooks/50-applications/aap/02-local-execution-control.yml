@@ -687,6 +687,7 @@
         group: "{{ item.group | default(omit) }}"
         mode: "{{ item.mode }}"
       loop:
+        - { path: /appl, owner: root, group: root, mode: "0755" }
         - { path: "{{ aap_effective_appl_root }}", owner: "{{ ansible_user }}", group: "{{ aap_local_remote_login_group.stdout | default(omit) }}", mode: "0750" }
         - { path: "{{ aap_effective_appl_root }}/etc", owner: "{{ ansible_user }}", group: "{{ aap_local_remote_login_group.stdout | default(omit) }}", mode: "0750" }
         - { path: "{{ aap_effective_appl_root }}/secrets", owner: "{{ ansible_user }}", group: "{{ aap_local_remote_login_group.stdout | default(omit) }}", mode: "0750" }

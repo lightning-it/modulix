@@ -132,6 +132,7 @@
         {{
           aap_runbook_base_os_directories
           | default([
+              {'path': '/appl', 'mode': '0755'},
               {'path': '/appl/tmp', 'mode': '1777'},
               {'path': '/appl/ansible-tmp', 'mode': '1777'},
               {'path': '/appl/home', 'mode': '0755'},
@@ -362,4 +363,20 @@
       tags:
         - aap
         - aap_base_os
+        - verify
+
+    - name: Run AAP preflight after base OS preparation
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_preflight
+        apply:
+          tags: [aap, aap_base_os, aap_preflight, verify]
+      vars:
+        aap_preflight_check_artifacts: false
+        aap_preflight_check_vault: false
+        aap_preflight_check_ansible_vault: false
+        aap_preflight_check_runtime: false
+      tags:
+        - aap
+        - aap_base_os
+        - aap_preflight
         - verify

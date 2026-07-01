@@ -164,6 +164,7 @@
       - "{{ aap_effective_appl_root }}/scripts"
       - "{{ aap_effective_appl_root }}/src"
     aap_baseline_root_directories:
+      - { path: /appl, mode: "0755" }
       - { path: /appl/tmp, mode: "1777" }
       - { path: /appl/ansible-tmp, mode: "1777" }
       - { path: /appl/home, mode: "0755" }
