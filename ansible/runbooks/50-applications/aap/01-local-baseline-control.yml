@@ -27,6 +27,9 @@
     machine_a_effective_secrets_dir: >-
       {{ machine_a_secrets_dir
          | default(machine_a_effective_appl_root ~ '/secrets', true) }}
+    machine_a_effective_ssh_key: >-
+      {{ machine_a_ssh_key
+         | default(machine_a_effective_secrets_dir ~ '/svc_ansible_aap', true) }}
     machine_a_effective_known_hosts: >-
       {{ machine_a_known_hosts
          | default(machine_a_effective_secrets_dir ~ '/known_hosts', true) }}
@@ -145,6 +148,25 @@
         state: directory
         mode: "0750"
 
+    - name: Check Machine A setup SSH key
+      ansible.builtin.stat:
+        path: "{{ machine_a_effective_ssh_key }}"
+      register: aap_baseline_machine_a_ssh_key_file
+      when: aap_ssh_key_auth_enabled | default(true) | bool
+
+    - name: Read Machine A setup SSH public key
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -y
+          - -f
+          - "{{ machine_a_effective_ssh_key }}"
+      register: aap_baseline_machine_a_ssh_public_key
+      changed_when: false
+      when:
+        - aap_ssh_key_auth_enabled | default(true) | bool
+        - aap_baseline_machine_a_ssh_key_file.stat.exists | default(false)
+
     - name: Add AAP host baseline target
       ansible.builtin.add_host:
         name: aap_baseline_target
@@ -160,6 +182,8 @@
           -o UserKnownHostsFile={{ machine_a_effective_known_hosts }}
           -o StrictHostKeyChecking=accept-new
         ansible_remote_tmp: "{{ aap_baseline_effective_remote_tmp }}"
+        aap_baseline_setup_public_key: >-
+          {{ aap_baseline_machine_a_ssh_public_key.stdout | default('', true) }}
 
 - name: Verify and prepare AAP customer baseline host
   hosts: aap_baseline_targets
@@ -218,6 +242,19 @@
     - name: Record login user primary group
       ansible.builtin.set_fact:
         aap_baseline_login_group: "{{ aap_baseline_login_group_result.stdout | trim }}"
+
+    - name: Resolve login user home directory
+      ansible.builtin.command:
+        argv:
+          - getent
+          - passwd
+          - "{{ aap_baseline_login_user }}"
+      register: aap_baseline_login_passwd_result
+      changed_when: false
+
+    - name: Record login user home directory
+      ansible.builtin.set_fact:
+        aap_baseline_login_home: "{{ aap_baseline_login_passwd_result.stdout.split(':')[5] }}"
 
   tasks:
     - name: Verify target hostname
@@ -308,6 +345,29 @@
       when:
         - aap_baseline_action == 'prepare'
         - aap_baseline_manage_packages | default(false) | bool
+
+    - name: Ensure setup user SSH directory exists
+      ansible.builtin.file:
+        path: "{{ aap_baseline_login_home }}/.ssh"
+        state: directory
+        owner: "{{ aap_baseline_login_user }}"
+        group: "{{ aap_baseline_login_group }}"
+        mode: "0700"
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_setup_public_key | default('', true) | string | trim | length > 0
+
+    - name: Authorize setup key for execution environment self-connection
+      ansible.builtin.lineinfile:
+        path: "{{ aap_baseline_login_home }}/.ssh/authorized_keys"
+        line: "{{ aap_baseline_setup_public_key }}"
+        create: true
+        owner: "{{ aap_baseline_login_user }}"
+        group: "{{ aap_baseline_login_group }}"
+        mode: "0600"
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_setup_public_key | default('', true) | string | trim | length > 0
 
     - name: Ensure AAP owned directories exist
       ansible.builtin.file:
