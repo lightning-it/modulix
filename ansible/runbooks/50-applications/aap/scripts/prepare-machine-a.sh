@@ -51,7 +51,7 @@ if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
 
   if [[ ! -s "${AAP_BOOTSTRAP_SSH_KEY}" ]]; then
     printf 'AAP bootstrap SSH key not found: %s\n' "${AAP_BOOTSTRAP_SSH_KEY}" >&2
-    printf 'Run the RHEL 10 baseline substrate step first, or set AAP_BOOTSTRAP_SSH_KEY explicitly.\n' >&2
+    printf 'Run the customer baseline substrate step first, or set AAP_BOOTSTRAP_SSH_KEY explicitly.\n' >&2
     exit 1
   fi
 

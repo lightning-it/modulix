@@ -1,0 +1,330 @@
+---
+# -----------------------------------------------------------------------------
+# AAP customer-prepared host baseline controller
+#
+# Purpose:
+# - Verify and prepare the minimal host substrate for AAP local execution from
+#   Machine A using Ansible inventory values instead of copy/paste SSH blocks.
+# - Keep customer ownership of OS lifecycle, RHSM/Satellite, repositories, DNS,
+#   and base package availability.
+# -----------------------------------------------------------------------------
+
+- name: Build AAP baseline target from local inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_baseline_action: verify
+    aap_baseline_allowed_actions:
+      - local_setup
+      - verify
+      - prepare
+      - check
+    machine_a_effective_appl_root: >-
+      {{ machine_a_appl_root
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/modulix-aap', true) }}
+    machine_a_effective_secrets_dir: >-
+      {{ machine_a_secrets_dir
+         | default(machine_a_effective_appl_root ~ '/secrets', true) }}
+    machine_a_effective_known_hosts: >-
+      {{ machine_a_known_hosts
+         | default(machine_a_effective_secrets_dir ~ '/known_hosts', true) }}
+    machine_a_effective_export_root: >-
+      {{ machine_a_export_root
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/modulix-aap-export', true) }}
+    machine_a_effective_automation_dir: >-
+      {{ machine_a_automation_dir
+         | default(machine_a_effective_export_root ~ '/src/modulix-automation', true) }}
+    aap_baseline_effective_repo_url: >-
+      {{ automation_repo_url
+         | default('https://github.com/lightning-it/modulix-automation.git', true) }}
+    aap_baseline_effective_repo_version: >-
+      {{ automation_repo_version
+         | default('main', true) }}
+    aap_baseline_effective_source_dir: >-
+      {{ aap_baseline_local_source_dir
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/sources/modulix-automation', true) }}
+    aap_baseline_effective_become_flags: >-
+      {{ aap_baseline_become_flags
+         | default('--preserve-env=SSH_AUTH_SOCK -i', true) }}
+    aap_baseline_effective_remote_tmp: >-
+      {{ ansible_remote_tmp | default('~/.ansible/tmp', true) }}
+
+  tasks:
+    - name: Validate requested baseline action
+      ansible.builtin.assert:
+        that:
+          - aap_baseline_action in aap_baseline_allowed_actions
+        fail_msg: >-
+          Set aap_baseline_action to one of {{
+          aap_baseline_allowed_actions | join(', ') }}.
+        quiet: true
+
+    - name: Validate remote baseline inputs
+      ansible.builtin.assert:
+        that:
+          - aap_fqdn | default('', true) | string | trim | length > 0
+          - aap_user | default(aap_bootstrap_user | default('', true), true) | string | trim | length > 0
+        fail_msg: >-
+          Provide aap_fqdn plus aap_user or aap_bootstrap_user in inventory.
+        quiet: true
+      when: aap_baseline_action != 'local_setup'
+
+    - name: Ensure Machine A baseline directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ machine_a_effective_appl_root }}/etc", mode: "0750" }
+        - { path: "{{ machine_a_effective_secrets_dir }}", mode: "0750" }
+        - { path: "{{ machine_a_effective_export_root }}/src", mode: "0750" }
+      when: aap_baseline_action == 'local_setup'
+
+    - name: Check optional local automation source
+      ansible.builtin.stat:
+        path: "{{ aap_baseline_effective_source_dir }}/ansible/runbooks/50-applications/aap/01-local-baseline-control.yml"
+      register: aap_baseline_local_source_check
+      when: aap_baseline_action == 'local_setup'
+
+    - name: Copy automation source from local checkout
+      ansible.builtin.command:
+        argv:
+          - rsync
+          - -a
+          - --delete
+          - "--exclude=.git"
+          - "{{ aap_baseline_effective_source_dir }}/"
+          - "{{ machine_a_effective_automation_dir }}/"
+      changed_when: true
+      when:
+        - aap_baseline_action == 'local_setup'
+        - aap_baseline_local_source_check.stat.exists | default(false)
+
+    - name: Clone or update automation source from Git
+      ansible.builtin.git:
+        repo: "{{ aap_baseline_effective_repo_url }}"
+        dest: "{{ machine_a_effective_automation_dir }}"
+        version: "{{ aap_baseline_effective_repo_version }}"
+        force: true
+      when:
+        - aap_baseline_action == 'local_setup'
+        - not (aap_baseline_local_source_check.stat.exists | default(false))
+
+    - name: Stop after Machine A local setup
+      ansible.builtin.meta: end_play
+      when: aap_baseline_action == 'local_setup'
+
+    - name: Ensure local known-hosts directory exists
+      ansible.builtin.file:
+        path: "{{ machine_a_effective_secrets_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Add AAP host baseline target
+      ansible.builtin.add_host:
+        name: aap_baseline_target
+        groups: aap_baseline_targets
+        ansible_host: "{{ aap_fqdn }}"
+        ansible_user: "{{ aap_user | default(aap_bootstrap_user, true) }}"
+        ansible_connection: ssh
+        ansible_become: true
+        ansible_become_method: sudo
+        ansible_become_flags: "{{ aap_baseline_effective_become_flags }}"
+        ansible_ssh_common_args: >-
+          -A
+          -o UserKnownHostsFile={{ machine_a_effective_known_hosts }}
+          -o StrictHostKeyChecking=accept-new
+        ansible_remote_tmp: "{{ aap_baseline_effective_remote_tmp }}"
+
+- name: Verify and prepare AAP customer baseline host
+  hosts: aap_baseline_targets
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    aap_effective_appl_root: "{{ aap_appl_root | default('/appl/modulix-aap', true) }}"
+    aap_baseline_login_user: "{{ ansible_user }}"
+    aap_baseline_required_commands:
+      - sudo
+      - podman
+      - git
+      - openssl
+      - python3
+    aap_baseline_owned_directories:
+      - "{{ aap_effective_appl_root }}"
+      - "{{ aap_effective_appl_root }}/etc"
+      - "{{ aap_effective_appl_root }}/secrets"
+      - "{{ aap_effective_appl_root }}/artifacts"
+      - "{{ aap_effective_appl_root }}/inbox"
+      - "{{ aap_effective_appl_root }}/scripts"
+      - "{{ aap_effective_appl_root }}/src"
+    aap_baseline_root_directories:
+      - { path: /appl/tmp, mode: "1777" }
+      - { path: /appl/ansible-tmp, mode: "1777" }
+      - { path: /appl/home, mode: "0755" }
+      - { path: /appl/podman, mode: "0755" }
+      - { path: /appl/podman/root-storage, mode: "0755" }
+      - { path: /appl/podman/root-run, mode: "0755" }
+
+  pre_tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ aap_baseline_wait_for_connection_timeout | default(120) }}"
+        sleep: 5
+
+    - name: Resolve login user primary group
+      ansible.builtin.command:
+        argv:
+          - id
+          - -gn
+          - "{{ aap_baseline_login_user }}"
+      become: false
+      register: aap_baseline_login_group_result
+      changed_when: false
+
+    - name: Record login user primary group
+      ansible.builtin.set_fact:
+        aap_baseline_login_group: "{{ aap_baseline_login_group_result.stdout | trim }}"
+
+  tasks:
+    - name: Verify target hostname
+      ansible.builtin.command:
+        argv:
+          - hostname
+          - -f
+      changed_when: false
+      become: false
+      when: aap_baseline_action in ['verify', 'check']
+
+    - name: Verify login user
+      ansible.builtin.command:
+        argv:
+          - whoami
+      changed_when: false
+      become: false
+      when: aap_baseline_action in ['verify', 'check']
+
+    - name: Read Red Hat release
+      ansible.builtin.command:
+        argv:
+          - cat
+          - /etc/redhat-release
+      register: aap_baseline_redhat_release_result
+      changed_when: false
+      when: aap_baseline_action in ['verify', 'check']
+
+    - name: Assert expected Red Hat major release
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('release ' ~ (aap_baseline_expected_rhel_major | string) ~ '.') in
+            (aap_baseline_redhat_release_result.stdout | default(''))
+        fail_msg: >-
+          Expected RHEL {{ aap_baseline_expected_rhel_major }}, got:
+          {{ aap_baseline_redhat_release_result.stdout | default('unknown') }}
+        quiet: true
+      when:
+        - aap_baseline_action in ['verify', 'check']
+        - aap_baseline_expected_rhel_major | default('', true) | string | trim | length > 0
+
+    - name: Verify passwordless root escalation
+      ansible.builtin.command:
+        argv:
+          - whoami
+      changed_when: false
+      when: aap_baseline_action in ['verify', 'check']
+
+    - name: Verify required commands exist
+      ansible.builtin.shell: "command -v {{ item | quote }}"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      loop: "{{ aap_baseline_required_commands }}"
+      when: aap_baseline_action in ['verify', 'check']
+
+    - name: Verify Podman version
+      ansible.builtin.command:
+        argv:
+          - podman
+          - --version
+      changed_when: false
+      when: aap_baseline_action in ['verify', 'check']
+
+    - name: Show enabled repositories
+      ansible.builtin.command:
+        argv:
+          - dnf
+          - repolist
+          - --enabled
+      changed_when: false
+      when: aap_baseline_action == 'verify'
+
+    - name: Show RHSM identity when available
+      ansible.builtin.command:
+        argv:
+          - subscription-manager
+          - identity
+      changed_when: false
+      failed_when: false
+      when: aap_baseline_action == 'verify'
+
+    - name: Ensure AAP owned directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ aap_baseline_login_user }}"
+        group: "{{ aap_baseline_login_group }}"
+        mode: "0750"
+      loop: "{{ aap_baseline_owned_directories }}"
+      when: aap_baseline_action == 'prepare'
+
+    - name: Ensure AAP root-owned substrate directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop: "{{ aap_baseline_root_directories }}"
+      loop_control:
+        label: "{{ item.path }}"
+      when: aap_baseline_action == 'prepare'
+
+    - name: Check prepared AAP directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: aap_baseline_directory_checks
+      loop: >-
+        {{
+          aap_baseline_owned_directories
+          + (aap_baseline_root_directories | map(attribute='path') | list)
+        }}
+      when: aap_baseline_action == 'check'
+
+    - name: Assert prepared AAP directories exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isdir | default(false)
+        fail_msg: "Required AAP baseline directory is missing: {{ item.item }}"
+        quiet: true
+      loop: "{{ aap_baseline_directory_checks.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: aap_baseline_action == 'check'
+
+    - name: Show AAP filesystem usage
+      ansible.builtin.command:
+        argv:
+          - df
+          - -hT
+          - /appl
+          - /appl/tmp
+          - /appl/ansible-tmp
+          - /appl/home
+          - /appl/podman
+      changed_when: false
+      failed_when: false
+      when: aap_baseline_action in ['verify', 'check']

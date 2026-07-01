@@ -18,22 +18,41 @@
     aap_local_action: prepare_machine_a
     aap_local_run_playbook_args: []
 
-    machine_a_appl_root: "{{ lookup('ansible.builtin.env', 'HOME') }}/appl/modulix-aap"
-    machine_a_export_root: "{{ lookup('ansible.builtin.env', 'HOME') }}/appl/modulix-aap-export"
-    machine_a_env_file: "{{ machine_a_appl_root }}/etc/aap-local.env"
-    machine_a_secrets_dir: "{{ machine_a_appl_root }}/secrets"
-    machine_a_bootstrap_known_hosts: "{{ machine_a_secrets_dir }}/bootstrap_known_hosts"
+    machine_a_effective_appl_root: >-
+      {{ machine_a_appl_root
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/modulix-aap', true) }}
+    machine_a_effective_export_root: >-
+      {{ machine_a_export_root
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/modulix-aap-export', true) }}
+    machine_a_effective_env_file: >-
+      {{ machine_a_env_file
+         | default(machine_a_effective_appl_root ~ '/etc/aap-local.env', true) }}
+    machine_a_effective_secrets_dir: >-
+      {{ machine_a_secrets_dir
+         | default(machine_a_effective_appl_root ~ '/secrets', true) }}
+    machine_a_effective_bootstrap_known_hosts: >-
+      {{ machine_a_bootstrap_known_hosts
+         | default(machine_a_effective_secrets_dir ~ '/bootstrap_known_hosts', true) }}
 
-    aap_appl_root: /appl/modulix-aap
-    aap_env_file: "{{ aap_appl_root }}/etc/aap-local.env"
-    aap_secrets_dir: "{{ aap_appl_root }}/secrets"
-    aap_automation_dir: "{{ aap_appl_root }}/src/modulix-automation"
-    aap_automation_ansible_dir: "{{ aap_automation_dir }}/ansible"
+    aap_effective_appl_root: "{{ aap_appl_root | default('/appl/modulix-aap', true) }}"
+    aap_effective_env_file: >-
+      {{ aap_env_file
+         | default(aap_effective_appl_root ~ '/etc/aap-local.env', true) }}
+    aap_effective_secrets_dir: >-
+      {{ aap_secrets_dir
+         | default(aap_effective_appl_root ~ '/secrets', true) }}
+    aap_effective_automation_dir: >-
+      {{ aap_automation_dir
+         | default(aap_effective_appl_root ~ '/src/modulix-automation', true) }}
+    aap_effective_automation_ansible_dir: >-
+      {{ aap_automation_ansible_dir
+         | default(aap_effective_automation_dir ~ '/ansible', true) }}
     aap_scripts_dir: "{{ playbook_dir }}/scripts"
     aap_local_env_mode: "0600"
 
     aap_local_allowed_actions:
       - prepare_machine_a
+      - seed_rh_offline_token
       - transfer_payload
       - stage_runtime
       - artifacts
@@ -83,15 +102,15 @@
         state: directory
         mode: "{{ item.mode }}"
       loop:
-        - { path: "{{ machine_a_appl_root }}/etc", mode: "0750" }
-        - { path: "{{ machine_a_secrets_dir }}", mode: "0750" }
-        - { path: "{{ machine_a_appl_root }}/artifacts", mode: "0750" }
-        - { path: "{{ machine_a_export_root }}/src", mode: "0750" }
-        - { path: "{{ machine_a_export_root }}/artifacts/aap", mode: "0750" }
+        - { path: "{{ machine_a_effective_appl_root }}/etc", mode: "0750" }
+        - { path: "{{ machine_a_effective_secrets_dir }}", mode: "0750" }
+        - { path: "{{ machine_a_effective_appl_root }}/artifacts", mode: "0750" }
+        - { path: "{{ machine_a_effective_export_root }}/src", mode: "0750" }
+        - { path: "{{ machine_a_effective_export_root }}/artifacts/aap", mode: "0750" }
 
     - name: Write AAP local env file from inventory values
       ansible.builtin.copy:
-        dest: "{{ machine_a_env_file }}"
+        dest: "{{ machine_a_effective_env_file }}"
         mode: "{{ aap_local_env_mode }}"
         content: |
           export AAP_FQDN="{{ aap_fqdn }}"
@@ -104,11 +123,11 @@
           export AAP_SSH_KEY_AUTH_ENABLED={{ aap_ssh_key_auth_enabled | default(true) | bool | ternary('true', 'false') }}
           export AAP_REMOTE_TMP_BOOTSTRAP_RAW={{ aap_remote_tmp_bootstrap_raw | default(true) | bool | ternary('true', 'false') }}
 
-          export MACHINE_A_APPL_ROOT="{{ machine_a_appl_root }}"
-          export MACHINE_A_EXPORT_ROOT="{{ machine_a_export_root }}"
-          export MACHINE_A_ENV_FILE="{{ machine_a_env_file }}"
-          export MACHINE_A_SECRETS_DIR="{{ machine_a_secrets_dir }}"
-          export MACHINE_A_BOOTSTRAP_KNOWN_HOSTS="{{ machine_a_bootstrap_known_hosts }}"
+          export MACHINE_A_APPL_ROOT="{{ machine_a_effective_appl_root }}"
+          export MACHINE_A_EXPORT_ROOT="{{ machine_a_effective_export_root }}"
+          export MACHINE_A_ENV_FILE="{{ machine_a_effective_env_file }}"
+          export MACHINE_A_SECRETS_DIR="{{ machine_a_effective_secrets_dir }}"
+          export MACHINE_A_BOOTSTRAP_KNOWN_HOSTS="{{ machine_a_effective_bootstrap_known_hosts }}"
 
           export VAULT_ADDR="{{ vault_addr | default('', true) }}"
           export VAULT_SKIP_VERIFY={{ vault_skip_verify | default(false) | bool | ternary('true', 'false') }}
@@ -132,26 +151,87 @@
           export AAP_MANIFEST_SHA256="{{ aap_manifest_sha256 | default('', true) }}"
           export AAP_MANIFEST_URL="{{ aap_manifest_url | default('', true) }}"
 
-          export AAP_APPL_ROOT="{{ aap_appl_root }}"
-          export AAP_ENV_FILE="{{ aap_env_file }}"
-          export AAP_SECRETS_DIR="{{ aap_secrets_dir }}"
-          export AUTOMATION_DIR="{{ aap_automation_dir }}"
-          export AUTOMATION_ANSIBLE_DIR="{{ aap_automation_ansible_dir }}"
+          export AAP_APPL_ROOT="{{ aap_effective_appl_root }}"
+          export AAP_ENV_FILE="{{ aap_effective_env_file }}"
+          export AAP_SECRETS_DIR="{{ aap_effective_secrets_dir }}"
+          export AUTOMATION_DIR="{{ aap_effective_automation_dir }}"
+          export AUTOMATION_ANSIBLE_DIR="{{ aap_effective_automation_ansible_dir }}"
 
   tasks:
     - name: Prepare Machine A staging
       ansible.builtin.command:
         argv:
           - "{{ aap_scripts_dir }}/prepare-machine-a.sh"
-          - "{{ machine_a_env_file }}"
+          - "{{ machine_a_effective_env_file }}"
       changed_when: false
       when: aap_local_action == 'prepare_machine_a'
+
+    - name: Prompt for Red Hat offline token
+      ansible.builtin.pause:
+        prompt: Red Hat offline token
+        echo: false
+      register: aap_local_rh_offline_token_prompt
+      no_log: true
+      when:
+        - aap_local_action == 'seed_rh_offline_token'
+        - rh_offline_token | default('', true) | string | trim | length == 0
+
+    - name: Resolve Red Hat offline token input
+      ansible.builtin.set_fact:
+        aap_local_effective_rh_offline_token: >-
+          {{
+            rh_offline_token
+            | default(aap_local_rh_offline_token_prompt.user_input | default('', true), true)
+            | string
+            | trim
+          }}
+      no_log: true
+      when: aap_local_action == 'seed_rh_offline_token'
+
+    - name: Validate Red Hat offline token Vault inputs
+      ansible.builtin.assert:
+        that:
+          - vault_engine_mount_point | default('', true) | string | trim | length > 0
+          - aap_vault_defaults_kv_path | default('', true) | string | trim | length > 0
+          - aap_local_effective_rh_offline_token | default('', true) | string | trim | length > 0
+        fail_msg: >-
+          Seeding rh_offline_token requires vault_engine_mount_point,
+          aap_vault_defaults_kv_path, and a non-empty token.
+        quiet: true
+      no_log: true
+      when: aap_local_action == 'seed_rh_offline_token'
+
+    - name: Store Red Hat offline token in Vault defaults
+      ansible.builtin.command:
+        argv:
+          - vault
+          - kv
+          - patch
+          - "-mount={{ vault_engine_mount_point }}"
+          - "{{ aap_vault_defaults_kv_path }}"
+          - "rh_offline_token={{ aap_local_effective_rh_offline_token }}"
+      changed_when: true
+      no_log: true
+      when: aap_local_action == 'seed_rh_offline_token'
+
+    - name: Verify Red Hat offline token exists in Vault defaults
+      ansible.builtin.command:
+        argv:
+          - vault
+          - kv
+          - get
+          - -field=rh_offline_token
+          - "-mount={{ vault_engine_mount_point }}"
+          - "{{ aap_vault_defaults_kv_path }}"
+      changed_when: false
+      no_log: true
+      when: aap_local_action == 'seed_rh_offline_token'
 
     - name: Transfer AAP payload to target host
       ansible.builtin.command:
         argv:
           - "{{ aap_scripts_dir }}/export-transfer-offline-payload.sh"
-          - "{{ machine_a_env_file }}"
+          - "{{ machine_a_effective_env_file }}"
       changed_when: false
       when: aap_local_action == 'transfer_payload'
 
@@ -161,11 +241,11 @@
           - ssh
           - -A
           - -o
-          - "UserKnownHostsFile={{ machine_a_bootstrap_known_hosts }}"
+          - "UserKnownHostsFile={{ machine_a_effective_bootstrap_known_hosts }}"
           - -o
           - StrictHostKeyChecking=accept-new
           - "{{ aap_bootstrap_user | default(aap_user, true) }}@{{ aap_fqdn }}"
-          - "sudo --preserve-env=SSH_AUTH_SOCK -n -i {{ aap_appl_root }}/scripts/stage-runtime-on-aap-host.sh"
+          - "sudo --preserve-env=SSH_AUTH_SOCK -n -i {{ aap_effective_appl_root }}/scripts/stage-runtime-on-aap-host.sh"
       changed_when: false
       when: aap_local_action == 'stage_runtime'
 
@@ -177,11 +257,11 @@
               'ssh',
               '-A',
               '-o',
-              'UserKnownHostsFile=' ~ machine_a_bootstrap_known_hosts,
+              'UserKnownHostsFile=' ~ machine_a_effective_bootstrap_known_hosts,
               '-o',
               'StrictHostKeyChecking=accept-new',
               (aap_bootstrap_user | default(aap_user, true)) ~ '@' ~ aap_fqdn,
-              'sudo --preserve-env=SSH_AUTH_SOCK -n -i ' ~ aap_appl_root ~ '/scripts/run-aap-playbooks.sh'
+              'sudo --preserve-env=SSH_AUTH_SOCK -n -i ' ~ aap_effective_appl_root ~ '/scripts/run-aap-playbooks.sh'
             ]
             + aap_local_remote_playbooks[aap_local_action]
             + (

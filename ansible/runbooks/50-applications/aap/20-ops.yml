@@ -68,10 +68,65 @@
               install_log_tail: "{{ aap_eda_diagnostics_install_log.stdout_lines | default([]) }}"
               podman_ps: "{{ aap_eda_diagnostics_podman_ps.stdout_lines | default([]) }}"
 
+    - name: Collect local execution diagnostics
+      when: (aap_ops_action | default('status')) == 'local_diagnostics'
+      block:
+        - name: Check root Podman image
+          ansible.builtin.shell:
+            cmd: |
+              set -euo pipefail
+              if [ -r /appl/modulix-aap/etc/aap-local.env ]; then
+                . /appl/modulix-aap/etc/aap-local.env
+              fi
+              export CONTAINERS_STORAGE_CONF="${AAP_PODMAN_STORAGE_CONF:-/appl/modulix-aap/etc/containers-storage.conf}"
+              export TMPDIR="${AAP_PODMAN_TMPDIR:-/appl/tmp}"
+              podman image exists "${MODULIX_RUN_EE_IMAGE}"
+              podman image inspect "${MODULIX_RUN_EE_IMAGE}" --format '{{ "{{" }}.Id{{ "}}" }} {{ "{{" }}.Created{{ "}}" }}'
+            executable: /bin/bash
+          register: aap_local_diagnostics_image
+          changed_when: false
+          failed_when: false
+
+        - name: Check AAP filesystem usage
+          ansible.builtin.command:
+            argv:
+              - df
+              - -hT
+              - /appl
+              - /appl/tmp
+              - /appl/ansible-tmp
+              - /appl/home
+              - /appl/podman
+          register: aap_local_diagnostics_df
+          changed_when: false
+          failed_when: false
+
+        - name: Check generated inventory paths
+          ansible.builtin.shell:
+            cmd: |
+              set -euo pipefail
+              if [ -r /appl/modulix-aap/etc/aap-local.env ]; then
+                . /appl/modulix-aap/etc/aap-local.env
+              fi
+              grep -RInE '/appl/(ansible-tmp|tmp|podman|home|aap)' \
+                "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}" || true
+            executable: /bin/bash
+          register: aap_local_diagnostics_inventory_paths
+          changed_when: false
+          failed_when: false
+
+        - name: Show local execution diagnostics
+          ansible.builtin.debug:
+            msg:
+              image_check: "{{ aap_local_diagnostics_image.stdout_lines | default([]) }}"
+              image_check_error: "{{ aap_local_diagnostics_image.stderr_lines | default([]) }}"
+              filesystems: "{{ aap_local_diagnostics_df.stdout_lines | default([]) }}"
+              inventory_paths: "{{ aap_local_diagnostics_inventory_paths.stdout_lines | default([]) }}"
+
     - name: Run AAP day-2 operation
       ansible.builtin.include_role:
         name: lit.supplementary.aap_ops
         apply:
           tags: [aap, aap_ops]
       tags: [aap, aap_ops]
-      when: (aap_ops_action | default('status')) != 'eda_diagnostics'
+      when: (aap_ops_action | default('status')) not in ['eda_diagnostics', 'local_diagnostics']
