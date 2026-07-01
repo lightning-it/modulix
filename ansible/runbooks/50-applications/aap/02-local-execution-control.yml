@@ -55,8 +55,23 @@
           - aap_effective_user | string | trim | length > 0
           - modulix_run_ee_image | default('', true) | string | trim | length > 0
         fail_msg: >-
-          AAP local execution requires aap_fqdn, aap_bootstrap_user or aap_user,
-          aap_user, and modulix_run_ee_image in inventory.
+          AAP local execution requires aap_fqdn and modulix_run_ee_image in
+          inventory. The default setup account is svc_ansible.
+        quiet: true
+
+    - name: Validate AAP setup and runtime accounts
+      ansible.builtin.assert:
+        that:
+          - aap_effective_setup_user == 'svc_ansible'
+          - aap_effective_bootstrap_user == aap_effective_setup_user
+          - aap_effective_user == aap_effective_setup_user
+          - aap_effective_install_user == 'svc_aap'
+          - aap_effective_user != aap_effective_install_user
+        fail_msg: >-
+          AAP setup/runbooks must execute through svc_ansible, while AAP
+          runtime must use svc_aap. Current values: aap_bootstrap_user={{
+          aap_effective_bootstrap_user }}, aap_user={{ aap_effective_user }},
+          aap_install_user={{ aap_effective_install_user }}.
         quiet: true
 
     - name: Validate Ansible Vault secret values for rollout actions
@@ -95,6 +110,7 @@
           export AAP_ANSIBLE_HOST="{{ aap_effective_ansible_host }}"
           export AAP_SHORTNAME="{{ aap_effective_shortname }}"
           export AAP_INVENTORY_HOST="{{ aap_effective_inventory_host }}"
+          export AAP_SETUP_USER="{{ aap_effective_setup_user }}"
           export AAP_BOOTSTRAP_USER="{{ aap_effective_bootstrap_user }}"
           export AAP_USER="{{ aap_effective_user }}"
           export AAP_INSTALL_USER="{{ aap_effective_install_user }}"
@@ -298,7 +314,7 @@
         path: "{{ aap_automation_source_dir_effective }}/ansible/ansible.cfg"
       register: aap_local_source_checkout
       when:
-        - aap_local_action == 'prepare_machine_a'
+        - aap_local_action in ['prepare_machine_a', 'transfer_payload']
         - aap_automation_source_dir_effective | length > 0
 
     - name: Assert configured automation source checkout is usable
@@ -310,7 +326,7 @@
           containing ansible/ansible.cfg.
         quiet: true
       when:
-        - aap_local_action == 'prepare_machine_a'
+        - aap_local_action in ['prepare_machine_a', 'transfer_payload']
         - aap_automation_source_dir_effective | length > 0
 
     - name: Mirror configured automation source checkout
@@ -332,7 +348,7 @@
           - "{{ aap_automation_source_dir_effective }}/"
           - "{{ machine_a_effective_export_root }}/src/modulix-automation/"
       when:
-        - aap_local_action == 'prepare_machine_a'
+        - aap_local_action in ['prepare_machine_a', 'transfer_payload']
         - aap_automation_source_dir_effective | length > 0
 
     - name: Clone or update automation checkout
@@ -635,6 +651,7 @@
         aap_podman_root_runroot_effective: "{{ aap_podman_root_runroot_effective }}"
         aap_podman_tmpdir_effective: "{{ aap_podman_tmpdir_effective }}"
         aap_effective_install_user: "{{ aap_effective_install_user }}"
+        aap_effective_setup_user: "{{ aap_effective_setup_user }}"
         aap_effective_user: "{{ aap_effective_user }}"
         aap_effective_inventory_host: "{{ aap_effective_inventory_host }}"
         aap_effective_ansible_host: "{{ aap_effective_ansible_host }}"

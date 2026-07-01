@@ -110,6 +110,17 @@
   become: true
   gather_facts: true
 
+  pre_tasks:
+    - name: Verify AAP setup account and prerequisites before deploy
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_preflight
+        apply:
+          tags: [aap, aap_preflight, aap_deploy]
+      tags:
+        - aap
+        - aap_preflight
+        - aap_deploy
+
   tasks:
     - name: Prepare AAP prerequisites and artifacts
       ansible.builtin.include_role:

@@ -375,6 +375,7 @@
         aap_preflight_check_vault: false
         aap_preflight_check_ansible_vault: false
         aap_preflight_check_runtime: false
+        aap_preflight_check_podman: false
       tags:
         - aap
         - aap_base_os

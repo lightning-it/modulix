@@ -50,6 +50,12 @@
          | default('--preserve-env=SSH_AUTH_SOCK -i', true) }}
     aap_baseline_effective_ansible_host: >-
       {{ aap_ansible_host | default(aap_fqdn, true) }}
+    aap_baseline_effective_setup_user: >-
+      {{ aap_setup_user | default('svc_ansible', true) }}
+    aap_baseline_effective_user: >-
+      {{ aap_user | default(aap_bootstrap_user | default(aap_baseline_effective_setup_user, true), true) }}
+    aap_baseline_effective_install_user: >-
+      {{ aap_install_user | default('svc_aap', true) }}
     aap_baseline_effective_remote_tmp: >-
       {{ ansible_remote_tmp | default('~/.ansible/tmp', true) }}
 
@@ -67,9 +73,24 @@
       ansible.builtin.assert:
         that:
           - aap_fqdn | default('', true) | string | trim | length > 0
-          - aap_user | default(aap_bootstrap_user | default('', true), true) | string | trim | length > 0
+          - aap_baseline_effective_user | string | trim | length > 0
         fail_msg: >-
-          Provide aap_fqdn plus aap_user or aap_bootstrap_user in inventory.
+          Provide aap_fqdn in inventory. The default setup account is svc_ansible.
+        quiet: true
+      when: aap_baseline_action != 'local_setup'
+
+    - name: Validate AAP baseline setup and runtime accounts
+      ansible.builtin.assert:
+        that:
+          - aap_baseline_effective_setup_user == 'svc_ansible'
+          - aap_baseline_effective_user == aap_baseline_effective_setup_user
+          - aap_baseline_effective_install_user == 'svc_aap'
+          - aap_baseline_effective_user != aap_baseline_effective_install_user
+        fail_msg: >-
+          AAP setup/runbooks must execute through svc_ansible, while AAP
+          runtime must use svc_aap. Current values: aap_user={{
+          aap_baseline_effective_user }}, aap_install_user={{
+          aap_baseline_effective_install_user }}.
         quiet: true
       when: aap_baseline_action != 'local_setup'
 
@@ -129,7 +150,7 @@
         name: aap_baseline_target
         groups: aap_baseline_targets
         ansible_host: "{{ aap_baseline_effective_ansible_host }}"
-        ansible_user: "{{ aap_user | default(aap_bootstrap_user, true) }}"
+        ansible_user: "{{ aap_baseline_effective_user }}"
         ansible_connection: ssh
         ansible_become: true
         ansible_become_method: sudo

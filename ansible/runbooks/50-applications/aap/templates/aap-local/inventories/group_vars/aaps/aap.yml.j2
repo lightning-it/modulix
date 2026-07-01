@@ -1,4 +1,7 @@
 ---
+aap_secret_backend: {{ aap_effective_secret_backend | to_json }}
+aap_preflight_expected_ansible_user: {{ aap_effective_setup_user | to_json }}
+
 aap_deploy_setup_download_version: "2.7"
 
 aap_deploy_install_dir: /appl/aap

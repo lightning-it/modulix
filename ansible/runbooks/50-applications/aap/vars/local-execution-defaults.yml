@@ -38,7 +38,10 @@ machine_a_effective_source_archive_path: "{{ machine_a_effective_appl_root }}/ar
 aap_effective_shortname: "{{ aap_shortname | default(aap_fqdn.split('.')[0], true) }}"
 aap_effective_inventory_host: "{{ aap_inventory_host | default(aap_effective_shortname, true) }}"
 aap_effective_ansible_host: "{{ aap_ansible_host | default(aap_fqdn, true) }}"
-aap_effective_bootstrap_user: "{{ aap_bootstrap_user | default(aap_user, true) }}"
+aap_effective_setup_user: "{{ aap_setup_user | default('svc_ansible', true) }}"
+aap_effective_bootstrap_user: >-
+  {{ aap_bootstrap_user
+     | default(aap_user | default(aap_effective_setup_user, true), true) }}
 aap_effective_user: "{{ aap_user | default(aap_effective_bootstrap_user, true) }}"
 aap_effective_install_user: "{{ aap_install_user | default('svc_aap', true) }}"
 aap_effective_appl_root: "{{ aap_appl_root | default('/appl/aap-local', true) }}"
