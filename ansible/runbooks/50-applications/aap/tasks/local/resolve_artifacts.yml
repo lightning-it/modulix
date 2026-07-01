@@ -3,14 +3,16 @@
   ansible.builtin.find:
     paths: "{{ aap_effective_artifact_dir }}"
     patterns: "ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz"
-    file_type: file
+    file_type: any
+    follow: true
   register: aap_remote_bundle_find
 
 - name: Find remote AAP manifest
   ansible.builtin.find:
     paths: "{{ aap_effective_artifact_dir }}"
     patterns: "manifest*.zip"
-    file_type: file
+    file_type: any
+    follow: true
   register: aap_remote_manifest_find
 
 - name: Assert exactly one remote AAP bundle and manifest exist

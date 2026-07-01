@@ -192,7 +192,8 @@
       ansible.builtin.find:
         paths: "{{ machine_a_effective_artifact_dir }}"
         patterns: "ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz"
-        file_type: file
+        file_type: any
+        follow: true
       register: aap_local_bundle_find
       when: aap_local_action in ['validate', 'transfer_payload']
 
@@ -200,7 +201,8 @@
       ansible.builtin.find:
         paths: "{{ machine_a_effective_artifact_dir }}"
         patterns: "manifest*.zip"
-        file_type: file
+        file_type: any
+        follow: true
       register: aap_local_manifest_find
       when: aap_local_action in ['validate', 'transfer_payload']
 
@@ -221,25 +223,32 @@
         aap_local_manifest_path: "{{ (aap_local_manifest_find.files | sort(attribute='path') | last).path }}"
       when: aap_local_action in ['validate', 'transfer_payload']
 
+    - name: Inspect selected local AAP setup bundle
+      ansible.builtin.stat:
+        path: "{{ aap_local_bundle_path }}"
+        follow: true
+        checksum_algorithm: sha256
+      register: aap_local_bundle_stat
+      when: aap_local_action in ['validate', 'transfer_payload']
+
+    - name: Inspect selected local AAP manifest
+      ansible.builtin.stat:
+        path: "{{ aap_local_manifest_path }}"
+        follow: true
+        checksum_algorithm: sha256
+      register: aap_local_manifest_stat
+      when: aap_local_action in ['validate', 'transfer_payload']
+
     - name: Validate selected artifact sizes
       ansible.builtin.assert:
         that:
-          - (aap_local_bundle_find.files | sort(attribute='path') | last).size | int >= (aap_bundle_min_size_bytes | default(100000000) | int)
-          - (aap_local_manifest_find.files | sort(attribute='path') | last).size | int > 0
+          - aap_local_bundle_stat.stat.size | int >= (aap_bundle_min_size_bytes | default(100000000) | int)
+          - aap_local_manifest_stat.stat.size | int > 0
         fail_msg: >-
           AAP setup bundle or manifest is too small. Check the selected files
           in {{ machine_a_effective_artifact_dir }}.
         quiet: true
       when: aap_local_action in ['validate', 'transfer_payload']
-
-    - name: Validate AAP bundle checksum when configured
-      ansible.builtin.stat:
-        path: "{{ aap_local_bundle_path }}"
-        checksum_algorithm: sha256
-      register: aap_local_bundle_stat
-      when:
-        - aap_local_action in ['validate', 'transfer_payload']
-        - aap_bundle_sha256 | default('', true) | string | trim | length > 0
 
     - name: Assert AAP bundle checksum
       ansible.builtin.assert:
@@ -250,15 +259,6 @@
       when:
         - aap_local_action in ['validate', 'transfer_payload']
         - aap_bundle_sha256 | default('', true) | string | trim | length > 0
-
-    - name: Validate AAP manifest checksum when configured
-      ansible.builtin.stat:
-        path: "{{ aap_local_manifest_path }}"
-        checksum_algorithm: sha256
-      register: aap_local_manifest_stat
-      when:
-        - aap_local_action in ['validate', 'transfer_payload']
-        - aap_manifest_sha256 | default('', true) | string | trim | length > 0
 
     - name: Assert AAP manifest checksum
       ansible.builtin.assert:
@@ -598,7 +598,7 @@
         ansible_connection: ssh
         ansible_become: true
         ansible_become_method: sudo
-        ansible_become_flags: "{{ aap_local_become_flags | default('--preserve-env=SSH_AUTH_SOCK -i', true) }}"
+        ansible_become_flags: "{{ aap_local_become_flags | default(aap_ansible_become_flags | default('--preserve-env=SSH_AUTH_SOCK -i', true), true) }}"
         ansible_ssh_common_args: >-
           -A
           -o UserKnownHostsFile={{ machine_a_effective_bootstrap_known_hosts }}
