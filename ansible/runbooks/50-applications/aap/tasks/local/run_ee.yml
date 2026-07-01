@@ -1,8 +1,9 @@
 ---
 - name: Read remote SSH_AUTH_SOCK
-  ansible.builtin.shell:
-    cmd: printf '%s' "${SSH_AUTH_SOCK:-}"
-    executable: /bin/bash
+  ansible.builtin.command:
+    argv:
+      - printenv
+      - SSH_AUTH_SOCK
   register: aap_remote_ssh_auth_sock
   changed_when: false
   failed_when: false

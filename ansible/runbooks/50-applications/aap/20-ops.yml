@@ -12,6 +12,28 @@
   become: true
   gather_facts: true
 
+  vars:
+    aap_ops_appl_root_effective: "{{ aap_appl_root | default('/appl/aap-local', true) }}"
+    aap_ops_automation_ansible_dir_effective: >-
+      {{
+        aap_automation_ansible_dir
+        | default(aap_ops_appl_root_effective ~ '/src/modulix-automation/ansible', true)
+      }}
+    aap_ops_inventory_name_effective: "{{ inventory_name | default('corp', true) }}"
+    aap_ops_inventory_dir_effective: >-
+      {{
+        aap_ops_automation_ansible_dir_effective
+        ~ '/inventories/'
+        ~ aap_ops_inventory_name_effective
+      }}
+    aap_ops_podman_storage_conf_effective: >-
+      {{
+        aap_podman_storage_conf
+        | default(aap_ops_appl_root_effective ~ '/etc/containers-storage.conf', true)
+      }}
+    aap_ops_podman_tmpdir_effective: "{{ aap_podman_tmpdir | default('/appl/tmp', true) }}"
+    aap_ops_modulix_run_ee_image_effective: "{{ modulix_run_ee_image | default('', true) | string | trim }}"
+
   tasks:
     - name: Prepare AAP shared context
       ansible.builtin.include_role:
@@ -47,13 +69,24 @@
           changed_when: false
           failed_when: false
 
+        - name: Resolve install user UID
+          ansible.builtin.command:
+            argv:
+              - id
+              - -u
+          become: true
+          become_user: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+          register: aap_eda_diagnostics_install_user_uid
+          changed_when: false
+          failed_when: false
+
         - name: List install user containers
-          ansible.builtin.shell:
-            cmd: |
-              set -euo pipefail
-              export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-              podman ps
-            executable: /bin/bash
+          ansible.builtin.command:
+            argv:
+              - podman
+              - ps
+          environment:
+            XDG_RUNTIME_DIR: "/run/user/{{ aap_eda_diagnostics_install_user_uid.stdout }}"
           become: true
           become_user: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
           register: aap_eda_diagnostics_podman_ps
@@ -71,19 +104,40 @@
     - name: Collect local execution diagnostics
       when: (aap_ops_action | default('status')) == 'local_diagnostics'
       block:
+        - name: Validate local diagnostics image value
+          ansible.builtin.assert:
+            that:
+              - aap_ops_modulix_run_ee_image_effective | length > 0
+            fail_msg: "local_diagnostics requires modulix_run_ee_image in inventory."
+            quiet: true
+
         - name: Check root Podman image
-          ansible.builtin.shell:
-            cmd: |
-              set -euo pipefail
-              if [ -r /appl/modulix-aap/etc/aap-local.env ]; then
-                . /appl/modulix-aap/etc/aap-local.env
-              fi
-              export CONTAINERS_STORAGE_CONF="${AAP_PODMAN_STORAGE_CONF:-/appl/modulix-aap/etc/containers-storage.conf}"
-              export TMPDIR="${AAP_PODMAN_TMPDIR:-/appl/tmp}"
-              podman image exists "${MODULIX_RUN_EE_IMAGE}"
-              podman image inspect "${MODULIX_RUN_EE_IMAGE}" --format '{{ "{{" }}.Id{{ "}}" }} {{ "{{" }}.Created{{ "}}" }}'
-            executable: /bin/bash
+          ansible.builtin.command:
+            argv:
+              - podman
+              - image
+              - exists
+              - "{{ aap_ops_modulix_run_ee_image_effective }}"
+          environment:
+            CONTAINERS_STORAGE_CONF: "{{ aap_ops_podman_storage_conf_effective }}"
+            TMPDIR: "{{ aap_ops_podman_tmpdir_effective }}"
           register: aap_local_diagnostics_image
+          changed_when: false
+          failed_when: false
+
+        - name: Inspect root Podman image
+          ansible.builtin.command:
+            argv:
+              - podman
+              - image
+              - inspect
+              - "{{ aap_ops_modulix_run_ee_image_effective }}"
+              - --format
+              - "{{ '{{' }}.Id{{ '}}' }} {{ '{{' }}.Created{{ '}}' }}"
+          environment:
+            CONTAINERS_STORAGE_CONF: "{{ aap_ops_podman_storage_conf_effective }}"
+            TMPDIR: "{{ aap_ops_podman_tmpdir_effective }}"
+          register: aap_local_diagnostics_image_inspect
           changed_when: false
           failed_when: false
 
@@ -102,26 +156,33 @@
           failed_when: false
 
         - name: Check generated inventory paths
-          ansible.builtin.shell:
-            cmd: |
-              set -euo pipefail
-              if [ -r /appl/modulix-aap/etc/aap-local.env ]; then
-                . /appl/modulix-aap/etc/aap-local.env
-              fi
-              grep -RInE '/appl/(ansible-tmp|tmp|podman|home|aap)' \
-                "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}" || true
-            executable: /bin/bash
+          ansible.builtin.find:
+            paths: "{{ aap_ops_inventory_dir_effective }}"
+            recurse: true
+            file_type: file
+            patterns:
+              - "*.yml"
+              - "*.yaml"
+            contains: "/appl/(ansible-tmp|tmp|podman|home|aap)"
+            read_whole_file: true
           register: aap_local_diagnostics_inventory_paths
-          changed_when: false
           failed_when: false
 
         - name: Show local execution diagnostics
           ansible.builtin.debug:
             msg:
-              image_check: "{{ aap_local_diagnostics_image.stdout_lines | default([]) }}"
-              image_check_error: "{{ aap_local_diagnostics_image.stderr_lines | default([]) }}"
+              image_exists_rc: "{{ aap_local_diagnostics_image.rc | default('unavailable') }}"
+              image_exists_error: "{{ aap_local_diagnostics_image.stderr_lines | default([]) }}"
+              image_inspect: "{{ aap_local_diagnostics_image_inspect.stdout_lines | default([]) }}"
+              image_inspect_error: "{{ aap_local_diagnostics_image_inspect.stderr_lines | default([]) }}"
               filesystems: "{{ aap_local_diagnostics_df.stdout_lines | default([]) }}"
-              inventory_paths: "{{ aap_local_diagnostics_inventory_paths.stdout_lines | default([]) }}"
+              inventory_path_files: >-
+                {{
+                  aap_local_diagnostics_inventory_paths.files
+                  | default([])
+                  | map(attribute='path')
+                  | list
+                }}
 
     - name: Run AAP day-2 operation
       ansible.builtin.include_role:

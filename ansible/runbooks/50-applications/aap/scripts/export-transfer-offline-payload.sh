@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Deprecated compatibility entry point. New guides should run
+# runbooks/50-applications/aap/02-local-execution-control.yml with
+# -e aap_action=transfer_payload.
 set -euo pipefail
 
-env_file="${1:-${HOME}/appl/modulix-aap/etc/aap-local.env}"
+env_file="${1:-${HOME}/aap-work/etc/aap-local.env}"
 
 if [[ ! -r "${env_file}" ]]; then
   printf 'AAP local env file not readable: %s\n' "${env_file}" >&2
@@ -211,13 +214,13 @@ printf 'Creating remote landing zone on %s.\n' "${AAP_FQDN}"
 ssh "${ssh_opts[@]}" "${remote}" \
   'set -euo pipefail
    sudo install -d -m 0750 -o "$(id -un)" -g "$(id -gn)" \
-     /appl/modulix-aap \
-     /appl/modulix-aap/etc \
-     /appl/modulix-aap/secrets \
-     /appl/modulix-aap/artifacts \
-     /appl/modulix-aap/inbox \
-     /appl/modulix-aap/scripts \
-     /appl/modulix-aap/src
+     /appl/aap-local \
+     /appl/aap-local/etc \
+     /appl/aap-local/secrets \
+     /appl/aap-local/artifacts \
+     /appl/aap-local/inbox \
+     /appl/aap-local/scripts \
+     /appl/aap-local/src
    sudo install -d -m 1777 /appl/tmp /appl/ansible-tmp
    sudo install -d -m 0755 \
      /appl/home \
@@ -261,21 +264,21 @@ modulix_run_ee_archive="$1"
 machine_a_ssh_key_basename="${2:-}"
 ee_transfer_enabled="${3:-true}"
 
-   install -m 0600 /appl/modulix-aap/inbox/aap-local.env /appl/modulix-aap/etc/aap-local.env
-   . /appl/modulix-aap/etc/aap-local.env
+   install -m 0600 /appl/aap-local/inbox/aap-local.env /appl/aap-local/etc/aap-local.env
+   . /appl/aap-local/etc/aap-local.env
    if [ -n "${machine_a_ssh_key_basename}" ]; then
-     install -m 0600 "/appl/modulix-aap/inbox/${machine_a_ssh_key_basename}" "${AAP_SSH_KEY}"
+     install -m 0600 "/appl/aap-local/inbox/${machine_a_ssh_key_basename}" "${AAP_SSH_KEY}"
    fi
-   if [ -s /appl/modulix-aap/inbox/.vault-token ]; then
-     install -m 0600 /appl/modulix-aap/inbox/.vault-token /appl/modulix-aap/secrets/.vault-token
+   if [ -s /appl/aap-local/inbox/.vault-token ]; then
+     install -m 0600 /appl/aap-local/inbox/.vault-token /appl/aap-local/secrets/.vault-token
    fi
-   install -m 0644 /appl/modulix-aap/inbox/aap-local-lib.sh /appl/modulix-aap/scripts/aap-local-lib.sh
-   install -m 0755 /appl/modulix-aap/inbox/run-aap-playbooks.sh /appl/modulix-aap/scripts/run-aap-playbooks.sh
-   install -m 0755 /appl/modulix-aap/inbox/stage-runtime-on-aap-host.sh /appl/modulix-aap/scripts/stage-runtime-on-aap-host.sh
+   install -m 0644 /appl/aap-local/inbox/aap-local-lib.sh /appl/aap-local/scripts/aap-local-lib.sh
+   install -m 0755 /appl/aap-local/inbox/run-aap-playbooks.sh /appl/aap-local/scripts/run-aap-playbooks.sh
+   install -m 0755 /appl/aap-local/inbox/stage-runtime-on-aap-host.sh /appl/aap-local/scripts/stage-runtime-on-aap-host.sh
    if [ "${ee_transfer_enabled}" = "true" ]; then
-     mv -f "/appl/modulix-aap/inbox/${modulix_run_ee_archive}" /appl/modulix-aap/artifacts/
+     mv -f "/appl/aap-local/inbox/${modulix_run_ee_archive}" /appl/aap-local/artifacts/
    fi
-   mv -f /appl/modulix-aap/inbox/modulix-automation.tar.gz /appl/modulix-aap/artifacts/
+   mv -f /appl/aap-local/inbox/modulix-automation.tar.gz /appl/aap-local/artifacts/
 REMOTE_PAYLOAD
 
 printf 'Offline payload transfer completed for %s.\n' "${AAP_FQDN}"

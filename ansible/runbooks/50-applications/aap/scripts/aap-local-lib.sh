@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Deprecated compatibility library. New guides should use
+# runbooks/50-applications/aap/02-local-execution-control.yml with
+# aap_action=... instead of sourcing this file.
+
 modulix_aap_set_defaults() {
   : "${AAP_SHORTNAME:=${AAP_FQDN%%.*}}"
   : "${AAP_USER:=svc_ansible}"
@@ -31,7 +35,7 @@ modulix_aap_set_defaults() {
   : "${AAP_VAULT_ADMIN_PASSWORDS_KV_PATH:=${AAP_VAULT_HOST_KEY}/aap/deploy/admin_passwords}"
   : "${AAP_VAULT_DEFAULTS_KV_PATH:=defaults}"
   : "${AAP_INVENTORY_HOST:=${AAP_SHORTNAME}}"
-  : "${AAP_APPL_ROOT:=/appl/modulix-aap}"
+  : "${AAP_APPL_ROOT:=/appl/aap-local}"
   : "${AAP_ENV_FILE:=${AAP_APPL_ROOT}/etc/aap-local.env}"
   : "${AAP_SECRETS_DIR:=${AAP_APPL_ROOT}/secrets}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
@@ -39,8 +43,8 @@ modulix_aap_set_defaults() {
   else
     : "${AAP_SSH_KEY:=}"
   fi
-  : "${MACHINE_A_APPL_ROOT:=${HOME}/appl/modulix-aap}"
-  : "${MACHINE_A_EXPORT_ROOT:=${HOME}/appl/modulix-aap-export}"
+  : "${MACHINE_A_APPL_ROOT:=${HOME}/aap-work}"
+  : "${MACHINE_A_EXPORT_ROOT:=${HOME}/aap-export}"
   : "${MACHINE_A_ENV_FILE:=${MACHINE_A_APPL_ROOT}/etc/aap-local.env}"
   : "${MACHINE_A_SECRETS_DIR:=${MACHINE_A_APPL_ROOT}/secrets}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then

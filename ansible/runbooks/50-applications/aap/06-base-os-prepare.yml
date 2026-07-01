@@ -206,36 +206,10 @@
         - os_prep
         - podman
 
-    - name: Clean stale install-user runtime before first AAP install
-      ansible.builtin.shell: |
-        set -euo pipefail
-        install_marker="{{ aap_deploy_installed_marker_path | default('/appl/aap/.aap_containerized_installed', true) }}"
-        install_user="{{ aap_runbook_install_user_effective }}"
-
-        if [ -f "${install_marker}" ]; then
-          echo "installed-marker-present"
-          exit 0
-        fi
-
-        if ! pgrep -u "${install_user}" >/dev/null 2>&1; then
-          echo "no-stale-runtime"
-          exit 0
-        fi
-
-        loginctl terminate-user "${install_user}" 2>/dev/null || true
-        pkill -u "${install_user}" 2>/dev/null || true
-        sleep 2
-
-        if pgrep -a -u "${install_user}"; then
-          echo "stale-runtime-still-running" >&2
-          exit 1
-        fi
-
-        echo "stale-runtime-cleaned"
-      args:
-        executable: /bin/bash
-      register: aap_runbook_install_user_runtime_cleanup
-      changed_when: "'stale-runtime-cleaned' in aap_runbook_install_user_runtime_cleanup.stdout"
+    - name: Check AAP installed marker
+      ansible.builtin.stat:
+        path: "{{ aap_deploy_installed_marker_path | default('/appl/aap/.aap_containerized_installed', true) }}"
+      register: aap_runbook_installed_marker
       when:
         - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
       tags:
@@ -244,22 +218,147 @@
         - os_prep
         - runtime
 
-    - name: Verify AAP base OS substrate
-      ansible.builtin.shell: |
-        set -euo pipefail
-        command -v podman
-        command -v git
-        command -v openssl
-        command -v python3
-        command -v sudo
-        podman --version
-        test -d /appl/tmp
-        test -d /appl/ansible-tmp
-        test -d /appl/home
-        test -d /appl/podman
-      args:
-        executable: /bin/bash
+    - name: Check install-user runtime processes
+      ansible.builtin.command:
+        argv:
+          - pgrep
+          - -u
+          - "{{ aap_runbook_install_user_effective }}"
+      register: aap_runbook_install_user_processes
       changed_when: false
+      failed_when: false
+      when:
+        - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
+        - not (aap_runbook_installed_marker.stat.exists | default(false))
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - runtime
+
+    - name: Terminate stale install-user session
+      ansible.builtin.command:
+        argv:
+          - loginctl
+          - terminate-user
+          - "{{ aap_runbook_install_user_effective }}"
+      register: aap_runbook_loginctl_terminate
+      changed_when: aap_runbook_loginctl_terminate.rc == 0
+      failed_when: false
+      when:
+        - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
+        - not (aap_runbook_installed_marker.stat.exists | default(false))
+        - aap_runbook_install_user_processes.rc | default(1) == 0
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - runtime
+
+    - name: Kill stale install-user processes
+      ansible.builtin.command:
+        argv:
+          - pkill
+          - -u
+          - "{{ aap_runbook_install_user_effective }}"
+      register: aap_runbook_pkill_install_user
+      changed_when: aap_runbook_pkill_install_user.rc == 0
+      failed_when: false
+      when:
+        - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
+        - not (aap_runbook_installed_marker.stat.exists | default(false))
+        - aap_runbook_install_user_processes.rc | default(1) == 0
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - runtime
+
+    - name: Wait after install-user runtime cleanup
+      ansible.builtin.pause:
+        seconds: 2
+      when:
+        - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
+        - not (aap_runbook_installed_marker.stat.exists | default(false))
+        - aap_runbook_install_user_processes.rc | default(1) == 0
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - runtime
+
+    - name: Verify stale install-user runtime is gone
+      ansible.builtin.command:
+        argv:
+          - pgrep
+          - -a
+          - -u
+          - "{{ aap_runbook_install_user_effective }}"
+      register: aap_runbook_install_user_processes_after_cleanup
+      changed_when: false
+      failed_when: aap_runbook_install_user_processes_after_cleanup.rc == 0
+      when:
+        - aap_runbook_cleanup_stale_install_user_runtime | default(true) | bool
+        - not (aap_runbook_installed_marker.stat.exists | default(false))
+        - aap_runbook_install_user_processes.rc | default(1) == 0
+      tags:
+        - aap
+        - aap_base_os
+        - os_prep
+        - runtime
+
+    - name: Verify required AAP base OS commands
+      ansible.builtin.command:
+        argv:
+          - which
+          - "{{ item }}"
+      loop:
+        - podman
+        - git
+        - openssl
+        - python3
+        - sudo
+      changed_when: false
+      tags:
+        - aap
+        - aap_base_os
+        - verify
+
+    - name: Verify Podman version
+      ansible.builtin.command:
+        argv:
+          - podman
+          - --version
+      changed_when: false
+      tags:
+        - aap
+        - aap_base_os
+        - verify
+
+    - name: Check required AAP base OS paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /appl/tmp
+        - /appl/ansible-tmp
+        - /appl/home
+        - /appl/podman
+      register: aap_runbook_base_os_path_stats
+      tags:
+        - aap
+        - aap_base_os
+        - verify
+
+    - name: Assert required AAP base OS paths exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isdir | default(false)
+        fail_msg: "Required AAP base OS path is missing or not a directory: {{ item.item }}"
+        quiet: true
+      loop: "{{ aap_runbook_base_os_path_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
       tags:
         - aap
         - aap_base_os

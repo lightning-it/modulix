@@ -23,7 +23,7 @@
       - check
     machine_a_effective_appl_root: >-
       {{ machine_a_appl_root
-         | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/modulix-aap', true) }}
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/aap-work', true) }}
     machine_a_effective_secrets_dir: >-
       {{ machine_a_secrets_dir
          | default(machine_a_effective_appl_root ~ '/secrets', true) }}
@@ -32,7 +32,7 @@
          | default(machine_a_effective_secrets_dir ~ '/known_hosts', true) }}
     machine_a_effective_export_root: >-
       {{ machine_a_export_root
-         | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/modulix-aap-export', true) }}
+         | default(lookup('ansible.builtin.env', 'HOME') ~ '/aap-export', true) }}
     machine_a_effective_automation_dir: >-
       {{ machine_a_automation_dir
          | default(machine_a_effective_export_root ~ '/src/modulix-automation', true) }}
@@ -144,7 +144,7 @@
   any_errors_fatal: true
 
   vars:
-    aap_effective_appl_root: "{{ aap_appl_root | default('/appl/modulix-aap', true) }}"
+    aap_effective_appl_root: "{{ aap_appl_root | default('/appl/aap-local', true) }}"
     aap_baseline_login_user: "{{ ansible_user }}"
     aap_baseline_required_commands:
       - sudo

@@ -66,9 +66,10 @@
         - dns
 
     - name: Verify required AAP host commands
-      ansible.builtin.shell: "command -v {{ item | quote }}"
-      args:
-        executable: /bin/bash
+      ansible.builtin.command:
+        argv:
+          - which
+          - "{{ item }}"
       changed_when: false
       loop: "{{ aap_preflight_required_commands }}"
       tags:
@@ -112,22 +113,40 @@
         - aap_preflight
         - podman
 
-    - name: Verify first-install runtime state
-      ansible.builtin.shell: |
-        set -euo pipefail
-        if [ -f /appl/aap/.aap_containerized_installed ]; then
-          echo "Existing AAP marker found; leaving install user runtime untouched."
-          pgrep -a -u "{{ aap_deploy_install_user | default('svc_aap', true) }}" || true
-        else
-          echo "No AAP marker found; install user runtime should be empty before first install."
-          if pgrep -a -u "{{ aap_deploy_install_user | default('svc_aap', true) }}"; then
-            echo "Stop stale install-user processes before first install." >&2
-            exit 1
-          fi
-        fi
-      args:
-        executable: /bin/bash
+    - name: Check AAP installed marker
+      ansible.builtin.stat:
+        path: "{{ aap_deploy_installed_marker_path | default('/appl/aap/.aap_containerized_installed', true) }}"
+      register: aap_preflight_installed_marker
+      tags:
+        - aap
+        - aap_preflight
+        - runtime
+
+    - name: Check install-user runtime processes
+      ansible.builtin.command:
+        argv:
+          - pgrep
+          - -a
+          - -u
+          - "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+      register: aap_preflight_install_user_processes
       changed_when: false
+      failed_when: false
+      tags:
+        - aap
+        - aap_preflight
+        - runtime
+
+    - name: Assert first-install runtime state
+      ansible.builtin.assert:
+        that:
+          - >-
+            (aap_preflight_installed_marker.stat.exists | default(false))
+            or (aap_preflight_install_user_processes.rc | default(1) != 0)
+        fail_msg: >-
+          Stop stale install-user processes before first install:
+          {{ aap_preflight_install_user_processes.stdout_lines | default([]) }}
+        quiet: true
       tags:
         - aap
         - aap_preflight
