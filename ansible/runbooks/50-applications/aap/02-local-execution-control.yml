@@ -92,6 +92,7 @@
         mode: "{{ aap_local_env_mode }}"
         content: |
           export AAP_FQDN="{{ aap_fqdn }}"
+          export AAP_ANSIBLE_HOST="{{ aap_effective_ansible_host }}"
           export AAP_SHORTNAME="{{ aap_effective_shortname }}"
           export AAP_INVENTORY_HOST="{{ aap_effective_inventory_host }}"
           export AAP_BOOTSTRAP_USER="{{ aap_effective_bootstrap_user }}"
@@ -592,7 +593,7 @@
       ansible.builtin.add_host:
         name: aap_local_target
         groups: aap_local_targets
-        ansible_host: "{{ aap_fqdn }}"
+        ansible_host: "{{ aap_effective_ansible_host }}"
         ansible_user: "{{ aap_effective_bootstrap_user }}"
         ansible_connection: ssh
         ansible_become: true
@@ -636,6 +637,7 @@
         aap_effective_install_user: "{{ aap_effective_install_user }}"
         aap_effective_user: "{{ aap_effective_user }}"
         aap_effective_inventory_host: "{{ aap_effective_inventory_host }}"
+        aap_effective_ansible_host: "{{ aap_effective_ansible_host }}"
         aap_effective_shortname: "{{ aap_effective_shortname }}"
         aap_effective_secret_backend: "{{ aap_effective_secret_backend }}"
         aap_ssh_key_container: "{{ aap_ssh_key_container }}"

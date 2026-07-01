@@ -48,6 +48,8 @@
     aap_baseline_effective_become_flags: >-
       {{ aap_baseline_become_flags
          | default('--preserve-env=SSH_AUTH_SOCK -i', true) }}
+    aap_baseline_effective_ansible_host: >-
+      {{ aap_ansible_host | default(aap_fqdn, true) }}
     aap_baseline_effective_remote_tmp: >-
       {{ ansible_remote_tmp | default('~/.ansible/tmp', true) }}
 
@@ -126,7 +128,7 @@
       ansible.builtin.add_host:
         name: aap_baseline_target
         groups: aap_baseline_targets
-        ansible_host: "{{ aap_fqdn }}"
+        ansible_host: "{{ aap_baseline_effective_ansible_host }}"
         ansible_user: "{{ aap_user | default(aap_bootstrap_user, true) }}"
         ansible_connection: ssh
         ansible_become: true
@@ -144,6 +146,7 @@
   any_errors_fatal: true
 
   vars:
+    aap_baseline_action: "{{ aap_action | default('verify', true) }}"
     aap_effective_appl_root: "{{ aap_appl_root | default('/appl/aap-local', true) }}"
     aap_baseline_login_user: "{{ ansible_user }}"
     aap_baseline_required_commands:

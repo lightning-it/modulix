@@ -1,5 +1,5 @@
 ---
-ansible_host: {{ aap_fqdn }}
+ansible_host: {{ aap_effective_ansible_host }}
 ansible_user: {{ aap_effective_user }}
 ansible_connection: ssh
 ansible_become: true
