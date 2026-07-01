@@ -1,6 +1,6 @@
 ---
 # -----------------------------------------------------------------------------
-# AAP customer-prepared host baseline controller
+# AAP prepared host baseline controller
 #
 # Purpose:
 # - Verify and prepare the minimal host substrate for AAP local execution from
