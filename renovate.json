@@ -1,9 +1,43 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":semanticCommitType(chore)",
+    ":semanticCommitScope(deps)"
   ],
+  "labels": [
+    "dependencies",
+    "renovate"
+  ],
+  "baseBranches": [
+    "develop"
+  ],
+  "timezone": "UTC",
+  "schedule": [],
+  "rebaseWhen": "behind-base-branch",
+  "prConcurrentLimit": 5,
   "packageRules": [
+    {
+      "description": "Automerge safe non-major updates into develop after CI passes",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest",
+        "pinDigest"
+      ],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Require manual approval for major updates",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
     {
       "description": "Keep ansible-core on 2.18.x",
       "matchManagers": [
