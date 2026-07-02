@@ -13,6 +13,8 @@
         name: lit.supplementary.aap_preflight
         apply:
           tags: [aap, aap_preflight, aap_deploy]
+      vars:
+        aap_preflight_allow_partial_install_runtime: true
       tags:
         - aap
         - aap_preflight
