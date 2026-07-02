@@ -1,0 +1,78 @@
+---
+aap_secret_backend: {{ aap_effective_secret_backend | to_json }}
+aap_preflight_expected_ansible_user: {{ aap_effective_setup_user | to_json }}
+
+aap_deploy_setup_download_version: "2.7"
+
+aap_deploy_install_dir: /appl/aap
+aap_deploy_setup_dir: "{{ '{{' }} aap_deploy_install_dir {{ '}}' }}/setup"
+aap_deploy_tls_dir: "{{ '{{' }} aap_deploy_install_dir {{ '}}' }}/tls"
+aap_deploy_installed_marker_path: "{{ '{{' }} aap_deploy_install_dir {{ '}}' }}/.aap_containerized_installed"
+
+aap_deploy_install_user: {{ aap_effective_install_user }}
+aap_deploy_install_user_home: /appl/home/{{ aap_effective_install_user }}
+aap_deploy_install_user_shell: /bin/bash
+
+aap_runbook_manage_rhsm: false
+aap_runbook_manage_repos: false
+aap_runbook_os_prep_enabled: false
+aap_runbook_manage_podman: true
+aap_runbook_allow_ansible_user_sudo_to_install_user: true
+
+ansible_remote_tmp: /appl/ansible-tmp
+ansible_remote_tmp_bootstrap_raw: {{ aap_remote_tmp_bootstrap_raw | default(true) | bool | lower }}
+aap_deploy_manage_install_tmp_dir: true
+aap_deploy_install_tmp_dir: /appl/tmp
+aap_deploy_install_environment:
+  TMPDIR: /appl/tmp
+  TEMP: /appl/tmp
+  TMP: /appl/tmp
+
+aap_cac_gateway_hostname: "https://{{ '{{' }} ansible_host {{ '}}' }}"
+
+aap_ops_health_url: "https://127.0.0.1/"
+aap_ops_validate_certs: false
+aap_ops_manage_systemd: false
+
+aap_prepare_bundle_required: true
+aap_prepare_no_log: false
+aap_prepare_bundle_source: remote
+aap_prepare_bundle_remote_src: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_BUNDLE_REMOTE_SRC') {{ '}}' }}"
+aap_prepare_bundle_dest: "{{ '{{' }} aap_deploy_install_dir {{ '}}' }}/aap-containerized-setup.tar.gz"
+aap_prepare_manifest_required: true
+aap_prepare_manifest_source: remote
+aap_prepare_manifest_remote_src: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_MANIFEST_REMOTE_SRC') {{ '}}' }}"
+aap_prepare_manifest_dest: "{{ '{{' }} aap_deploy_install_dir {{ '}}' }}/manifest.zip"
+aap_prepare_artifact_dir: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_ARTIFACT_DIR') {{ '}}' }}"
+
+aap_deploy_tls_enabled: true
+aap_deploy_tls_source: customer_files
+aap_deploy_tls_customer_files:
+  ca_cert_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap-selfsigned-ca.crt"
+  gateway:
+    cert_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.crt"
+    key_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.key"
+  controller:
+    cert_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.crt"
+    key_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.key"
+  hub:
+    cert_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.crt"
+    key_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.key"
+  eda:
+    cert_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.crt"
+    key_src: "{{ '{{' }} lookup('ansible.builtin.env', 'PWD') {{ '}}' }}/files/tls/aap.key"
+
+aap_cac_controller_license_required: true
+
+aap_orgs:
+  - name: org-modulix
+aap_org_primary: "{{ '{{' }} (aap_orgs | first).name {{ '}}' }}"
+aap_cac_controller_organizations:
+  - name: org-modulix
+
+controller_settings:
+  - name: TOWER_URL_BASE
+    value: "https://{{ aap_fqdn }}"
+  - name: AWX_TASK_ENV
+    value:
+      GIT_SSL_NO_VERIFY: "true"

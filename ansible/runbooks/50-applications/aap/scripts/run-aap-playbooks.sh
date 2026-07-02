@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Deprecated compatibility entry point. New guides should run
+# runbooks/50-applications/aap/02-local-execution-control.yml with
+# -e aap_action=<artifacts|base_preflight|tls|deploy|status>.
 set -euo pipefail
 
-env_file="${AAP_ENV_FILE:-/appl/modulix-aap/etc/aap-local.env}"
+env_file="${AAP_ENV_FILE:-/appl/aap-local/etc/aap-local.env}"
 
 if [[ "${1:-}" == "--env-file" ]]; then
   env_file="${2:-}"
@@ -41,6 +44,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${script_dir}/aap-local-lib.sh"
 modulix_aap_set_defaults
+modulix_write_podman_storage_conf
 
 cd "${AUTOMATION_ANSIBLE_DIR}"
 modulix_resolve_aap_artifacts

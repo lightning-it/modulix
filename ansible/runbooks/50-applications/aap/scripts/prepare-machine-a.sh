@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Deprecated compatibility entry point. New guides should run
+# runbooks/50-applications/aap/02-local-execution-control.yml with
+# -e aap_action=prepare_machine_a.
 set -euo pipefail
 
-env_file="${1:-${HOME}/appl/modulix-aap/etc/aap-local.env}"
+env_file="${1:-${HOME}/aap-work/etc/aap-local.env}"
 
 if [[ ! -r "${env_file}" ]]; then
   printf 'AAP local env file not readable: %s\n' "${env_file}" >&2
@@ -51,7 +54,7 @@ if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
 
   if [[ ! -s "${AAP_BOOTSTRAP_SSH_KEY}" ]]; then
     printf 'AAP bootstrap SSH key not found: %s\n' "${AAP_BOOTSTRAP_SSH_KEY}" >&2
-    printf 'Run the RHEL 10 baseline substrate step first, or set AAP_BOOTSTRAP_SSH_KEY explicitly.\n' >&2
+    printf 'Run the customer baseline substrate step first, or set AAP_BOOTSTRAP_SSH_KEY explicitly.\n' >&2
     exit 1
   fi
 

@@ -1,0 +1,127 @@
+---
+aap_local_action: "{{ aap_action | default('prepare_machine_a', true) }}"
+aap_local_run_playbook_args: []
+aap_effective_secret_backend: "{{ aap_secret_backend | default('hashicorp_vault', true) }}"
+aap_local_secret_backends:
+  - hashicorp_vault
+  - ansible_vault
+aap_ansible_vault_required_secret_vars:
+  - aap_gateway_admin_password_input
+  - aap_controller_admin_password_input
+  - aap_hub_admin_password_input
+  - aap_eda_admin_password_input
+  - aap_postgresql_admin_password_input
+  - aap_breakglass_password_input
+  - rh_offline_token
+
+machine_a_effective_appl_root: >-
+  {{ machine_a_appl_root
+     | default(lookup('ansible.builtin.env', 'HOME') ~ '/aap-work', true) }}
+machine_a_effective_export_root: >-
+  {{ machine_a_export_root
+     | default(lookup('ansible.builtin.env', 'HOME') ~ '/aap-export', true) }}
+machine_a_effective_env_file: >-
+  {{ machine_a_env_file
+     | default(machine_a_effective_appl_root ~ '/etc/aap-local.env', true) }}
+machine_a_effective_secrets_dir: >-
+  {{ machine_a_secrets_dir
+     | default(machine_a_effective_appl_root ~ '/secrets', true) }}
+machine_a_effective_ssh_key: >-
+  {{ machine_a_ssh_key
+     | default(machine_a_effective_secrets_dir ~ '/svc_ansible_aap', true) }}
+machine_a_effective_bootstrap_known_hosts: >-
+  {{ machine_a_bootstrap_known_hosts
+     | default(machine_a_effective_secrets_dir ~ '/bootstrap_known_hosts', true) }}
+machine_a_effective_artifact_dir: "{{ machine_a_effective_export_root }}/artifacts/aap"
+machine_a_effective_source_archive_path: "{{ machine_a_effective_appl_root }}/artifacts/modulix-automation.tar.gz"
+
+aap_effective_shortname: "{{ aap_shortname | default(aap_fqdn.split('.')[0], true) }}"
+aap_effective_inventory_host: "{{ aap_inventory_host | default(aap_effective_shortname, true) }}"
+aap_effective_ansible_host: "{{ aap_ansible_host | default(aap_fqdn, true) }}"
+aap_effective_setup_user: "{{ aap_setup_user | default('svc_ansible', true) }}"
+aap_effective_bootstrap_user: >-
+  {{ aap_bootstrap_user
+     | default(aap_user | default(aap_effective_setup_user, true), true) }}
+aap_effective_user: "{{ aap_user | default(aap_effective_bootstrap_user, true) }}"
+aap_effective_install_user: "{{ aap_install_user | default('svc_aap', true) }}"
+aap_effective_appl_root: "{{ aap_appl_root | default('/appl/aap-local', true) }}"
+aap_effective_env_file: >-
+  {{ aap_env_file
+     | default(aap_effective_appl_root ~ '/etc/aap-local.env', true) }}
+aap_effective_secrets_dir: >-
+  {{ aap_secrets_dir
+     | default(aap_effective_appl_root ~ '/secrets', true) }}
+aap_effective_automation_dir: >-
+  {{ aap_automation_dir
+     | default(aap_effective_appl_root ~ '/src/modulix-automation', true) }}
+aap_effective_automation_ansible_dir: >-
+  {{ aap_automation_ansible_dir
+     | default(aap_effective_automation_dir ~ '/ansible', true) }}
+aap_effective_artifact_dir: "{{ aap_effective_automation_ansible_dir }}/.artifacts"
+aap_effective_inventory_name: "{{ inventory_name | default('corp', true) }}"
+aap_effective_inventory_rel: "{{ inventory_rel | default('inventories/' ~ aap_effective_inventory_name ~ '/inventory.yml', true) }}"
+aap_effective_inventory_file: "{{ aap_effective_automation_ansible_dir }}/{{ aap_effective_inventory_rel }}"
+aap_local_env_mode: "0600"
+automation_repo_url_effective: "{{ automation_repo_url | default('https://github.com/lightning-it/modulix-automation.git', true) }}"
+aap_automation_source_dir_effective: "{{ aap_automation_source_dir | default('', true) | string | trim }}"
+
+aap_effective_ee_transfer_enabled: "{{ aap_ee_transfer_enabled | default(true) | bool }}"
+modulix_run_ee_archive: >-
+  {{ (modulix_run_ee_image | regex_replace('^.*/', '') | regex_replace(':', '-')) ~ '.tar' }}
+machine_a_effective_ee_archive_path: >-
+  {{ machine_a_modulix_run_ee_archive_path
+     | default(machine_a_effective_appl_root ~ '/artifacts/' ~ modulix_run_ee_archive, true) }}
+aap_effective_ee_archive_path: "{{ aap_effective_appl_root }}/artifacts/{{ modulix_run_ee_archive }}"
+ansible_toolbox_runtime_mode_effective: "{{ ansible_toolbox_runtime_mode | default('disconnected', true) }}"
+ansible_collections_path_effective: >-
+  {{ ansible_collections_path
+     | default('/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections', true) }}
+ansible_vault_password_file_effective: >-
+  {{ ansible_vault_password_file
+     | default(aap_effective_secrets_dir ~ '/.vault-pass.txt', true) }}
+aap_podman_storage_conf_effective: >-
+  {{ aap_podman_storage_conf
+     | default(aap_effective_appl_root ~ '/etc/containers-storage.conf', true) }}
+aap_podman_root_graphroot_effective: "{{ aap_podman_root_graphroot | default('/appl/podman/root-storage', true) }}"
+aap_podman_root_runroot_effective: "{{ aap_podman_root_runroot | default('/appl/podman/root-run', true) }}"
+aap_podman_tmpdir_effective: "{{ aap_podman_tmpdir | default('/appl/tmp', true) }}"
+aap_ssh_key_container: >-
+  {{
+    ''
+    if not (aap_ssh_key_auth_enabled | default(true) | bool)
+    else '/runner/secrets/svc_ansible_aap'
+  }}
+vault_token_effective: >-
+  {{
+    vault_token
+    | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | string | trim, true)
+    | string
+    | trim
+  }}
+aap_vault_host_key_effective: "{{ aap_vault_host_key | default(aap_effective_shortname, true) }}"
+aap_vault_admin_passwords_kv_path_effective: >-
+  {{ aap_vault_admin_passwords_kv_path
+     | default(aap_vault_host_key_effective ~ '/aap/deploy/admin_passwords', true) }}
+aap_vault_defaults_kv_path_effective: >-
+  {{ aap_vault_defaults_kv_path
+     | default(aap_vault_host_key_effective ~ '/aap/deploy/defaults', true) }}
+aap_effective_bundle_checksum: >-
+  {{
+    ''
+    if (aap_bundle_sha256 | default('', true) | string | trim | length == 0)
+    else (
+      aap_bundle_sha256
+      if (aap_bundle_sha256 | string | regex_search('^sha256:'))
+      else 'sha256:' ~ (aap_bundle_sha256 | string | trim)
+    )
+  }}
+aap_effective_manifest_checksum: >-
+  {{
+    ''
+    if (aap_manifest_sha256 | default('', true) | string | trim | length == 0)
+    else (
+      aap_manifest_sha256
+      if (aap_manifest_sha256 | string | regex_search('^sha256:'))
+      else 'sha256:' ~ (aap_manifest_sha256 | string | trim)
+    )
+  }}

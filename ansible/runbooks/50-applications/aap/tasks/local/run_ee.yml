@@ -1,0 +1,81 @@
+---
+- name: Read remote SSH_AUTH_SOCK
+  ansible.builtin.command:
+    argv:
+      - printenv
+      - SSH_AUTH_SOCK
+  register: aap_remote_ssh_auth_sock
+  changed_when: false
+  failed_when: false
+
+- name: Check remote SSH agent socket
+  ansible.builtin.stat:
+    path: "{{ aap_remote_ssh_auth_sock.stdout }}"
+  register: aap_remote_ssh_auth_sock_stat
+  when: aap_remote_ssh_auth_sock.stdout | default('', true) | trim | length > 0
+
+- name: Build execution environment command
+  ansible.builtin.set_fact:
+    aap_ee_command_argv: >-
+      {{
+        [
+          'podman', 'run', '--rm',
+          '--network=host',
+          '--security-opt', 'label=disable',
+          '--user', '0',
+          '-e', 'ANSIBLE_CONFIG=/runner/project/ansible.cfg',
+          '-e', 'ANSIBLE_LOCAL_TEMP=/appl/tmp/.ansible/tmp',
+          '-e', 'ANSIBLE_REMOTE_TEMP',
+          '-e', 'ANSIBLE_TOOLBOX_RUNTIME_MODE',
+          '-e', 'ANSIBLE_COLLECTIONS_PATH',
+          '-e', 'ANSIBLE_VAULT_PASSWORD_FILE=/runner/secrets/.vault-pass.txt',
+          '-e', 'VAULT_ADDR',
+          '-e', 'VAULT_SKIP_VERIFY',
+          '-e', 'VAULT_TOKEN',
+          '-e', 'VAULT_ENGINE_MOUNT_POINT',
+          '-e', 'AAP_VAULT_HOST_KEY',
+          '-e', 'AAP_VAULT_ADMIN_PASSWORDS_KV_PATH',
+          '-e', 'AAP_VAULT_DEFAULTS_KV_PATH',
+          '-e', 'AAP_ARTIFACT_DIR',
+          '-e', 'AAP_BUNDLE_REMOTE_SRC',
+          '-e', 'AAP_MANIFEST_REMOTE_SRC',
+          '-v', aap_effective_automation_ansible_dir ~ ':/runner/project',
+          '-v', aap_effective_secrets_dir ~ ':/runner/secrets:ro',
+          '-v', '/appl/tmp:/appl/tmp'
+        ]
+        + (
+          [
+            '-e', 'SSH_AUTH_SOCK=/runner/ssh-agent',
+            '-v', aap_remote_ssh_auth_sock.stdout ~ ':/runner/ssh-agent'
+          ]
+          if (aap_remote_ssh_auth_sock_stat.stat.issock | default(false))
+          else []
+        )
+        + [
+          '-w', '/runner/project',
+          modulix_run_ee_image
+        ]
+        + aap_ee_command
+      }}
+
+- name: Run command in execution environment
+  ansible.builtin.command:
+    argv: "{{ aap_ee_command_argv }}"
+  environment:
+    ANSIBLE_TOOLBOX_RUNTIME_MODE: "{{ ansible_toolbox_runtime_mode_effective }}"
+    ANSIBLE_COLLECTIONS_PATH: "{{ ansible_collections_path_effective }}"
+    ANSIBLE_REMOTE_TEMP: "{{ ansible_remote_tmp | default('/appl/ansible-tmp', true) }}"
+    VAULT_ADDR: "{{ vault_addr | default('', true) }}"
+    VAULT_SKIP_VERIFY: "{{ vault_skip_verify | default(false) | bool | ternary('true', 'false') }}"
+    VAULT_TOKEN: "{{ vault_token_effective }}"
+    VAULT_ENGINE_MOUNT_POINT: "{{ vault_engine_mount_point | default('', true) }}"
+    AAP_VAULT_HOST_KEY: "{{ aap_vault_host_key | default(aap_effective_shortname, true) }}"
+    AAP_VAULT_ADMIN_PASSWORDS_KV_PATH: "{{ aap_vault_admin_passwords_kv_path }}"
+    AAP_VAULT_DEFAULTS_KV_PATH: "{{ aap_vault_defaults_kv_path }}"
+    AAP_ARTIFACT_DIR: "{{ aap_effective_artifact_dir }}"
+    AAP_BUNDLE_REMOTE_SRC: "{{ aap_bundle_remote_src | default('', true) }}"
+    AAP_MANIFEST_REMOTE_SRC: "{{ aap_manifest_remote_src | default('', true) }}"
+    CONTAINERS_STORAGE_CONF: "{{ aap_podman_storage_conf_effective }}"
+    TMPDIR: "{{ aap_podman_tmpdir_effective }}"
+  register: aap_ee_command_result
+  changed_when: false

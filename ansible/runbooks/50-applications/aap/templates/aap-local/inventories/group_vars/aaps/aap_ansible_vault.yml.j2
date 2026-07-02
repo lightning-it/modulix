@@ -1,0 +1,17 @@
+---
+aap_password_seed_enabled: false
+aap_preflight_vault_enabled: false
+
+aap_username: {{ aap_username | default('admin', true) | to_json }}
+aap_validate_certs: false
+
+aap_gateway_admin_password_input: {{ aap_gateway_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+aap_controller_admin_password_input: {{ aap_controller_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+aap_hub_admin_password_input: {{ aap_hub_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+aap_eda_admin_password_input: {{ aap_eda_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+aap_postgresql_admin_password_input: {{ aap_postgresql_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+aap_breakglass_password_input: {{ aap_breakglass_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+aap_admin_password_input: {{ aap_admin_password_input | default(aap_gateway_admin_password_input | default('', true), true) | to_json }}
+
+aap_password: {{ aap_gateway_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
+rh_offline_token: {{ rh_offline_token | default('', true) | to_json }}

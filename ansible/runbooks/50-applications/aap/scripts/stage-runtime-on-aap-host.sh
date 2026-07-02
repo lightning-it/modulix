@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Deprecated compatibility entry point. New guides should run
+# runbooks/50-applications/aap/02-local-execution-control.yml with
+# -e aap_action=stage_runtime.
 set -euo pipefail
 
-env_file="${AAP_ENV_FILE:-/appl/modulix-aap/etc/aap-local.env}"
+env_file="${AAP_ENV_FILE:-/appl/aap-local/etc/aap-local.env}"
 
 if [[ "${1:-}" == "--env-file" ]]; then
   env_file="${2:-}"
@@ -22,6 +25,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 modulix_aap_set_defaults
 
 mkdir -p "${AAP_APPL_ROOT}/src" /appl/tmp /appl/ansible-tmp
+modulix_write_podman_storage_conf
 
 if [[ ! -f "${AUTOMATION_ANSIBLE_DIR}/ansible.cfg" ]]; then
   rm -rf "${AUTOMATION_DIR}"
@@ -34,7 +38,11 @@ find "${AAP_APPL_ROOT}/inbox" -maxdepth 1 -type f \
   \( -name 'ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz' -o -name 'manifest*.zip' \) \
   -exec mv {} "${AAP_ARTIFACT_DIR}/" \;
 
-podman load -i "${MODULIX_RUN_EE_ARCHIVE_PATH}"
+if [[ "${AAP_EE_TRANSFER_ENABLED}" == "true" ]]; then
+  podman load -i "${MODULIX_RUN_EE_ARCHIVE_PATH}"
+else
+  podman pull "${MODULIX_RUN_EE_IMAGE}"
+fi
 podman image exists "${MODULIX_RUN_EE_IMAGE}"
 
 test -f "${ANSIBLE_VAULT_PASSWORD_FILE}" ||

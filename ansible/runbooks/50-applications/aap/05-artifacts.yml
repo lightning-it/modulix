@@ -14,6 +14,27 @@
   become: true
   gather_facts: true
 
+  pre_tasks:
+    - name: Verify AAP setup account before artifact staging
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_preflight
+        apply:
+          tags: [aap, aap_preflight, aap_prepare, artifacts]
+      vars:
+        aap_preflight_check_dns: false
+        aap_preflight_check_commands: false
+        aap_preflight_check_paths: false
+        aap_preflight_check_podman: false
+        aap_preflight_check_runtime: false
+        aap_preflight_check_artifacts: false
+        aap_preflight_check_vault: false
+        aap_preflight_check_ansible_vault: false
+      tags:
+        - aap
+        - aap_preflight
+        - aap_prepare
+        - artifacts
+
   tasks:
     - name: Stage AAP setup bundle and manifest
       ansible.builtin.include_role:
@@ -25,4 +46,3 @@
         - aap_prepare
         - artifacts
         - dns
-

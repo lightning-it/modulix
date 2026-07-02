@@ -1,0 +1,58 @@
+---
+- name: Ensure generated AAP inventory directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/group_vars/aaps"
+    - "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/host_vars/{{ aap_effective_inventory_host }}"
+    - "{{ aap_effective_automation_ansible_dir }}/files/tls"
+
+- name: Write generated AAP inventory
+  ansible.builtin.template:
+    src: aap-local/inventories/inventory.yml.j2
+    dest: "{{ aap_effective_inventory_file }}"
+    mode: "0644"
+
+- name: Write generated AAP connection host vars
+  ansible.builtin.template:
+    src: aap-local/inventories/host_vars/connection.yml.j2
+    dest: "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/host_vars/{{ aap_effective_inventory_host }}/connection.yml"
+    mode: "0644"
+
+- name: Write generated AAP group vars
+  ansible.builtin.template:
+    src: "aap-local/inventories/group_vars/aaps/{{ item }}"
+    dest: "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/group_vars/aaps/{{ item | regex_replace('\\.j2$', '') }}"
+    mode: "0644"
+  loop:
+    - aap.yml.j2
+    - podman.yml.j2
+
+- name: Write generated HashiCorp Vault AAP group vars
+  ansible.builtin.template:
+    src: aap-local/inventories/group_vars/aaps/aap_hc_vault.yml.j2
+    dest: "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/group_vars/aaps/aap_hc_vault.yml"
+    mode: "0644"
+  when: aap_effective_secret_backend | default('hashicorp_vault', true) == 'hashicorp_vault'
+
+- name: Write generated Ansible Vault AAP group vars
+  ansible.builtin.template:
+    src: aap-local/inventories/group_vars/aaps/aap_ansible_vault.yml.j2
+    dest: "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/group_vars/aaps/aap_ansible_vault.yml"
+    mode: "0600"
+  no_log: true
+  when: aap_effective_secret_backend | default('hashicorp_vault', true) == 'ansible_vault'
+
+- name: Remove stale HashiCorp Vault group vars when using Ansible Vault
+  ansible.builtin.file:
+    path: "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/group_vars/aaps/aap_hc_vault.yml"
+    state: absent
+  when: aap_effective_secret_backend | default('hashicorp_vault', true) == 'ansible_vault'
+
+- name: Remove stale Ansible Vault group vars when using HashiCorp Vault
+  ansible.builtin.file:
+    path: "{{ aap_effective_automation_ansible_dir }}/inventories/{{ aap_effective_inventory_name }}/group_vars/aaps/aap_ansible_vault.yml"
+    state: absent
+  when: aap_effective_secret_backend | default('hashicorp_vault', true) == 'hashicorp_vault'

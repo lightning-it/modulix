@@ -5,6 +5,10 @@ inventory-owned values.
 
 ## Runbooks
 
+- `01-local-baseline-control.yml`: verify and prepare a customer-provided AAP
+  host baseline from Machine A using inventory values.
+- `02-local-execution-control.yml`: drive the disconnected/local-execution AAP
+  workflow from Machine A with `aap_action`.
 - `05-artifacts.yml`: stage the AAP setup bundle and manifest using
   `lit.supplementary.aap_prepare` and `lit.supplementary.artifacts`.
 - `06-base-os-prepare.yml`: prepare the AAP-specific OS substrate on an
@@ -16,24 +20,19 @@ inventory-owned values.
 - `10-deploy.yml`: prepare and deploy AAP, then apply configuration-as-code.
 - `20-ops.yml`: run explicit day-2 AAP operations with `aap_ops_action`.
 
-## Helper Scripts
+## Local Control
 
-- `scripts/aap-local-lib.sh`: shared local shell functions for the disconnected
-  AAP guide, including artifact resolution, execution-environment Ansible, and
-  generated local inventory.
-- `scripts/prepare-machine-a.sh`: Machine A helper that creates the local
-  staging layout, prepares the AAP SSH key, and refreshes the automation
-  checkout.
-- `scripts/run-aap-playbooks.sh`: AAP-host helper that resolves local
-  artifacts, writes the generated inventory, and runs one or more AAP runbooks
-  inside the execution environment.
-- `scripts/stage-runtime-on-aap-host.sh`: AAP-host helper that unpacks the
-  transferred automation checkout, moves installer artifacts into place, loads
-  the execution environment image, and writes the generated inventory.
-- `scripts/export-transfer-offline-payload.sh`: Machine A helper that pulls and
-  exports the execution environment image, packages the automation checkout,
-  creates the remote landing zone, and transfers the disconnected payload to
-  the AAP host before local Ansible execution is available.
+`02-local-execution-control.yml` owns Machine A preparation, payload transfer,
+runtime staging, Vault token seeding, validation, generated inventory,
+execution-environment dispatch, and AAP runbook execution.
+
+The `tasks/local/` task files and `templates/aap-local/` templates contain the
+reusable pieces that used to live in shell helpers: artifact resolution, Podman
+storage configuration, generated inventory, and execution-environment command
+construction.
+
+The older scripts in `scripts/` are kept for compatibility with environments
+that have not moved to the local control playbook yet.
 
 ## OS Preparation Boundary
 

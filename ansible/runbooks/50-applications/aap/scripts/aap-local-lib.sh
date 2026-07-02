@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Deprecated compatibility library. New guides should use
+# runbooks/50-applications/aap/02-local-execution-control.yml with
+# aap_action=... instead of sourcing this file.
+
 modulix_aap_set_defaults() {
   : "${AAP_SHORTNAME:=${AAP_FQDN%%.*}}"
   : "${AAP_USER:=svc_ansible}"
@@ -7,6 +11,19 @@ modulix_aap_set_defaults() {
   : "${AAP_ANSIBLE_BECOME_FLAGS:=}"
   : "${AAP_SSH_KEY_AUTH_ENABLED:=true}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
+        "${AAP_USER}" == "svc_ansible" &&
+        "${AAP_BOOTSTRAP_USER}" != "svc_ansible" ]]; then
+    AAP_USER="${AAP_BOOTSTRAP_USER}"
+  fi
+  if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
+        "${AAP_USER}" == "root" &&
+        "${AAP_BOOTSTRAP_USER}" == "root" &&
+        -n "${SUDO_USER:-}" &&
+        "${SUDO_USER}" != "root" ]]; then
+    AAP_BOOTSTRAP_USER="${SUDO_USER}"
+    AAP_USER="${SUDO_USER}"
+  fi
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
     : "${AAP_BASELINE_SSH_KEY:=${HOME}/sources/modulix-automation/ansible/.tmp/${AAP_SHORTNAME}-secrets/svc_ansible_aap}"
     : "${AAP_BOOTSTRAP_SSH_KEY:=${AAP_BASELINE_SSH_KEY}}"
@@ -18,7 +35,7 @@ modulix_aap_set_defaults() {
   : "${AAP_VAULT_ADMIN_PASSWORDS_KV_PATH:=${AAP_VAULT_HOST_KEY}/aap/deploy/admin_passwords}"
   : "${AAP_VAULT_DEFAULTS_KV_PATH:=defaults}"
   : "${AAP_INVENTORY_HOST:=${AAP_SHORTNAME}}"
-  : "${AAP_APPL_ROOT:=/appl/modulix-aap}"
+  : "${AAP_APPL_ROOT:=/appl/aap-local}"
   : "${AAP_ENV_FILE:=${AAP_APPL_ROOT}/etc/aap-local.env}"
   : "${AAP_SECRETS_DIR:=${AAP_APPL_ROOT}/secrets}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
@@ -26,8 +43,8 @@ modulix_aap_set_defaults() {
   else
     : "${AAP_SSH_KEY:=}"
   fi
-  : "${MACHINE_A_APPL_ROOT:=${HOME}/appl/modulix-aap}"
-  : "${MACHINE_A_EXPORT_ROOT:=${HOME}/appl/modulix-aap-export}"
+  : "${MACHINE_A_APPL_ROOT:=${HOME}/aap-work}"
+  : "${MACHINE_A_EXPORT_ROOT:=${HOME}/aap-export}"
   : "${MACHINE_A_ENV_FILE:=${MACHINE_A_APPL_ROOT}/etc/aap-local.env}"
   : "${MACHINE_A_SECRETS_DIR:=${MACHINE_A_APPL_ROOT}/secrets}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
@@ -46,12 +63,17 @@ modulix_aap_set_defaults() {
   : "${AAP_ARTIFACT_DIR:=${AUTOMATION_ANSIBLE_DIR}/.artifacts}"
   : "${INVENTORY_REL:=inventories/${INVENTORY_NAME}/inventory.yml}"
   : "${INVENTORY_FILE:=${AUTOMATION_ANSIBLE_DIR}/${INVENTORY_REL}}"
-  : "${MODULIX_RUN_EE_ARCHIVE:=${MODULIX_RUN_EE_IMAGE##*/}.tar}"
+  MODULIX_RUN_EE_ARCHIVE="${MODULIX_RUN_EE_IMAGE##*/}.tar"
   MODULIX_RUN_EE_ARCHIVE="${MODULIX_RUN_EE_ARCHIVE//:/-}"
-  : "${MODULIX_RUN_EE_ARCHIVE_PATH:=${AAP_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}}"
+  MODULIX_RUN_EE_ARCHIVE_PATH="${AAP_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}"
   : "${ANSIBLE_TOOLBOX_RUNTIME_MODE:=disconnected}"
   : "${ANSIBLE_VAULT_PASSWORD_FILE:=${AAP_SECRETS_DIR}/.vault-pass.txt}"
   : "${ANSIBLE_COLLECTIONS_PATH:=/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
+  : "${AAP_PODMAN_STORAGE_CONF:=${AAP_APPL_ROOT}/etc/containers-storage.conf}"
+  : "${AAP_PODMAN_ROOT_GRAPHROOT:=/appl/podman/root-storage}"
+  : "${AAP_PODMAN_ROOT_RUNROOT:=/appl/podman/root-run}"
+  : "${AAP_PODMAN_TMPDIR:=/appl/tmp}"
+  : "${AAP_EE_TRANSFER_ENABLED:=true}"
 
   if [[ -z "${VAULT_TOKEN:-}" && -r "${AAP_SECRETS_DIR}/.vault-token" ]]; then
     VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
@@ -69,7 +91,34 @@ modulix_aap_set_defaults() {
   export INVENTORY_REL INVENTORY_FILE
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
   export ANSIBLE_TOOLBOX_RUNTIME_MODE ANSIBLE_VAULT_PASSWORD_FILE ANSIBLE_COLLECTIONS_PATH
+  export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT AAP_PODMAN_TMPDIR
+  export AAP_EE_TRANSFER_ENABLED
   export VAULT_TOKEN
+}
+
+modulix_write_podman_storage_conf() {
+  mkdir -p \
+    "$(dirname "${AAP_PODMAN_STORAGE_CONF}")" \
+    "${AAP_PODMAN_ROOT_GRAPHROOT}" \
+    "${AAP_PODMAN_ROOT_RUNROOT}" \
+    "${AAP_PODMAN_TMPDIR}"
+
+  cat >"${AAP_PODMAN_STORAGE_CONF}" <<EOF
+[storage]
+driver = "overlay"
+graphroot = "${AAP_PODMAN_ROOT_GRAPHROOT}"
+runroot = "${AAP_PODMAN_ROOT_RUNROOT}"
+
+[storage.options]
+EOF
+
+  if [[ -x /usr/bin/fuse-overlayfs ]]; then
+    printf 'mount_program = "/usr/bin/fuse-overlayfs"\n' >>"${AAP_PODMAN_STORAGE_CONF}"
+  fi
+
+  chmod 0644 "${AAP_PODMAN_STORAGE_CONF}"
+  export CONTAINERS_STORAGE_CONF="${AAP_PODMAN_STORAGE_CONF}"
+  export TMPDIR="${AAP_PODMAN_TMPDIR}"
 }
 
 modulix_resolve_aap_artifacts() {
@@ -98,6 +147,14 @@ modulix_resolve_aap_artifacts() {
 }
 
 modulix_ansible_ee() {
+  local -a ssh_agent_args=()
+  if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
+    ssh_agent_args=(
+      -e SSH_AUTH_SOCK=/runner/ssh-agent
+      -v "${SSH_AUTH_SOCK}:/runner/ssh-agent"
+    )
+  fi
+
   podman run --rm \
     --network=host \
     --security-opt label=disable \
@@ -121,6 +178,7 @@ modulix_ansible_ee() {
     -v "${AUTOMATION_ANSIBLE_DIR}:/runner/project" \
     -v "${AAP_SECRETS_DIR}:/runner/secrets:ro" \
     -v /appl/tmp:/appl/tmp \
+    "${ssh_agent_args[@]}" \
     -w /runner/project \
     "${MODULIX_RUN_EE_IMAGE}" \
     "$@"
@@ -188,8 +246,10 @@ aap_runbook_manage_rhsm: false
 aap_runbook_manage_repos: false
 aap_runbook_os_prep_enabled: false
 aap_runbook_manage_podman: true
+aap_runbook_allow_ansible_user_sudo_to_install_user: true
 
 ansible_remote_tmp: /appl/ansible-tmp
+ansible_remote_tmp_bootstrap_raw: ${AAP_REMOTE_TMP_BOOTSTRAP_RAW:-true}
 aap_deploy_manage_install_tmp_dir: true
 aap_deploy_install_tmp_dir: /appl/tmp
 aap_deploy_install_environment:

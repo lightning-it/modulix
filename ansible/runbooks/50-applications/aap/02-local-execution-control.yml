@@ -1,0 +1,35 @@
+---
+# AAP local-execution controller.
+# The reusable logic lives in lit.supplementary.aap_local_execution.
+
+- name: Prepare AAP local-execution context on Machine A
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Prepare local-execution context
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_local_execution
+        tasks_from: controller
+        apply:
+          tags: [aap, aap_local_execution]
+      tags:
+        - aap
+        - aap_local_execution
+
+- name: Transfer payload and run AAP local-execution actions on target
+  hosts: aap_local_targets
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Run local-execution target action
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_local_execution
+        tasks_from: target
+        apply:
+          tags: [aap, aap_local_execution]
+      tags:
+        - aap
+        - aap_local_execution

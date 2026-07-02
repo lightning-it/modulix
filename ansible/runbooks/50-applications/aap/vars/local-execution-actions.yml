@@ -1,0 +1,25 @@
+---
+aap_local_allowed_actions:
+  - validate
+  - prepare_machine_a
+  - seed_rh_offline_token
+  - transfer_payload
+  - stage_runtime
+  - artifacts
+  - base_preflight
+  - tls
+  - deploy
+  - status
+
+aap_local_remote_playbooks:
+  artifacts:
+    - runbooks/50-applications/aap/05-artifacts.yml
+  base_preflight:
+    - runbooks/50-applications/aap/06-base-os-prepare.yml
+    - runbooks/50-applications/aap/07-preflight.yml
+  tls:
+    - runbooks/50-applications/aap/08-tls-selfsigned.yml
+  deploy:
+    - runbooks/50-applications/aap/10-deploy.yml
+  status:
+    - runbooks/50-applications/aap/20-ops.yml
