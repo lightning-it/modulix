@@ -1,109 +1,6 @@
 ---
-# -----------------------------------------------------------------------------
-# Ansible Automation Platform (AAP) hosts
-#
-# Purpose:
-# - Optionally prepare host OS prerequisites
-# - Stage AAP artifacts
-# - Install AAP with the containerized installer
-# - Apply AAP configuration-as-code objects
-# - Expose day-2 operations (restart/status/upgrade/sync_hub_password)
-# -----------------------------------------------------------------------------
-
-- name: Prepare optional AAP host OS prerequisites
-  hosts: aaps
-  become: true
-  gather_facts: true
-
-  tasks:
-    - name: Register RHEL host with RHSM
-      ansible.builtin.include_role:
-        name: lit.rhel.rhsm
-        apply:
-          tags: [aap, aap_deploy, aap_os_prep, os_prep, rhsm]
-      tags:
-        - aap
-        - aap_deploy
-        - aap_os_prep
-        - os_prep
-        - rhsm
-      when:
-        - aap_runbook_os_prep_enabled | default(true) | bool
-        - >-
-          aap_runbook_manage_rhsm
-          | default((rhsm_method | default('none')) != 'none')
-          | bool
-
-    - name: Enable RHEL repositories for AAP host
-      ansible.builtin.include_role:
-        name: lit.rhel.repos
-        apply:
-          tags: [aap, aap_deploy, aap_os_prep, os_prep, repos]
-      tags:
-        - aap
-        - aap_deploy
-        - aap_os_prep
-        - os_prep
-        - repos
-      when:
-        - aap_runbook_os_prep_enabled | default(true) | bool
-        - aap_runbook_manage_repos | default(true) | bool
-
-    - name: Install AAP host prerequisite packages
-      ansible.builtin.package:
-        name: "{{ aap_runbook_host_packages | default(['acl', 'ansible-core', 'rsync']) }}"
-        state: present
-      tags:
-        - aap
-        - aap_deploy
-        - aap_os_prep
-        - os_prep
-        - packages
-      when:
-        - aap_runbook_os_prep_enabled | default(true) | bool
-        - aap_runbook_manage_host_packages | default(true) | bool
-        - (aap_runbook_host_packages | default(['acl', 'ansible-core', 'rsync'])) | length > 0
-
-    - name: Prepare AAP install user on RHEL host
-      ansible.builtin.include_role:
-        name: lit.rhel.users
-        apply:
-          tags: [aap, aap_deploy, aap_os_prep, os_prep, users]
-      vars:
-        users_accounts:
-          - name: "{{ aap_deploy_install_user }}"
-            gid: "{{ aap_deploy_install_user }}"
-            groups:
-              - "{{ aap_deploy_install_user }}"
-              - wheel
-            home: "{{ aap_deploy_install_user_home }}"
-            shell: "{{ aap_deploy_install_user_shell }}"
-            create_home: true
-            passwordless_sudo: true
-      tags:
-        - aap
-        - aap_deploy
-        - aap_os_prep
-        - os_prep
-        - users
-      when:
-        - aap_runbook_os_prep_enabled | default(true) | bool
-        - aap_runbook_manage_install_user | default(true) | bool
-
-    - name: Prepare Podman on AAP host
-      ansible.builtin.include_role:
-        name: lit.rhel.podman
-        apply:
-          tags: [aap, aap_deploy, aap_os_prep, os_prep, podman]
-      tags:
-        - aap
-        - aap_deploy
-        - aap_os_prep
-        - os_prep
-        - podman
-      when:
-        - aap_runbook_os_prep_enabled | default(true) | bool
-        - aap_runbook_manage_podman | default(true) | bool
+# Ansible Automation Platform (AAP) deployment.
+# OS substrate preparation is handled by 06-base-os-prepare.yml.
 
 - name: Deploy and configure AAP
   hosts: aaps
@@ -135,73 +32,36 @@
         - artifacts
         - dns
 
-    - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
-      ansible.builtin.import_tasks: tasks/aap_seed_passwords_vault.yml
+    - name: Seed AAP secrets
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_secrets
+        apply:
+          tags: [aap, aap_deploy, aap_passwords, vault]
       when: aap_password_seed_enabled | default(false) | bool
       tags:
         - aap
         - aap_deploy
         - aap_passwords
         - vault
-        - aap_cac
-        - settings
-        - organizations
-        - gateway_users
-        - gateway_teams
-        - gateway_role_user_assignments
-        - controller_license
-        - controller_credential_types
-        - labels
-        - controller_credentials
-        - controller_projects
-        - controller_instance_groups
-        - controller_inventories
-        - controller_inventory_sources
-        - controller_templates
-        - hub_collection_remote
-        - hub_collection_remotes
-        - hub_collection_repository
-        - hub_collection_repositories
-        - hub_collection_repository_sync
-        - hub_group_roles
-        - filetree_create
-        - filetree_read
-        - bulk_host_create
-        - hosts
-        - groups
-        - instances
-        - ad_hoc_command
-        - ad_hoc_command_cancel
-        - bulk_job_launch
-        - job_launch
-        - jobs_cancel
-        - workflow_job_templates
-        - workflow_launch
-        - applications
-        - credential_input_sources
-        - dispatch
-        - execution_environments
-        - global_vars
-        - notification_templates
-        - object_diff
-        - project_update
-        - roles
-        - schedules
-        - ee_builder
 
     - name: Prepare AAP shared context
       ansible.builtin.include_role:
         name: lit.supplementary.aap
         apply:
           tags: [aap, aap_deploy, aap_cac]
-      tags: [aap, aap_deploy, aap_cac]
+      tags:
+        - aap
+        - aap_deploy
+        - aap_cac
 
     - name: Deploy AAP
       ansible.builtin.include_role:
         name: lit.supplementary.aap_deploy
         apply:
           tags: [aap, aap_deploy]
-      tags: [aap, aap_deploy]
+      tags:
+        - aap
+        - aap_deploy
 
     - name: AAP configuration-as-code
       ansible.builtin.include_role:
@@ -211,47 +71,3 @@
       tags:
         - aap
         - aap_cac
-        - settings
-        - organizations
-        - gateway_users
-        - gateway_teams
-        - gateway_role_user_assignments
-        - controller_license
-        - controller_credential_types
-        - labels
-        - controller_credentials
-        - controller_projects
-        - controller_instance_groups
-        - controller_inventories
-        - controller_inventory_sources
-        - controller_templates
-        - hub_collection_remote
-        - hub_collection_remotes
-        - hub_collection_repository
-        - hub_collection_repositories
-        - hub_collection_repository_sync
-        - hub_group_roles
-        - filetree_create
-        - filetree_read
-        - bulk_host_create
-        - hosts
-        - groups
-        - instances
-        - ad_hoc_command
-        - ad_hoc_command_cancel
-        - bulk_job_launch
-        - job_launch
-        - jobs_cancel
-        - workflow_job_templates
-        - workflow_launch
-        - applications
-        - credential_input_sources
-        - dispatch
-        - execution_environments
-        - global_vars
-        - notification_templates
-        - object_diff
-        - project_update
-        - roles
-        - schedules
-        - ee_builder
