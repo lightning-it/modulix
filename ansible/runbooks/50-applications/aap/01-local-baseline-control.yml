@@ -206,6 +206,12 @@
       - git
       - openssl
       - python3
+    aap_baseline_storage_packages:
+      - cloud-utils-growpart
+      - lvm2
+      - xfsprogs
+    aap_baseline_grow_partition_disk: /dev/sda
+    aap_baseline_grow_partition_number: 3
     aap_baseline_owned_directories:
       - "{{ aap_effective_appl_root }}"
       - "{{ aap_effective_appl_root }}/etc"
@@ -340,11 +346,85 @@
 
     - name: Install baseline packages when explicitly managed
       ansible.builtin.dnf:
-        name: "{{ aap_baseline_required_packages }}"
+        name: >-
+          {{
+            aap_baseline_required_packages
+            + (
+              aap_baseline_storage_packages
+              if (aap_baseline_manage_storage | default(false) | bool)
+              else []
+            )
+          }}
         state: present
       when:
         - aap_baseline_action == 'prepare'
         - aap_baseline_manage_packages | default(false) | bool
+
+    - name: Grow baseline disk partition when explicitly managed
+      ansible.builtin.command:
+        argv:
+          - growpart
+          - "{{ aap_baseline_grow_partition_disk }}"
+          - "{{ aap_baseline_grow_partition_number | string }}"
+      register: aap_baseline_growpart_result
+      changed_when: aap_baseline_growpart_result.rc == 0
+      failed_when:
+        - aap_baseline_growpart_result.rc != 0
+        - "'NOCHANGE' not in (aap_baseline_growpart_result.stdout ~ aap_baseline_growpart_result.stderr)"
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_manage_storage | default(false) | bool
+
+    - name: Resize baseline LVM physical volume when explicitly managed
+      ansible.builtin.command:
+        argv:
+          - pvresize
+          - "{{ aap_baseline_grow_partition_disk }}{{ aap_baseline_grow_partition_number }}"
+      register: aap_baseline_pvresize_result
+      changed_when: "'changed' in aap_baseline_pvresize_result.stdout"
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_manage_storage | default(false) | bool
+
+    - name: Resolve root filesystem logical volume
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - -n
+          - -o
+          - SOURCE
+          - /
+      register: aap_baseline_root_lv_result
+      changed_when: false
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_manage_storage | default(false) | bool
+
+    - name: Check free LVM extents after disk growth
+      ansible.builtin.command:
+        argv:
+          - vgs
+          - --noheadings
+          - -o
+          - vg_free_count
+      register: aap_baseline_vg_free_count_result
+      changed_when: false
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_manage_storage | default(false) | bool
+
+    - name: Extend root filesystem into free LVM space when explicitly managed
+      ansible.builtin.command:
+        argv:
+          - lvextend
+          - -r
+          - -l
+          - +100%FREE
+          - "{{ aap_baseline_root_lv_result.stdout | trim }}"
+      when:
+        - aap_baseline_action == 'prepare'
+        - aap_baseline_manage_storage | default(false) | bool
+        - (aap_baseline_vg_free_count_result.stdout | trim | int) > 0
 
     - name: Ensure setup user SSH directory exists
       ansible.builtin.file:
