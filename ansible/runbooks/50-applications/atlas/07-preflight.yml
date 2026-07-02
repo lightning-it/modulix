@@ -1,0 +1,32 @@
+---
+- name: Run LIT Atlas deployment preflight
+  hosts: atlas
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Validate Atlas inventory contract
+      ansible.builtin.assert:
+        that:
+          - _lit_atlas_enabled is boolean
+          - _atlas_services_cfg is mapping
+          - _lit_atlas_data_dir | trim | length > 0
+          - _lit_atlas_bind_address | trim | length > 0
+        fail_msg: >-
+          Atlas inventory is incomplete. Provide lit_atlas_* values and
+          services.atlas or atlas_services as a mapping.
+        quiet: true
+      tags: [atlas, atlas_preflight]
+
+    - name: Verify required runtime commands are available
+      ansible.builtin.command:
+        argv:
+          - "{{ item }}"
+          - --version
+      changed_when: false
+      loop:
+        - podman
+      tags: [atlas, atlas_preflight]

@@ -1,0 +1,26 @@
+---
+- name: Operate LIT Atlas observability appliances
+  hosts: atlas
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Show Atlas container runtime status
+      ansible.builtin.command:
+        argv:
+          - podman
+          - ps
+          - -a
+      changed_when: false
+      tags: [atlas, atlas_ops]
+
+    - name: Show Atlas kube systemd units
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - list-units
+          - "podman-kube@*"
+          - --no-pager
+      changed_when: false
+      failed_when: false
+      tags: [atlas, atlas_ops]

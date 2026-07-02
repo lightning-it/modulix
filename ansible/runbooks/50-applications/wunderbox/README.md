@@ -24,6 +24,13 @@ ansible-playbook -i inventory.yml \
   ansible/runbooks/50-applications/wunderbox/10-deploy.yml
 ```
 
+## Runbooks
+
+- `05-prepare.yml`: prepare optional repos and firewall policy.
+- `07-preflight.yml`: validate service inventory and guarded DHCP enablement.
+- `10-deploy.yml`: deploy and configure the full Wunderbox stack.
+- `20-ops.yml`: inspect Wunderbox runtime status.
+
 Enable services through inventory:
 
 ```yaml
