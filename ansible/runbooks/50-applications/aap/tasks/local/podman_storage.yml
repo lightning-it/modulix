@@ -6,14 +6,20 @@
 
 - name: Ensure Podman storage paths exist
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
-    mode: "0755"
+    mode: "{{ item.mode }}"
   loop:
-    - "{{ aap_podman_storage_conf_effective | dirname }}"
-    - "{{ aap_podman_root_graphroot_effective }}"
-    - "{{ aap_podman_root_runroot_effective }}"
-    - "{{ aap_podman_tmpdir_effective }}"
+    - path: "{{ aap_podman_storage_conf_effective | dirname }}"
+      mode: "0755"
+    - path: "{{ aap_podman_root_graphroot_effective }}"
+      mode: "0755"
+    - path: "{{ aap_podman_root_runroot_effective }}"
+      mode: "0755"
+    - path: "{{ aap_podman_tmpdir_effective }}"
+      mode: "1777"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Write Podman storage configuration
   ansible.builtin.template:
