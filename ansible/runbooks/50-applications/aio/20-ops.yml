@@ -1,0 +1,26 @@
+---
+- name: Operate AIO hosts
+  hosts: "{{ aio_target | default('aio') }}"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Show AIO container runtime status
+      ansible.builtin.command:
+        argv:
+          - podman
+          - ps
+          - -a
+      changed_when: false
+      tags: [aio, aio_ops]
+
+    - name: Show AIO kube systemd units
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - list-units
+          - "podman-kube@*"
+          - --no-pager
+      changed_when: false
+      failed_when: false
+      tags: [aio, aio_ops]

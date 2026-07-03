@@ -1,9 +1,9 @@
 ---
 collections:
   - name: ansible.posix
-    version: "2.2.0"
+    version: "2.2.1"
   - name: community.vmware
-    version: "5.10.0"
+    version: "6.2.0"
   - name: vmware.vmware
     version: "2.9.0"
   - name: community.crypto
@@ -11,11 +11,11 @@ collections:
   - name: community.hashi_vault
     version: "7.1.0"
   - name: community.general
-    version: "11.4.9"
+    version: "13.1.0"
   - name: fedora.linux_system_roles
-    version: "1.125.4"
+    version: "1.127.2"
   - name: lit.supplementary
-    version: "1.31.3"
+    version: "1.35.0"
   - name: lit.foundational
     version: "1.21.0"
   - name: lit.rhel

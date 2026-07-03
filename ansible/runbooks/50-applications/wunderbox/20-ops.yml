@@ -1,0 +1,26 @@
+---
+- name: Operate Wunderbox hosts
+  hosts: wunderboxes
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Show Wunderbox container runtime status
+      ansible.builtin.command:
+        argv:
+          - podman
+          - ps
+          - -a
+      changed_when: false
+      tags: [wunderbox, wunderbox_ops]
+
+    - name: Show Wunderbox kube systemd units
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - list-units
+          - "podman-kube@*"
+          - --no-pager
+      changed_when: false
+      failed_when: false
+      tags: [wunderbox, wunderbox_ops]

@@ -1,0 +1,66 @@
+---
+- name: Prepare LIT Atlas observability appliances
+  hosts: atlas
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Ensure Atlas is enabled
+      ansible.builtin.meta: end_play
+      when: not _lit_atlas_enabled | bool
+      tags: always
+
+    - name: Ensure Atlas base directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ _lit_atlas_data_dir }}"
+        - "{{ _lit_atlas_config_dir }}"
+        - "{{ _lit_atlas_state_dir }}"
+        - "{{ _lit_atlas_quadlet_dir }}"
+        - "{{ _lit_atlas_backup_dir }}"
+      tags: [atlas, atlas_prepare]
+
+    - name: Prepare Ubuntu baseline
+      ansible.builtin.include_role:
+        name: lit.ubuntu.baseline
+        apply:
+          tags: [atlas, atlas_prepare, ubuntu]
+      when: _lit_atlas_prepare_ubuntu_enabled | bool
+      tags: [atlas, atlas_prepare, ubuntu]
+
+    - name: Install and configure Podman
+      ansible.builtin.include_role:
+        name: lit.ubuntu.podman
+        apply:
+          tags: [atlas, podman]
+      when: _lit_atlas_podman_enabled | bool
+      tags: [atlas, podman]
+
+    - name: Apply Atlas firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [atlas, firewall]
+      vars:
+        firewall:
+          - port: "{{ _lit_atlas_grafana_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_prometheus_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_alertmanager_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_loki_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_rsyslog_tcp_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_rsyslog_udp_port }}/udp"
+            state: enabled
+          - port: "{{ _lit_atlas_checkmk_port }}/tcp"
+            state: enabled
+      when: _lit_atlas_firewall_enabled | bool
+      tags: [atlas, firewall]

@@ -1,0 +1,45 @@
+---
+_lit_atlas_enabled: "{{ lit_atlas_enabled | default(true) }}"
+_lit_atlas_domain: "{{ lit_atlas_domain | default(inventory_hostname) }}"
+_lit_atlas_data_dir: "{{ lit_atlas_data_dir | default('/opt/lit/atlas') }}"
+_lit_atlas_config_dir: "{{ lit_atlas_config_dir | default(_lit_atlas_data_dir ~ '/config') }}"
+_lit_atlas_state_dir: "{{ lit_atlas_state_dir | default(_lit_atlas_data_dir ~ '/data') }}"
+_lit_atlas_quadlet_dir: "{{ lit_atlas_quadlet_dir | default(_lit_atlas_data_dir ~ '/quadlet') }}"
+_lit_atlas_backup_dir: "{{ lit_atlas_backup_dir | default(_lit_atlas_data_dir ~ '/backup') }}"
+_lit_atlas_bind_address: "{{ lit_atlas_bind_address | default('127.0.0.1') }}"
+
+_lit_atlas_prepare_ubuntu_enabled: "{{ lit_atlas_prepare_ubuntu_enabled | default(true) }}"
+_lit_atlas_podman_enabled: "{{ lit_atlas_podman_enabled | default(true) }}"
+_lit_atlas_firewall_enabled: "{{ lit_atlas_firewall_enabled | default(false) }}"
+_lit_atlas_grafana_enabled: "{{ lit_atlas_grafana_enabled | default(true) }}"
+_lit_atlas_prometheus_enabled: "{{ lit_atlas_prometheus_enabled | default(true) }}"
+_lit_atlas_loki_enabled: "{{ lit_atlas_loki_enabled | default(true) }}"
+_lit_atlas_alloy_enabled: "{{ lit_atlas_alloy_enabled | default(true) }}"
+_lit_atlas_alertmanager_enabled: "{{ lit_atlas_alertmanager_enabled | default(true) }}"
+_lit_atlas_rsyslog_enabled: "{{ lit_atlas_rsyslog_enabled | default(true) }}"
+_lit_atlas_checkmk_enabled: "{{ lit_atlas_checkmk_enabled | default(true) }}"
+
+_lit_atlas_grafana_port: "{{ lit_atlas_grafana_port | default(3000) }}"
+_lit_atlas_prometheus_port: "{{ lit_atlas_prometheus_port | default(9090) }}"
+_lit_atlas_alertmanager_port: "{{ lit_atlas_alertmanager_port | default(9093) }}"
+_lit_atlas_loki_port: "{{ lit_atlas_loki_port | default(3100) }}"
+_lit_atlas_alloy_port: "{{ lit_atlas_alloy_port | default(12345) }}"
+_lit_atlas_rsyslog_tcp_port: "{{ lit_atlas_rsyslog_tcp_port | default(514) }}"
+_lit_atlas_rsyslog_udp_port: "{{ lit_atlas_rsyslog_udp_port | default(514) }}"
+_lit_atlas_checkmk_port: "{{ lit_atlas_checkmk_port | default(5000) }}"
+
+_atlas_services_cfg: >-
+  {{
+    (
+      services.atlas
+      if (
+        services is defined and
+        services is mapping and
+        services.atlas is defined and
+        services.atlas is mapping
+      )
+      else
+      (atlas_services | default({}))
+    )
+  }}
+_enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']

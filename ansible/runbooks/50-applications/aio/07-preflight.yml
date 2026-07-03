@@ -1,0 +1,43 @@
+---
+- name: Run AIO deployment preflight
+  hosts: "{{ aio_target | default('aio') }}"
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    _aio_services_cfg: >-
+      {{
+        (
+          services.aio
+          if (
+            services is defined and
+            services is mapping and
+            services.aio is defined and
+            services.aio is mapping
+          )
+          else
+          (aio_services | default({}))
+        )
+      }}
+
+  tasks:
+    - name: Validate AIO inventory contract
+      ansible.builtin.assert:
+        that:
+          - _aio_services_cfg is mapping
+          - semaphore_deploy_host_ip | default('', true) | trim | length > 0
+        fail_msg: >-
+          AIO inventory is incomplete. Provide services.aio or aio_services,
+          and Semaphore bind values from inventory.
+        quiet: true
+      tags: [aio, aio_preflight]
+
+    - name: Verify required runtime commands are available
+      ansible.builtin.command:
+        argv:
+          - "{{ item }}"
+          - --version
+      changed_when: false
+      loop:
+        - podman
+      tags: [aio, aio_preflight]

@@ -257,7 +257,7 @@ aap_deploy_install_environment:
   TEMP: /appl/tmp
   TMP: /appl/tmp
 
-aap_cac_gateway_hostname: "https://{{ ansible_host }}"
+aap_cac_gateway_hostname: "https://${AAP_FQDN}"
 
 aap_ops_health_url: "https://127.0.0.1/"
 aap_ops_validate_certs: false
