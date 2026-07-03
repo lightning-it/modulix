@@ -1,0 +1,22 @@
+---
+- name: Prepare AIO hosts
+  hosts: "{{ aio_target | default('aio') }}"
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Prepare Ubuntu baseline
+      ansible.builtin.include_role:
+        name: lit.ubuntu.baseline
+        apply:
+          tags: [aio, aio_prepare, ubuntu]
+      when: aio_prepare_ubuntu_enabled | default(false) | bool
+      tags: [aio, aio_prepare, ubuntu]
+
+    - name: Install and configure Podman
+      ansible.builtin.include_role:
+        name: lit.ubuntu.podman
+        apply:
+          tags: [aio, aio_prepare, podman]
+      when: aio_prepare_podman_enabled | default(false) | bool
+      tags: [aio, aio_prepare, podman]
