@@ -59,10 +59,14 @@ aap_effective_automation_ansible_dir: >-
      | default(aap_effective_automation_dir ~ '/ansible', true) }}
 aap_effective_artifact_dir: "{{ aap_effective_automation_ansible_dir }}/.artifacts"
 aap_effective_inventory_name: "{{ inventory_name | default('corp', true) }}"
-aap_effective_inventory_rel: "{{ inventory_rel | default('inventories/' ~ aap_effective_inventory_name ~ '/inventory.yml', true) }}"
+aap_effective_inventory_rel: >-
+  {{ inventory_rel
+     | default('inventories/' ~ aap_effective_inventory_name ~ '/inventory.yml', true) }}
 aap_effective_inventory_file: "{{ aap_effective_automation_ansible_dir }}/{{ aap_effective_inventory_rel }}"
 aap_local_env_mode: "0600"
-automation_repo_url_effective: "{{ automation_repo_url | default('https://github.com/lightning-it/modulix-automation.git', true) }}"
+automation_repo_url_effective: >-
+  {{ automation_repo_url
+     | default('https://github.com/lightning-it/modulix-automation.git', true) }}
 aap_automation_source_dir_effective: "{{ aap_automation_source_dir | default('', true) | string | trim }}"
 
 aap_effective_ee_transfer_enabled: "{{ aap_ee_transfer_enabled | default(true) | bool }}"
@@ -74,8 +78,14 @@ machine_a_effective_ee_archive_path: >-
 aap_effective_ee_archive_path: "{{ aap_effective_appl_root }}/artifacts/{{ modulix_run_ee_archive }}"
 ansible_toolbox_runtime_mode_effective: "{{ ansible_toolbox_runtime_mode | default('disconnected', true) }}"
 ansible_collections_path_effective: >-
-  {{ ansible_collections_path
-     | default('/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections', true) }}
+  {{
+    ansible_collections_path
+    | default(
+        '/runner/project/collections:/usr/share/ansible/collections:'
+        ~ '/usr/share/automation-controller/collections:/runner/collections',
+        true
+      )
+  }}
 ansible_vault_password_file_effective: >-
   {{ ansible_vault_password_file
      | default(aap_effective_secrets_dir ~ '/.vault-pass.txt', true) }}
