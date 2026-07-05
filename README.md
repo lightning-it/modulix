@@ -1,11 +1,15 @@
 # ModuLix Automation
 
-<!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
+<!-- BEGIN LIT_QUALITY_BADGES -->
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lightning-it/modulix-automation/badge)](https://scorecard.dev/viewer/?uri=github.com/lightning-it/modulix-automation)
 [![CI](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml)
-[![Release](https://github.com/lightning-it/modulix-automation/actions/workflows/semantic-release.yml/badge.svg?branch=main)](https://github.com/lightning-it/modulix-automation/actions/workflows/semantic-release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/lightning-it/modulix-automation?sort=semver)](https://github.com/lightning-it/modulix-automation/releases/latest)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lightning-it/modulix-automation/badge)](https://scorecard.dev/viewer/?uri=github.com/lightning-it/modulix-automation)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+<!-- END LIT_QUALITY_BADGES -->
+
+<!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
 
 ## Release and Quality Model
 
@@ -23,6 +27,18 @@ See [RELEASE.md](./RELEASE.md) for:
 Repository classification: **Playbook/Runbook Repository**.
 Required test profiles: `pre-commit, lint, playbook-syntax, inventory-template-validation, smoke, integration-incus, release-validation`.
 Publishing targets: `github-release, rpm-srpm`.
+
+## Supported and Tested Platforms
+
+| Platform / Product | Status | Validation |
+|---|---:|---|
+| ubuntu-latest | Supported | Molecule / Incus |
+| rhel-9 | Supported | Molecule / Incus |
+| rhel-10 | Supported | Molecule / Incus |
+| ansible-core | Tested where applicable | Molecule / Incus |
+| aap-2.6 | Tested where applicable | Molecule / Incus |
+| aap-2.7 | Tested where applicable | Molecule / Incus |
+| incus | Tested where applicable | Molecule / Incus |
 
 <!-- END LIT_SHARED_RELEASE_MODEL -->
 
