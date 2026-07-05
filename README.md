@@ -1,5 +1,30 @@
 # ModuLix Automation
 
+<!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
+
+[![CI](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml)
+[![Release](https://github.com/lightning-it/modulix-automation/actions/workflows/semantic-release.yml/badge.svg?branch=main)](https://github.com/lightning-it/modulix-automation/actions/workflows/semantic-release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+## Release and Quality Model
+
+This repository follows the Lightning IT shared release and quality model.
+
+See [RELEASE.md](./RELEASE.md) for:
+
+- branch and release flow
+- required quality checks
+- test matrix
+- release evidence
+- artifact publishing
+- supported repository-specific release behavior
+
+Repository classification: **Playbook/Runbook Repository**.
+Required test profiles: `pre-commit, lint, playbook-syntax, inventory-template-validation, smoke, integration-incus, release-validation`.
+Publishing targets: `github-release, rpm-srpm`.
+
+<!-- END LIT_SHARED_RELEASE_MODEL -->
+
 ModuLix automation is the delivery source-of-truth for platform automation baselines.
 It is delivered as the `modulix-automation-runtime` RPM.
 
