@@ -2,6 +2,7 @@
 
 <!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lightning-it/modulix-automation/badge)](https://scorecard.dev/viewer/?uri=github.com/lightning-it/modulix-automation)
 [![CI](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml)
 [![Release](https://github.com/lightning-it/modulix-automation/actions/workflows/semantic-release.yml/badge.svg?branch=main)](https://github.com/lightning-it/modulix-automation/actions/workflows/semantic-release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
