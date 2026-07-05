@@ -115,7 +115,11 @@
         ansible_port: "{{ _probe_port_bootstrap }}"
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective }}"
-        ansible_private_key_file: "{{ (bootstrap_private_key_file_effective | length > 0) | ternary(bootstrap_private_key_file_effective, omit) }}"
+        ansible_private_key_file: >-
+          {{
+            (bootstrap_private_key_file_effective | length > 0)
+            | ternary(bootstrap_private_key_file_effective, omit)
+          }}
       when:
         - _bootstrap_configured | bool
         - (ping_normal.ping | default('')) != 'pong'
@@ -189,7 +193,11 @@
       vars:
         ansible_user: "{{ bootstrap_user_effective }}"
         ansible_password: "{{ bootstrap_password_effective | default(omit) }}"
-        ansible_private_key_file: "{{ (bootstrap_private_key_file_effective | length > 0) | ternary(bootstrap_private_key_file_effective, omit) }}"
+        ansible_private_key_file: >-
+          {{
+            (bootstrap_private_key_file_effective | length > 0)
+            | ternary(bootstrap_private_key_file_effective, omit)
+          }}
         ansible_port: "{{ _probe_port_bootstrap }}"
       block:
         - name: Bootstrap - ensure users exist
