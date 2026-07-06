@@ -62,6 +62,42 @@ jobs:
       - name: Run semantic-release
         run: npx semantic-release
 
+      - name: Generate release evidence
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          tag="$(git describe --tags --abbrev=0)"
+          version="${tag#v}"
+          TESTED_MATRIX="pre-commit,playbook-syntax,rpm-srpm,release-validation" \
+          PASSED_JOBS="Release" \
+          BUILT_ARTIFACTS="modulix-automation-runtime-srpm" \
+          PUBLISHED_ARTIFACTS="github-release:${tag}" \
+          RELEASE_TAG="$tag" \
+          RELEASE_VERSION="$version" \
+          CHANGELOG_URL="https://github.com/${{ github.repository }}/releases/tag/${tag}" \
+          python3 scripts/generate-release-evidence.py
+
+      - name: Attach release evidence
+        env:
+          GH_TOKEN: ${{ env.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$(git describe --tags --abbrev=0)"
+          gh release upload "$tag" \
+            dist/release-evidence.json \
+            dist/release-evidence.md \
+            --clobber
+
+      - name: Upload release evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-evidence
+          path: |
+            dist/release-evidence.json
+            dist/release-evidence.md
+          if-no-files-found: ignore
+
   release-dry-run:
     name: Release Dry Run
     runs-on: ubuntu-latest

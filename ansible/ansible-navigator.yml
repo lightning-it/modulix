@@ -8,7 +8,7 @@ ansible-navigator:
     container-engine: podman
     # Default image. Override at runtime with:
     # ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>
-    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.21.3
+    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.0
     pull:
       policy: missing
     container-options:

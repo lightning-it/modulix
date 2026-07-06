@@ -1,0 +1,44 @@
+---
+schema_version: 1
+managed_by: lightning-it/shared-assets-lit
+repository: modulix-automation
+visibility: public
+license_spdx: MIT
+repository_type: playbook_runbook
+release_type: semantic_release
+artifact_type: rpm
+test_profiles:
+  - pre-commit
+  - lint
+  - playbook-syntax
+  - inventory-template-validation
+  - smoke
+  - integration-incus
+  - release-validation
+os_matrix:
+  - ubuntu-latest
+  - rhel-9
+  - rhel-10
+product_matrix:
+  - ansible-core
+  - aap-2.6
+  - aap-2.7
+  - incus
+publishing_targets:
+  - github-release
+  - rpm-srpm
+galaxy_publish: false
+quay_publish: false
+release_evidence: true
+heavy_incus_required: true
+readme_badges:
+  - ci
+  - pre-commit
+  - playbook-validation
+  - release
+  - license
+workflows:
+  ci: rpm-srpm-ci.yml
+  release: semantic-release.yml
+  promote: promote-develop-to-main.yml
+  backmerge: sync-main-to-develop.yml
