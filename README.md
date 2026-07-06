@@ -1,5 +1,38 @@
 # ModuLix Automation
 
+<!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
+
+## Release and Quality Model
+
+This repository follows the Lightning IT shared release and quality model.
+
+See [RELEASE.md](./RELEASE.md) for:
+
+- branch and release flow
+- required quality checks
+- test matrix
+- release evidence
+- artifact publishing
+- supported repository-specific release behavior
+
+Repository classification: **Playbook/Runbook Repository**.
+Required test profiles: `pre-commit, lint, playbook-syntax, inventory-template-validation, smoke, integration-incus, release-validation`.
+Publishing targets: `github-release, rpm-srpm`.
+
+## Supported and Tested Platforms
+
+| Platform / Product | Status | Validation |
+|---|---:|---|
+| ubuntu-latest | Supported | Molecule / Incus |
+| rhel-9 | Supported | Molecule / Incus |
+| rhel-10 | Supported | Molecule / Incus |
+| ansible-core | Tested where applicable | Molecule / Incus |
+| aap-2.6 | Tested where applicable | Molecule / Incus |
+| aap-2.7 | Tested where applicable | Molecule / Incus |
+| incus | Tested where applicable | Molecule / Incus |
+
+<!-- END LIT_SHARED_RELEASE_MODEL -->
+
 <!-- BEGIN LIT_QUALITY_BADGES -->
 
 [![CI](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml)
