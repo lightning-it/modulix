@@ -1,0 +1,92 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - Tang deployment
+#
+# Purpose:
+# - Deploy the inventory-enabled, socket-activated Tang service
+# - Validate its local advertisement
+# - Return only public signing thumbprints for out-of-band client pinning
+#
+# Firewall and DNS policy remain external prerequisites.
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require --limit)
+  hosts: wunderboxes
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require an explicit limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+        fail_msg: "This runbook requires --limit with the intended Tang host."
+      run_once: true
+      tags: [always]
+
+- name: Deploy and validate Tang
+  hosts: wunderboxes
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('24.04', '>=')
+          - ansible_distribution_version is version('25.04', '<')
+        fail_msg: "This runbook supports Ubuntu 24.04 only."
+      tags: [always]
+
+  tasks:
+    - name: Deploy the declared Tang service
+      ansible.builtin.include_role:
+        name: lit.ubuntu.tang_deploy
+
+    - name: Require one public Tang signing thumbprint
+      ansible.builtin.assert:
+        that:
+          - tang_deploy_public_thumbprints | default([]) | length == 1
+        fail_msg: "Tang did not return exactly one public signing thumbprint."
+      when: tang_deploy_enabled | default(false) | bool
+
+    - name: Read the current Tang host Vault document
+      community.hashi_vault.vault_kv2_get:
+        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+        path: "{{ hetzner_baremetal_vault_secret_path }}"
+      delegate_to: localhost
+      become: false
+      register: _tang_deploy_vault_current
+      when: tang_deploy_enabled | default(false) | bool
+      no_log: true
+
+    - name: Persist the pinned Tang thumbprint with Vault CAS
+      community.hashi_vault.vault_kv2_write:
+        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+        path: "{{ hetzner_baremetal_vault_secret_path }}"
+        cas: "{{ _tang_deploy_vault_current.metadata.version | int }}"
+        data: >-
+          {{
+            _tang_deploy_vault_current.secret
+            | combine(
+                {
+                  hetzner_baremetal_vault.tang_thumbprint_field:
+                    tang_deploy_public_thumbprints[0]
+                }
+              )
+          }}
+      delegate_to: localhost
+      become: false
+      when: tang_deploy_enabled | default(false) | bool
+      no_log: true
+
+    - name: Report persisted Tang trust material
+      ansible.builtin.debug:
+        msg: >-
+          Tang signing thumbprint is pinned in the inventory-declared
+          Vault document.
+      when: tang_deploy_enabled | default(false) | bool

@@ -1,0 +1,155 @@
+---
+# Back up the installed root LUKS2 header into the inventory-declared Vault KV
+# document before any Clevis/Tang keyslot is added.
+- name: PreCheck (require an explicit limit)
+  hosts: ubuntu24
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require an explicit limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+        fail_msg: >-
+          This runbook requires --limit with the intended Ubuntu host or group.
+      run_once: true
+      tags: [always]
+
+- name: Back up LUKS headers to Vault
+  hosts: ubuntu24
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _luks_header_vault_mount: >-
+      {{ hetzner_baremetal_vault.engine_mount_point }}
+
+  tasks:
+    - name: Discover the single crypttab source device
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
+      args:
+        executable: /bin/bash
+      register: _luks_header_devices
+      changed_when: false
+
+    - name: Require exactly one encrypted root source
+      ansible.builtin.assert:
+        that:
+          - _luks_header_devices.stdout_lines | length == 1
+          - _luks_header_devices.stdout_lines[0] is match('^/dev/')
+        fail_msg: "Expected exactly one resolvable crypttab source device."
+
+    - name: Read the installed LUKS UUID
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksUUID
+          - "{{ _luks_header_devices.stdout_lines[0] }}"
+      register: _luks_header_uuid
+      changed_when: false
+
+    - name: Create, validate, and persist the LUKS header backup
+      block:
+        - name: Allocate a protected remote header path
+          ansible.builtin.tempfile:
+            state: file
+            path: /run
+            suffix: .luks-header
+          register: _luks_header_temp
+
+        - name: Back up the LUKS header
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksHeaderBackup
+              - "{{ _luks_header_devices.stdout_lines[0] }}"
+              - --header-backup-file
+              - "{{ _luks_header_temp.path }}"
+          changed_when: true
+
+        - name: Validate the backup as a LUKS header
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksDump
+              - "{{ _luks_header_temp.path }}"
+          changed_when: false
+
+        - name: Read the protected header backup
+          ansible.builtin.slurp:
+            src: "{{ _luks_header_temp.path }}"
+          register: _luks_header_slurp
+          no_log: true
+
+        - name: Read the current Vault document
+          community.hashi_vault.vault_kv2_get:
+            engine_mount_point: "{{ _luks_header_vault_mount }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _luks_header_vault_current
+          no_log: true
+
+        - name: Build the updated Vault document
+          ansible.builtin.set_fact:
+            _luks_header_sha256: >-
+              {{ _luks_header_slurp.content | hash('sha256') }}
+            _luks_header_vault_data: >-
+              {{
+                _luks_header_vault_current.secret
+                | combine(
+                    {
+                      hetzner_baremetal_vault.luks_header_field:
+                        _luks_header_slurp.content,
+                      hetzner_baremetal_vault.luks_header_sha256_field:
+                        (_luks_header_slurp.content | hash('sha256')),
+                      hetzner_baremetal_vault.luks_uuid_field:
+                        (_luks_header_uuid.stdout | trim)
+                    }
+                  )
+              }}
+          no_log: true
+
+        - name: Persist the header with Vault CAS
+          community.hashi_vault.vault_kv2_write:
+            engine_mount_point: "{{ _luks_header_vault_mount }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+            cas: "{{ _luks_header_vault_current.metadata.version | int }}"
+            data: "{{ _luks_header_vault_data }}"
+          delegate_to: localhost
+          become: false
+          no_log: true
+
+        - name: Read back the persisted Vault document
+          community.hashi_vault.vault_kv2_get:
+            engine_mount_point: "{{ _luks_header_vault_mount }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _luks_header_vault_verified
+          no_log: true
+        - name: Require matching persisted header metadata
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_sha256_field
+                ] == _luks_header_sha256
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ] == _luks_header_uuid.stdout | trim
+            fail_msg: "Vault header-backup verification failed."
+          no_log: true
+      always:
+        - name: Remove the remote header backup
+          ansible.builtin.file:
+            path: "{{ _luks_header_temp.path | default('/nonexistent') }}"
+            state: absent
+          no_log: true

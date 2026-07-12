@@ -19,6 +19,8 @@ ansible-navigator:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
         - ANSIBLE_REMOTE_TEMP
+        - HETZNER_ROBOT_PASSWORD
+        - HETZNER_ROBOT_USER
         - VAULT_ADDR
         - VAULT_SKIP_VERIFY
         - VAULT_TOKEN

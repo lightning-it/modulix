@@ -1,0 +1,169 @@
+---
+# Inventory-driven acceptance for the installed Ubuntu, encrypted boot,
+# management VLAN, RAID, and intentionally preserved disks.
+- name: PreCheck (require an explicit limit)
+  hosts: ubuntu24
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require an explicit limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+        fail_msg: >-
+          This runbook requires --limit with the intended Ubuntu host or group.
+      run_once: true
+      tags: [always]
+
+- name: Validate installed Ubuntu hosts
+  hosts: ubuntu24
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+    - name: Require Ubuntu 24.04 and the inventory hostname
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('24.04', '>=')
+          - ansible_distribution_version is version('25.04', '<')
+          - ansible_fqdn == inventory_hostname
+        fail_msg: "Installed OS or hostname does not match inventory."
+
+    - name: Read the root filesystem type
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - -n
+          - -o
+          - FSTYPE
+          - /
+      register: _ubuntu_acceptance_root_fstype
+      changed_when: false
+
+    - name: Inspect required encrypted-boot files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/crypttab
+        - /boot/grub/grub.cfg
+        - /etc/default/grub.d/80-lit-initramfs-network.cfg
+      register: _ubuntu_acceptance_boot_files
+
+    - name: Inspect the newest initramfs
+      ansible.builtin.shell: |
+        set -o pipefail
+        newest="$(
+          find /boot -maxdepth 1 -type f -name 'initrd.img-*' \
+            -printf '%T@ %p\n' |
+            sort -nr | head -1 | cut -d' ' -f2-
+        )"
+        test -n "${newest}"
+        lsinitramfs "${newest}" | grep -q cryptroot-unlock
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Read the management VLAN address
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -j
+          - address
+          - show
+          - "{{ mgmt_network.vlan_interface }}"
+      register: _ubuntu_acceptance_mgmt_address
+      changed_when: false
+
+    - name: Require encrypted root and the inventory management address
+      ansible.builtin.assert:
+        that:
+          - _ubuntu_acceptance_root_fstype.stdout | trim == 'ext4'
+          - >-
+            _ubuntu_acceptance_boot_files.results
+            | map(attribute='stat.exists') | min
+          - >-
+            mgmt_network.ipv4 in
+            (
+              (_ubuntu_acceptance_mgmt_address.stdout | from_json)[0].addr_info
+              | map(attribute='local')
+              | list
+            )
+        fail_msg: "Encrypted-root or MGMT network acceptance failed."
+
+    - name: Read software RAID state when declared
+      ansible.builtin.command:
+        argv:
+          - cat
+          - /proc/mdstat
+      register: _ubuntu_acceptance_mdstat
+      changed_when: false
+      when: hetzner_installimage_layout.software_raid.enabled | bool
+
+    - name: Require healthy RAID1 members when declared
+      ansible.builtin.assert:
+        that:
+          - "' active raid1 ' in _ubuntu_acceptance_mdstat.stdout"
+          - _ubuntu_acceptance_mdstat.stdout is not search('\[[U_]*_[U_]*\]')
+        fail_msg: "The declared software RAID is missing or degraded."
+      when: hetzner_installimage_layout.software_raid.enabled | bool
+
+    - name: Discover installed physical disks
+      ansible.builtin.command:
+        argv:
+          - lsblk
+          - --json
+          - --bytes
+          - --output
+          - PATH,SERIAL,TYPE,FSTYPE,MOUNTPOINTS
+      register: _ubuntu_acceptance_lsblk
+      changed_when: false
+
+    - name: Require preserved disks to remain raw
+      vars:
+        _ubuntu_acceptance_preserved_matches: >-
+          {{
+            (_ubuntu_acceptance_lsblk.stdout | from_json).blockdevices
+            | selectattr('serial', 'equalto', item.serial)
+            | selectattr('type', 'equalto', 'disk')
+            | list
+          }}
+        _ubuntu_acceptance_preserved_disk: >-
+          {{
+            _ubuntu_acceptance_preserved_matches
+            | first | default({})
+          }}
+      ansible.builtin.assert:
+        that:
+          - _ubuntu_acceptance_preserved_matches | length == 1
+          - >-
+            (
+              _ubuntu_acceptance_preserved_disk.fstype
+              | default(none, true)
+            ) in [none, '']
+          - >-
+            _ubuntu_acceptance_preserved_disk.children
+            | default([]) | length == 0
+        fail_msg: >-
+          Preserved disk {{ item.serial }} is missing or has a filesystem.
+      loop: >-
+        {{
+          hetzner_installimage_expected_disks
+          | selectattr('purpose', 'equalto', 'preserve')
+          | list
+        }}
+      loop_control:
+        label: "{{ item.serial }}"
+
+    - name: Reboot for explicit encrypted-boot acceptance
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+        connect_timeout: 10
+      when: hetzner_baremetal_acceptance_reboot | default(false) | bool
+
+    - name: Verify Ansible connectivity after acceptance
+      ansible.builtin.ping:

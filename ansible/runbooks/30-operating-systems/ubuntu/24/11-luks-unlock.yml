@@ -1,0 +1,85 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - Encrypted-root unlock management
+#
+# Purpose:
+# - Keep Dropbear as the manual first-boot and recovery path
+# - Add a pinned Clevis/Tang keyslot only after its explicit safety gates pass
+# - Rebuild and validate boot artifacts without partitioning or formatting
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require --limit)
+  hosts: ubuntu24
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require an explicit limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+        fail_msg: >-
+          This runbook requires --limit with an intended Ubuntu host or group.
+      run_once: true
+      tags: [always]
+
+- name: Configure encrypted-root unlock
+  hosts: ubuntu24
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('24.04', '>=')
+          - ansible_distribution_version is version('25.04', '<')
+        fail_msg: "This runbook supports Ubuntu 24.04 only."
+      tags: [always]
+
+    - name: Read the host recovery secret for Tang binding
+      community.hashi_vault.vault_kv2_get:
+        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+        path: "{{ hetzner_baremetal_vault_secret_path }}"
+      delegate_to: localhost
+      become: false
+      register: _luks_unlock_recovery_secret
+      when: luks_unlock_method == 'clevis_tang'
+      no_log: true
+
+    - name: Read the pinned Tang trust document
+      community.hashi_vault.vault_kv2_get:
+        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+        path: "{{ hetzner_baremetal_tang_vault_secret_path }}"
+      delegate_to: localhost
+      become: false
+      register: _luks_unlock_tang_secret
+      when: luks_unlock_method == 'clevis_tang'
+      no_log: true
+
+    - name: Resolve LUKS and Tang inputs from Vault
+      ansible.builtin.set_fact:
+        luks_unlock_existing_passphrases:
+          root: >-
+            {{
+              _luks_unlock_recovery_secret.secret[
+                hetzner_baremetal_vault.recovery_passphrase_field
+              ]
+            }}
+        luks_unlock_clevis_tang_thumbprint: >-
+          {{
+            _luks_unlock_tang_secret.secret[
+              hetzner_baremetal_vault.tang_thumbprint_field
+            ]
+          }}
+      when: luks_unlock_method == 'clevis_tang'
+      no_log: true
+
+  tasks:
+    - name: Configure the declared LUKS unlock method
+      ansible.builtin.include_role:
+        name: lit.ubuntu.luks_unlock

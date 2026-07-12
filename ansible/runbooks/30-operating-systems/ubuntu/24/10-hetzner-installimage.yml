@@ -1,0 +1,151 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - Hetzner Rescue installimage
+#
+# Purpose:
+# - Require an explicit --limit
+# - Stage key-only Dropbear access for the first encrypted boot
+# - Produce a secret-free installation plan and plan hash by default
+# - Execute installimage only when every destructive role gate is satisfied
+#
+# This runbook never reboots a host. Run it against one host at a time when
+# hetzner_installimage_action=install.
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require a safe target limit)
+  hosts: hetzner_baremetal
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+
+  tasks:
+    - name: Require an explicit limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+        fail_msg: >-
+          This runbook requires --limit. Use one exact inventory hostname for
+          an installation and never run an unbounded Rescue install.
+      run_once: true
+      tags: [always]
+
+    - name: Require one host for a destructive installation
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          Destructive installimage execution is restricted to one inventory
+          host at a time. Use --limit with one exact FQDN.
+      run_once: true
+      when: hetzner_installimage_action | default('plan') == 'install'
+      tags: [always]
+
+    - name: Require an explicit Rescue root connection
+      ansible.builtin.assert:
+        that:
+          - ansible_user | default('', true) == 'root'
+          - not (ansible_become | default(false) | bool)
+        fail_msg: >-
+          This runbook must connect directly as Rescue root. Supply explicit,
+          high-precedence Rescue connection variables; installed-host inventory
+          defaults intentionally use svc_ansible and must not be reused.
+      tags: [always]
+
+- name: Plan or execute the approved Ubuntu installation
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+
+  pre_tasks:
+    - name: Read the persisted recovery secret for installation
+      community.hashi_vault.vault_kv2_get:
+        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+        path: "{{ hetzner_baremetal_vault_secret_path }}"
+      delegate_to: localhost
+      become: false
+      register: _hetzner_installimage_recovery_secret
+      when: hetzner_installimage_action == 'install'
+      no_log: true
+
+    - name: Resolve the installation recovery passphrase from Vault
+      ansible.builtin.set_fact:
+        hetzner_installimage_crypt_password: >-
+          {{
+            _hetzner_installimage_recovery_secret.secret[
+              hetzner_baremetal_vault.recovery_passphrase_field
+            ]
+          }}
+      when: hetzner_installimage_action == 'install'
+      no_log: true
+
+    - name: Require a valid persisted installation recovery passphrase
+      ansible.builtin.assert:
+        that:
+          - >-
+            hetzner_installimage_crypt_password
+            | default('', true) | length >= 40
+        fail_msg: >-
+          No valid recovery passphrase was found. Run the recovery-secrets
+          runbook for this host before authorizing installation.
+      when: hetzner_installimage_action == 'install'
+      no_log: true
+
+  tasks:
+    - name: Stage and consume the encrypted-root first-boot hook
+      block:
+        - name: Stage the secret-free installimage Dropbear hook
+          ansible.builtin.include_role:
+            name: lit.ubuntu.luks_unlock
+          vars:
+            luks_unlock_enabled: true
+            luks_unlock_execution_mode: rescue_stage
+            luks_unlock_method: dropbear
+
+        - name: Build or execute the guarded installimage plan
+          ansible.builtin.include_role:
+            name: lit.foundational.hetzner_installimage
+          vars:
+            hetzner_installimage_post_install_script_path: >-
+              {{ luks_unlock_installimage_post_install_script_path }}
+
+        - name: Require a generated installation plan hash
+          ansible.builtin.assert:
+            that:
+              - hetzner_installimage_plan_sha256 is defined
+              - >-
+                hetzner_installimage_plan_sha256
+                is match('^[0-9a-f]{64}$')
+            fail_msg: >-
+              The installimage role did not return a valid plan hash.
+
+        - name: Show the secret-free installation approval hash
+          ansible.builtin.debug:
+            msg: >-
+              HETZNER_INSTALLIMAGE_PLAN_SHA256={{
+                hetzner_installimage_plan_sha256
+              }}
+      always:
+        - name: Remove the staged Rescue post-install hook
+          ansible.builtin.file:
+            path: >-
+              {{
+                luks_unlock_installimage_post_install_script_path
+                | default('/root/lit-luks-unlock-post-install.sh', true)
+              }}
+            state: absent
