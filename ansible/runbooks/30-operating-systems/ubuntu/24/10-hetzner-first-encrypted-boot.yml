@@ -15,6 +15,7 @@
     ansible_ssh_common_args: >-
       -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
       -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
 
   pre_tasks:
     - name: Require one explicit host and boot confirmation
@@ -22,6 +23,25 @@
         that:
           - ansible_limit is defined
           - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - not ansible_check_mode
+          - hetzner_installimage_expected_disks is sequence
+          - hetzner_installimage_expected_disks is not string
+          - >-
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length > 0
+          - >-
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | map(attribute='serial') | list | unique | length
+            ==
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length
+          - >-
+            not (hetzner_installimage_layout.software_raid.enabled | bool)
+            or hetzner_installimage_layout.software_raid.level | int == 1
           - >-
             hetzner_baremetal_secret_backend
             in ['ansible_vault_bootstrap', 'hashicorp_vault']
@@ -29,14 +49,59 @@
             hetzner_first_boot_confirmation | default('')
             == 'BOOT:' ~ inventory_hostname
         fail_msg: >-
-          Use --limit with one exact host or single-host group and pass
-          hetzner_first_boot_confirmation=BOOT:<inventory-hostname>.
+          Use --limit with one exact inventory FQDN and pass
+          hetzner_first_boot_confirmation=BOOT:<inventory-hostname> outside
+          check mode. The inventory must declare unique approved system disks
+          and, when enabled, RAID level 1.
       tags: [always]
 
   tasks:
-    - name: Read generated first-boot fingerprints from the new boot filesystem
+    - name: Read fingerprints only from the approved installed boot filesystem
       ansible.builtin.shell: |
         set -euo pipefail
+        export LC_ALL=C
+
+        expected_serials() {
+          printf '%s\n' "${LIT_EXPECTED_SYSTEM_SERIALS}" |
+            sed '/^$/d' | sort -u
+        }
+
+        device_serials() {
+          local device="$1"
+          local disk serial
+
+          while read -r disk; do
+            test -n "${disk}" || continue
+            serial="$(
+              lsblk -dn -o SERIAL -- "${disk}" |
+                sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+            )"
+            test -n "${serial}"
+            printf '%s\n' "${serial}"
+          done < <(
+            lsblk -srpn -o PATH,TYPE -- "${device}" |
+              awk '$2 == "disk" {print $1}' | sort -u
+          )
+        }
+
+        has_approved_ancestry() {
+          test "$(expected_serials)" = "$(device_serials "$1" | sort -u)"
+        }
+
+        expected_device_type=part
+        if test "${LIT_EXPECTED_RAID_ENABLED}" = 1; then
+          expected_device_type=raid1
+        fi
+
+        root_candidates=0
+        while read -r device fstype type; do
+          test "${fstype}" = crypto_LUKS || continue
+          has_approved_ancestry "${device}" || continue
+          test "${type}" = "${expected_device_type}"
+          root_candidates=$((root_candidates + 1))
+        done < <(lsblk -rpn -o PATH,FSTYPE,TYPE | sort -u)
+        test "${root_candidates}" -eq 1
+
         work="$(mktemp -d /mnt/lit-first-boot-keys.XXXXXX)"
         mounted=false
         cleanup() {
@@ -50,14 +115,19 @@
         found=0
         while read -r device fstype type; do
           test "${fstype}" = ext4 || continue
-          case "${type}" in
-            part|raid1|lvm) ;;
-            *) continue ;;
-          esac
-          mount -o ro "${device}" "${work}" || continue
+          test "${type}" = "${expected_device_type}" || continue
+          has_approved_ancestry "${device}" || continue
+          mount -o ro,nosuid,nodev,noexec "${device}" "${work}" || continue
           mounted=true
-          if test -s "${work}/lit-first-boot-hostkey-fingerprints"; then
-            cat "${work}/lit-first-boot-hostkey-fingerprints"
+          marker="${work}/lit-first-boot-hostkey-fingerprints"
+          if test -e "${marker}"; then
+            test -f "${marker}"
+            test "$(stat -c '%u:%g:%a' "${marker}")" = 0:0:644
+            test "$(stat -c '%s' "${marker}")" -le 512
+            test "$(wc -l <"${marker}")" -eq 2
+            test "$(grep -Ec '^LIT_DROPBEAR_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$' "${marker}")" -eq 1
+            test "$(grep -Ec '^LIT_OPENSSH_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$' "${marker}")" -eq 1
+            cat "${marker}"
             found=$((found + 1))
           fi
           umount "${work}"
@@ -68,6 +138,41 @@
         executable: /bin/bash
       register: _first_boot_expected_fingerprints
       changed_when: false
+      check_mode: false
+      environment:
+        LIT_EXPECTED_SYSTEM_SERIALS: >-
+          {{
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | map(attribute='serial') | list | sort | join('\n')
+          }}
+        LIT_EXPECTED_RAID_ENABLED: >-
+          {{
+            (hetzner_installimage_layout.software_raid.enabled | bool)
+            | ternary('1', '0')
+          }}
+
+    - name: Require one exact generated fingerprint line for each SSH service
+      ansible.builtin.assert:
+        that:
+          - _first_boot_expected_fingerprints.stdout_lines | length == 2
+          - >-
+            _first_boot_expected_fingerprints.stdout_lines
+            | select(
+                'match',
+                '^LIT_DROPBEAR_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$'
+              )
+            | list | length == 1
+          - >-
+            _first_boot_expected_fingerprints.stdout_lines
+            | select(
+                'match',
+                '^LIT_OPENSSH_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$'
+              )
+            | list | length == 1
+        fail_msg: >-
+          The approved installed /boot does not contain exactly one valid
+          generated Dropbear and OpenSSH Ed25519 fingerprint.
 
     - name: Decode the expected first-boot fingerprints
       ansible.builtin.set_fact:
@@ -75,7 +180,7 @@
           {{
             _first_boot_expected_fingerprints.stdout
             | regex_search(
-                '(?m)^LIT_DROPBEAR_HOSTKEY_SHA256=(SHA256:[^\n]+)$',
+                '(?m)^LIT_DROPBEAR_HOSTKEY_SHA256=(SHA256:[A-Za-z0-9+/]{43})$',
                 '\1'
               )
             | first
@@ -84,7 +189,7 @@
           {{
             _first_boot_expected_fingerprints.stdout
             | regex_search(
-                '(?m)^LIT_OPENSSH_HOSTKEY_SHA256=(SHA256:[^\n]+)$',
+                '(?m)^LIT_OPENSSH_HOSTKEY_SHA256=(SHA256:[A-Za-z0-9+/]{43})$',
                 '\1'
               )
             | first
@@ -127,6 +232,27 @@
       register: _first_boot_dropbear_keyscan
       changed_when: false
 
+    - name: Require exactly one valid generated Dropbear key line
+      ansible.builtin.assert:
+        that:
+          - _first_boot_dropbear_keyscan.rc == 0
+          - _first_boot_dropbear_keyscan.stdout_lines | length == 1
+          - _first_boot_dropbear_keyscan.stdout_lines[0].split() | length == 3
+          - >-
+            _first_boot_dropbear_keyscan.stdout_lines[0].split()[0]
+            ==
+            '[' ~ ansible_host ~ ']:'
+            ~ (luks_unlock_dropbear_port | string)
+          - >-
+            _first_boot_dropbear_keyscan.stdout_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _first_boot_dropbear_keyscan.stdout_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          Dropbear keyscan did not return exactly one valid Ed25519 host key;
+          nothing was pinned.
+
     - name: Create a temporary Dropbear key file
       ansible.builtin.tempfile:
         state: file
@@ -163,6 +289,15 @@
         - name: Require the generated Dropbear fingerprint
           ansible.builtin.assert:
             that:
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout_lines
+                | length == 1
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout.split()
+                | length >= 2
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout.split()[1]
+                is match('^SHA256:[A-Za-z0-9+/]{43}$')
               - >-
                 _first_boot_dropbear_fingerprint_actual.stdout.split()[1]
                 == _first_boot_dropbear_fingerprint
@@ -231,6 +366,25 @@
       register: _first_boot_openssh_keyscan
       changed_when: false
 
+    - name: Require exactly one valid generated OpenSSH key line
+      ansible.builtin.assert:
+        that:
+          - _first_boot_openssh_keyscan.rc == 0
+          - _first_boot_openssh_keyscan.stdout_lines | length == 1
+          - _first_boot_openssh_keyscan.stdout_lines[0].split() | length == 3
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[0]
+            == ansible_host
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          OpenSSH keyscan did not return exactly one valid Ed25519 host key;
+          the Rescue keys were retained and nothing was pinned.
+
     - name: Create a temporary OpenSSH key file
       ansible.builtin.tempfile:
         state: file
@@ -266,6 +420,15 @@
         - name: Require the generated OpenSSH fingerprint
           ansible.builtin.assert:
             that:
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout_lines
+                | length == 1
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()
+                | length >= 2
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()[1]
+                is match('^SHA256:[A-Za-z0-9+/]{43}$')
               - >-
                 _first_boot_openssh_fingerprint_actual.stdout.split()[1]
                 == _first_boot_openssh_fingerprint

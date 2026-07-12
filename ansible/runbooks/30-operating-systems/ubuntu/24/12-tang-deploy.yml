@@ -10,19 +10,23 @@
 # Firewall and DNS policy remain external prerequisites.
 # -----------------------------------------------------------------------------
 
-- name: PreCheck (require --limit)
+- name: PreCheck (require the exact Tang host)
   hosts: wunderboxes
   gather_facts: false
   any_errors_fatal: true
 
   tasks:
-    - name: Require an explicit limit
+    - name: Require one exact Tang host limit
       ansible.builtin.assert:
         that:
           - ansible_limit is defined
-          - ansible_limit | string | trim | length > 0
-        fail_msg: "This runbook requires --limit with the intended Tang host."
-      run_once: true
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_tang_host
+          - inventory_hostname == hetzner_baremetal_vault.host
+        fail_msg: >-
+          Use --limit with the exact inventory FQDN that is declared as both
+          the Tang and Vault host.
       tags: [always]
 
     - name: Require the HashiCorp Vault secret backend
@@ -51,6 +55,10 @@
           - ansible_distribution_version is version('25.04', '<')
         fail_msg: "This runbook supports Ubuntu 24.04 only."
       tags: [always]
+
+    - name: Verify the migrated recovery document before Tang mutation
+      ansible.builtin.include_tasks: tasks/resolve-recovery-secret.yml
+      no_log: true
 
   tasks:
     - name: Deploy the declared Tang service
@@ -101,12 +109,9 @@
       when: tang_deploy_enabled | default(false) | bool
       no_log: true
 
-    - name: Persist the pinned Tang thumbprint with Vault CAS
-      community.hashi_vault.vault_kv2_write:
-        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
-        path: "{{ hetzner_baremetal_vault_secret_path }}"
-        cas: "{{ _tang_deploy_vault_current.metadata.version | int }}"
-        data: >-
+    - name: Build the exact Tang trust document
+      ansible.builtin.set_fact:
+        _tang_deploy_vault_expected: >-
           {{
             _tang_deploy_vault_current.secret
             | combine(
@@ -116,12 +121,42 @@
                 }
               )
           }}
-      delegate_to: localhost
-      become: false
       when:
         - tang_deploy_enabled | default(false) | bool
         - _tang_deploy_vault_thumbprint_current | length == 0
       no_log: true
+
+    - name: Persist the absent pinned Tang thumbprint with exact Vault CAS
+      when:
+        - tang_deploy_enabled | default(false) | bool
+        - _tang_deploy_vault_thumbprint_current | length == 0
+      no_log: true
+      block:
+        - name: Write the absent Tang thumbprint at the read version
+          community.hashi_vault.vault_kv2_write:
+            engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+            cas: "{{ _tang_deploy_vault_current.metadata.version | int }}"
+            data: "{{ _tang_deploy_vault_expected }}"
+          delegate_to: localhost
+          become: false
+      rescue:
+        - name: Re-read Tang trust after a possible CAS race
+          community.hashi_vault.vault_kv2_get:
+            engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _tang_deploy_vault_race_read
+
+        - name: Accept a Tang CAS race only for an identical document
+          ansible.builtin.assert:
+            that:
+              - _tang_deploy_vault_race_read.secret == _tang_deploy_vault_expected
+            fail_msg: >-
+              The Tang trust CAS write lost a race and the winner is not the
+              exact expected recovery and trust document.
+            quiet: true
 
     - name: Read back the pinned Tang trust document
       community.hashi_vault.vault_kv2_get:

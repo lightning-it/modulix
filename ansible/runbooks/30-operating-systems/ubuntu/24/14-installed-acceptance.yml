@@ -12,8 +12,29 @@
         that:
           - ansible_limit is defined
           - ansible_limit | string | trim | length > 0
+          - hetzner_baremetal_acceptance_reboot | default(false) is boolean
+          - >-
+            not (hetzner_baremetal_acceptance_reboot | default(false) | bool)
+            or ansible_play_hosts_all | length == 1
+          - >-
+            not (hetzner_baremetal_acceptance_reboot | default(false) | bool)
+            or ansible_limit | string | trim == inventory_hostname
+          - >-
+            not (hetzner_baremetal_acceptance_reboot | default(false) | bool)
+            or inventory_hostname != hetzner_baremetal_tang_host
+          - >-
+            not (hetzner_baremetal_acceptance_reboot | default(false) | bool)
+            or not ansible_check_mode
+          - >-
+            not (hetzner_baremetal_acceptance_reboot | default(false) | bool)
+            or
+            hetzner_baremetal_acceptance_reboot_confirmation | default('')
+            == 'REBOOT_ACCEPTANCE:' ~ inventory_hostname
         fail_msg: >-
-          This runbook requires --limit with the intended Ubuntu host or group.
+          Supply an explicit target limit. Reboot acceptance additionally
+          requires one exact client FQDN that is not the Tang host, a boolean
+          reboot flag, and the fresh confirmation
+          REBOOT_ACCEPTANCE:<inventory-hostname> outside check mode.
       run_once: true
       tags: [always]
 
@@ -32,6 +53,36 @@
           - ansible_distribution_version is version('24.04', '>=')
           - ansible_distribution_version is version('25.04', '<')
           - ansible_fqdn == inventory_hostname
+          - hetzner_installimage_expected_disks is sequence
+          - hetzner_installimage_expected_disks is not string
+          - >-
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length > 0
+          - >-
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | map(attribute='serial') | list | unique | length
+            ==
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length
+          - >-
+            (hetzner_installimage_layout.software_raid.enabled | bool)
+            | ternary(
+                hetzner_installimage_layout.software_raid.level | int == 1
+                and
+                (
+                  hetzner_installimage_expected_disks
+                  | selectattr('purpose', 'equalto', 'system')
+                  | list | length
+                ) >= 2,
+                (
+                  hetzner_installimage_expected_disks
+                  | selectattr('purpose', 'equalto', 'system')
+                  | list | length
+                ) == 1
+              )
         fail_msg: "Installed OS or hostname does not match inventory."
 
     - name: Read the root filesystem type
@@ -44,6 +95,7 @@
           - /
       register: _ubuntu_acceptance_root_fstype
       changed_when: false
+      check_mode: false
 
     - name: Inspect required encrypted-boot files
       ansible.builtin.stat:
@@ -67,16 +119,195 @@
       args:
         executable: /bin/bash
       changed_when: false
+      check_mode: false
+
+    - name: Prove root encryption and approved physical-disk ancestry
+      ansible.builtin.shell: |
+        set -euo pipefail
+        export LC_ALL=C
+
+        expected_serials() {
+          printf '%s\n' "${LIT_EXPECTED_SYSTEM_SERIALS}" |
+            sed '/^$/d' | sort -u
+        }
+
+        device_serials() {
+          local device="$1"
+          local disk serial
+
+          while read -r disk; do
+            test -n "${disk}" || continue
+            serial="$(
+              lsblk -dn -o SERIAL -- "${disk}" |
+                sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+            )"
+            test -n "${serial}"
+            printf '%s\n' "${serial}"
+          done < <(
+            lsblk -srpn -o PATH,TYPE -- "${device}" |
+              awk '$2 == "disk" {print $1}' | sort -u
+          )
+        }
+
+        require_approved_ancestry() {
+          test "$(expected_serials)" = "$(device_serials "$1" | sort -u)"
+        }
+
+        canonical_device() {
+          local canonical
+          canonical="$(readlink -e -- "$1")"
+          test -n "${canonical}"
+          test -b "${canonical}"
+          printf '%s\n' "${canonical}"
+        }
+
+        device_type() {
+          lsblk -dn -o TYPE -- "$1" |
+            sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+        }
+
+        require_raid1() {
+          local device canonical kname sysfs
+          device="$1"
+          canonical="$(canonical_device "${device}")"
+          test "$(device_type "${canonical}")" = raid1
+          kname="$(lsblk -dn -o KNAME -- "${canonical}" | tr -d '[:space:]')"
+          test -n "${kname}"
+          sysfs="/sys/class/block/${kname}/md"
+          test "$(cat "${sysfs}/level")" = raid1
+          test "$(cat "${sysfs}/degraded")" -eq 0
+          test "$(cat "${sysfs}/sync_action")" = idle
+          case "$(cat "${sysfs}/array_state")" in
+            active|active-idle|clean) ;;
+            *) return 1 ;;
+          esac
+          test "$(cat "${sysfs}/raid_disks")" -eq "${LIT_EXPECTED_SYSTEM_DISK_COUNT}"
+          test "$(
+            find "/sys/class/block/${kname}/slaves" \
+              -mindepth 1 -maxdepth 1 -type l | wc -l
+          )" -eq "${LIT_EXPECTED_SYSTEM_DISK_COUNT}"
+          require_approved_ancestry "${canonical}"
+        }
+
+        mapfile -t crypttab_entries < <(
+          awk '
+            {
+              line=$0
+              sub(/[[:space:]]*#.*/, "", line)
+              if (line ~ /[^[:space:]]/) print line
+            }
+          ' /etc/crypttab
+        )
+        test "$(printf '%s\n' "${crypttab_entries[@]}" | sed '/^$/d' | wc -l)" -eq 1
+        read -r crypt_name crypt_source _ <<<"${crypttab_entries[0]}"
+        [[ "${crypt_name}" =~ ^[A-Za-z0-9_.+-]+$ ]]
+        test -n "${crypt_source}"
+
+        case "${crypt_source}" in
+          UUID=*|PARTUUID=*|LABEL=*|PARTLABEL=*)
+            crypt_source_path="$(findfs "${crypt_source}")"
+            ;;
+          /dev/*)
+            crypt_source_path="${crypt_source}"
+            ;;
+          *)
+            exit 1
+            ;;
+        esac
+        crypt_source_path="$(canonical_device "${crypt_source_path}")"
+        cryptsetup isLuks "${crypt_source_path}"
+        cryptsetup luksDump --dump-json-metadata "${crypt_source_path}" >/dev/null
+
+        mapping_path="$(canonical_device "/dev/mapper/${crypt_name}")"
+        root_source="$(canonical_device "$(findmnt -n -o SOURCE /)")"
+        mapfile -t root_crypt_mappings < <(
+          lsblk -srpn -o PATH,TYPE -- "${root_source}" |
+            awk '$2 == "crypt" {print $1}' |
+            while read -r path; do readlink -e -- "${path}"; done |
+            sort -u
+        )
+        test "$(printf '%s\n' "${root_crypt_mappings[@]}" | sed '/^$/d' | wc -l)" -eq 1
+        test "${root_crypt_mappings[0]}" = "${mapping_path}"
+
+        status_device="$(
+          cryptsetup status "${crypt_name}" |
+            sed -nE 's/^[[:space:]]*device:[[:space:]]*(\/dev\/[^[:space:]]+).*$/\1/p'
+        )"
+        test "$(printf '%s\n' "${status_device}" | sed '/^$/d' | wc -l)" -eq 1
+        status_device="$(canonical_device "${status_device}")"
+        test "${status_device}" = "${crypt_source_path}"
+
+        require_approved_ancestry "${root_source}"
+        require_approved_ancestry "${crypt_source_path}"
+
+        boot_source="$(canonical_device "$(findmnt -n -o SOURCE /boot)")"
+        require_approved_ancestry "${boot_source}"
+
+        if test "${LIT_EXPECTED_RAID_ENABLED}" = 1; then
+          test "${crypt_source_path}" != "${boot_source}"
+          require_raid1 "${crypt_source_path}"
+          require_raid1 "${boot_source}"
+        else
+          test "$(device_type "${crypt_source_path}")" = part
+          test "$(device_type "${boot_source}")" = part
+          ! lsblk -srno TYPE -- "${root_source}" | grep -Eq '^raid[0-9]+$'
+          ! lsblk -srno TYPE -- "${boot_source}" | grep -Eq '^raid[0-9]+$'
+        fi
+      args:
+        executable: /bin/bash
+      environment:
+        LIT_EXPECTED_SYSTEM_SERIALS: >-
+          {{
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | map(attribute='serial') | list | sort | join('\n')
+          }}
+        LIT_EXPECTED_SYSTEM_DISK_COUNT: >-
+          {{
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length | string
+          }}
+        LIT_EXPECTED_RAID_ENABLED: >-
+          {{
+            (hetzner_installimage_layout.software_raid.enabled | bool)
+            | ternary('1', '0')
+          }}
+      changed_when: false
+      check_mode: false
 
     - name: Read the management VLAN address
       ansible.builtin.command:
         argv:
           - ip
+          - -details
           - -j
           - address
           - show
           - "{{ mgmt_network.vlan_interface }}"
       register: _ubuntu_acceptance_mgmt_address
+      changed_when: false
+      check_mode: false
+
+    - name: Require the declared management VLAN device
+      ansible.builtin.assert:
+        that:
+          - (_ubuntu_acceptance_mgmt_address.stdout | from_json) | length == 1
+        fail_msg: >-
+          The inventory-declared management VLAN interface is absent or
+          ambiguous.
+
+    - name: Record the installed management VLAN data
+      ansible.builtin.set_fact:
+        _ubuntu_acceptance_mgmt_link: >-
+          {{ (_ubuntu_acceptance_mgmt_address.stdout | from_json)[0] }}
+        _ubuntu_acceptance_mgmt_ipv4: >-
+          {{
+            (_ubuntu_acceptance_mgmt_address.stdout | from_json)[0].addr_info
+            | selectattr('family', 'equalto', 'inet')
+            | selectattr('local', 'equalto', mgmt_network.ipv4)
+            | list
+          }}
       changed_when: false
 
     - name: Require encrypted root and the inventory management address
@@ -86,31 +317,89 @@
           - >-
             _ubuntu_acceptance_boot_files.results
             | map(attribute='stat.exists') | min
+          - _ubuntu_acceptance_mgmt_link.ifname == mgmt_network.vlan_interface
           - >-
-            mgmt_network.ipv4 in
-            (
-              (_ubuntu_acceptance_mgmt_address.stdout | from_json)[0].addr_info
-              | map(attribute='local')
-              | list
-            )
-        fail_msg: "Encrypted-root or MGMT network acceptance failed."
+            _ubuntu_acceptance_mgmt_link.mtu | int
+            == mgmt_transport.mtu | int
+          - "'UP' in _ubuntu_acceptance_mgmt_link.flags"
+          - >-
+            _ubuntu_acceptance_mgmt_link.linkinfo.info_kind == 'vlan'
+          - >-
+            _ubuntu_acceptance_mgmt_link.linkinfo.info_data.id | int
+            == mgmt_transport.vlan_id | int
+          - _ubuntu_acceptance_mgmt_ipv4 | length == 1
+          - >-
+            _ubuntu_acceptance_mgmt_ipv4[0].prefixlen | int
+            == mgmt_subnet.prefix_length | int
+        fail_msg: >-
+          The installed root filesystem, encrypted-boot artifacts, or exact
+          inventory management VLAN configuration failed acceptance.
 
-    - name: Read software RAID state when declared
-      ansible.builtin.command:
-        argv:
-          - cat
-          - /proc/mdstat
-      register: _ubuntu_acceptance_mdstat
+    - name: Initialize the relevant management reachability targets
+      ansible.builtin.set_fact:
+        _ubuntu_acceptance_mgmt_targets: >-
+          {{
+            [mgmt_subnet.gateway]
+            if mgmt_subnet.gateway | default('', true) | trim | length > 0
+            else []
+          }}
       changed_when: false
-      when: hetzner_installimage_layout.software_raid.enabled | bool
 
-    - name: Require healthy RAID1 members when declared
+    - name: Require selected peer management inventory
       ansible.builtin.assert:
         that:
-          - "' active raid1 ' in _ubuntu_acceptance_mdstat.stdout"
-          - _ubuntu_acceptance_mdstat.stdout is not search('\[[U_]*_[U_]*\]')
-        fail_msg: "The declared software RAID is missing or degraded."
-      when: hetzner_installimage_layout.software_raid.enabled | bool
+          - (hostvars[item].mgmt_network | default({})) is mapping
+          - >-
+            hostvars[item].mgmt_network.ipv4
+            | default('', true) | trim | length > 0
+          - >-
+            hostvars[item].mgmt_network.allocation_state
+            | default('') == 'active'
+        fail_msg: >-
+          Selected peer {{ item }} lacks an active inventory MGMT address.
+      loop: "{{ ansible_play_hosts_all | difference([inventory_hostname]) }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Add selected peer management addresses
+      ansible.builtin.set_fact:
+        _ubuntu_acceptance_mgmt_targets: >-
+          {{
+            _ubuntu_acceptance_mgmt_targets
+            + [hostvars[item].mgmt_network.ipv4]
+          }}
+      loop: "{{ ansible_play_hosts_all | difference([inventory_hostname]) }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+
+    - name: Require unique external management reachability targets
+      ansible.builtin.assert:
+        that:
+          - >-
+            _ubuntu_acceptance_mgmt_targets | unique | length
+            == _ubuntu_acceptance_mgmt_targets | length
+          - mgmt_network.ipv4 not in _ubuntu_acceptance_mgmt_targets
+        fail_msg: >-
+          Inventory produced duplicate or self-referential MGMT probes.
+
+    - name: Probe the inventory gateway and selected management peers
+      ansible.builtin.command:
+        argv:
+          - ping
+          - -4
+          - -I
+          - "{{ mgmt_network.vlan_interface }}"
+          - -c
+          - "2"
+          - -W
+          - "3"
+          - "{{ item }}"
+      loop: "{{ _ubuntu_acceptance_mgmt_targets }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+      check_mode: false
 
     - name: Discover installed physical disks
       ansible.builtin.command:
@@ -122,6 +411,7 @@
           - PATH,SERIAL,TYPE,FSTYPE,MOUNTPOINTS
       register: _ubuntu_acceptance_lsblk
       changed_when: false
+      check_mode: false
 
     - name: Require preserved disks to remain raw
       vars:
@@ -165,5 +455,5 @@
         connect_timeout: 10
       when: hetzner_baremetal_acceptance_reboot | default(false) | bool
 
-    - name: Verify Ansible connectivity after acceptance
+    - name: Verify installed-host Ansible connectivity
       ansible.builtin.ping:

@@ -19,15 +19,13 @@ ansible-navigator:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
         - ANSIBLE_REMOTE_TEMP
-        - HETZNER_ROBOT_PASSWORD
-        - HETZNER_ROBOT_USER
         - VAULT_ADDR
         - VAULT_SKIP_VERIFY
         - VAULT_TOKEN
       set:
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp/.ansible/tmp
-        ANSIBLE_COLLECTIONS_PATH: "/opt/modulix/ansible/collections:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+        ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/opt/modulix/ansible/collections:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
   mode: stdout
   playbook-artifact:
     enable: false

@@ -1,0 +1,386 @@
+---
+# Persist Wunderbox's installed LUKS2 header as immutable controller-side
+# Ansible Vault ciphertext before HashiCorp Vault exists. Raw header bytes are
+# created only under /run on the managed host and are never decoded or written
+# to controller disk.
+- name: PreCheck (require the exact Wunderbox bootstrap target)
+  hosts: hetzner_baremetal
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    _wunderbox_luks_header_safe_raw_max_bytes: 20971520
+
+  tasks:
+    - name: Require one exact Wunderbox limit and bootstrap backend
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_tang_host
+          - >-
+            hetzner_baremetal_secret_backend
+            == 'ansible_vault_bootstrap'
+          - not ansible_check_mode
+        fail_msg: >-
+          Use --limit with the exact Wunderbox inventory FQDN while
+          ansible_vault_bootstrap is selected. This runbook does not operate
+          in check mode because it must inspect a real LUKS2 header.
+        quiet: true
+      tags: [always]
+
+    - name: Validate the controller escrow contract
+      ansible.builtin.assert:
+        that:
+          - hetzner_baremetal_ansible_vault is mapping
+          - >-
+            hetzner_baremetal_ansible_vault.luks_header_schema_version
+            | default(0) | int == 1
+          - >-
+            hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+            | default(0) | int > 0
+          - >-
+            hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+            | int <= _wunderbox_luks_header_safe_raw_max_bytes
+          - >-
+            hetzner_baremetal_ansible_vault_luks_header_path
+            | default('', true) | length > 0
+          - >-
+            lookup('ansible.builtin.env', 'PWD') | length > 0
+          - >-
+            lookup(
+              'ansible.builtin.env',
+              'ANSIBLE_VAULT_PASSWORD_FILE'
+            ) | length > 0
+        fail_msg: >-
+          The encrypted LUKS-header escrow contract, safe size ceiling, or
+          controller Ansible Vault password-file environment is invalid.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+    - name: Resolve canonical controller escrow paths
+      ansible.builtin.set_fact:
+        _wunderbox_luks_header_escrow_root_canonical: >-
+          {{
+            (
+              lookup('ansible.builtin.env', 'PWD')
+              ~ '/.secrets'
+            ) | realpath
+          }}
+        _wunderbox_luks_header_escrow_path_canonical: >-
+          {{
+            hetzner_baremetal_ansible_vault_luks_header_path
+            | realpath
+          }}
+        _wunderbox_luks_header_escrow_path_normalized: >-
+          {{
+            hetzner_baremetal_ansible_vault_luks_header_path
+            | normpath
+          }}
+      no_log: true
+      tags: [always]
+
+    - name: Require the canonical header escrow to remain under .secrets
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_luks_header_escrow_root_canonical | length > 1
+          - >-
+            _wunderbox_luks_header_escrow_path_normalized
+            is match('^/')
+          - >-
+            _wunderbox_luks_header_escrow_path_canonical
+            != _wunderbox_luks_header_escrow_root_canonical
+          - >-
+            _wunderbox_luks_header_escrow_path_canonical.startswith(
+              _wunderbox_luks_header_escrow_root_canonical ~ '/'
+            )
+        fail_msg: >-
+          The canonical encrypted LUKS-header path must remain below the
+          execution workspace .secrets directory.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+    - name: Resolve the effective Ansible controller user ID
+      ansible.builtin.set_fact:
+        _wunderbox_luks_header_controller_uid: >-
+          {{ lookup('ansible.builtin.pipe', 'id -u') | int }}
+      no_log: true
+      tags: [always]
+
+    - name: Check the controller Ansible Vault password file
+      ansible.builtin.stat:
+        path: >-
+          {{ lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') }}
+      delegate_to: localhost
+      become: false
+      register: _wunderbox_luks_header_password_file
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Require a readable regular Ansible Vault password file
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_luks_header_password_file.stat.exists | default(false)
+          - _wunderbox_luks_header_password_file.stat.isreg | default(false)
+          - _wunderbox_luks_header_password_file.stat.readable | default(false)
+          - >-
+            not (
+              _wunderbox_luks_header_password_file.stat.islnk
+              | default(false)
+            )
+          - >-
+            _wunderbox_luks_header_password_file.stat.mode
+            | default('') in ['0400', '0600']
+          - >-
+            _wunderbox_luks_header_password_file.stat.uid
+            | default(-1) | int
+            in [0, _wunderbox_luks_header_controller_uid | int]
+        fail_msg: >-
+          ANSIBLE_VAULT_PASSWORD_FILE must name a readable, owner-only 0400 or
+          0600 regular file owned by root or the effective controller user.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+- name: Back up Wunderbox LUKS2 header to immutable Ansible Vault ciphertext
+  hosts: wunderboxes
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('24.04', '>=')
+          - ansible_distribution_version is version('25.04', '<')
+        fail_msg: "This runbook supports Ubuntu 24.04 only."
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Discover the single crypttab source device
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
+      args:
+        executable: /bin/bash
+      register: _wunderbox_luks_header_devices
+      changed_when: false
+
+    - name: Require exactly one encrypted root source
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_luks_header_devices.stdout_lines | length == 1
+          - >-
+            _wunderbox_luks_header_devices.stdout_lines[0]
+            is match('^/dev/')
+        fail_msg: "Expected exactly one resolvable crypttab source device."
+        quiet: true
+
+    - name: Require installed LUKS2 JSON metadata
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksDump
+          - --dump-json-metadata
+          - "{{ _wunderbox_luks_header_devices.stdout_lines[0] }}"
+      changed_when: false
+      no_log: true
+
+    - name: Read the installed LUKS UUID
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksUUID
+          - "{{ _wunderbox_luks_header_devices.stdout_lines[0] }}"
+      register: _wunderbox_luks_header_uuid
+      changed_when: false
+      no_log: true
+
+    - name: Create, encrypt, and verify the independent header escrow
+      block:
+        - name: Allocate a protected remote header directory under /run
+          ansible.builtin.tempfile:
+            state: directory
+            path: /run
+            prefix: lit-wunderbox-
+          register: _wunderbox_luks_header_temp
+          no_log: true
+
+        - name: Resolve the initially absent raw header path
+          ansible.builtin.set_fact:
+            _wunderbox_luks_header_raw_path: >-
+              {{ _wunderbox_luks_header_temp.path }}/header.luks
+          no_log: true
+
+        - name: Back up the raw LUKS2 header on the managed host
+          ansible.builtin.command:
+            argv:
+              - /bin/bash
+              - -c
+              - >-
+                umask 077;
+                exec cryptsetup luksHeaderBackup "$1"
+                --header-backup-file "$2"
+              - lit-luks-header-backup
+              - "{{ _wunderbox_luks_header_devices.stdout_lines[0] }}"
+              - "{{ _wunderbox_luks_header_raw_path }}"
+          changed_when: true
+          no_log: true
+
+        - name: Read the backup LUKS UUID
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksUUID
+              - "{{ _wunderbox_luks_header_raw_path }}"
+          register: _wunderbox_luks_header_backup_uuid
+          changed_when: false
+          no_log: true
+
+        - name: Require backup LUKS2 JSON metadata
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksDump
+              - --dump-json-metadata
+              - "{{ _wunderbox_luks_header_raw_path }}"
+          changed_when: false
+          no_log: true
+
+        - name: Require the backup to match the installed LUKS2 UUID
+          ansible.builtin.assert:
+            that:
+              - >-
+                _wunderbox_luks_header_backup_uuid.stdout | trim
+                == _wunderbox_luks_header_uuid.stdout | trim
+            fail_msg: "The remote LUKS-header backup UUID does not match."
+            quiet: true
+          no_log: true
+
+        - name: Calculate raw header size and SHA-256 on the managed host
+          ansible.builtin.stat:
+            path: "{{ _wunderbox_luks_header_raw_path }}"
+            get_checksum: true
+            checksum_algorithm: sha256
+          register: _wunderbox_luks_header_raw_stat
+          changed_when: false
+          no_log: true
+
+        - name: Require a protected header below the safe encrypted envelope
+          ansible.builtin.assert:
+            that:
+              - _wunderbox_luks_header_raw_stat.stat.exists | default(false)
+              - _wunderbox_luks_header_raw_stat.stat.isreg | default(false)
+              - _wunderbox_luks_header_raw_stat.stat.mode == '0600'
+              - _wunderbox_luks_header_raw_stat.stat.size | int > 0
+              - >-
+                _wunderbox_luks_header_raw_stat.stat.size | int
+                <=
+                hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+                | int
+              - >-
+                _wunderbox_luks_header_raw_stat.stat.checksum
+                | default('') is match('^[0-9a-f]{64}$')
+            fail_msg: >-
+              The remote LUKS-header backup is absent, invalid, or too large
+              for the approved encrypted controller-document envelope.
+            quiet: true
+          no_log: true
+
+        - name: Read the raw header as base64 into Ansible memory
+          ansible.builtin.slurp:
+            src: "{{ _wunderbox_luks_header_raw_path }}"
+          register: _wunderbox_luks_header_slurp
+          no_log: true
+
+        - name: Build the exact immutable escrow document
+          ansible.builtin.set_fact:
+            _wunderbox_luks_header_document:
+              schema_version: >-
+                {{
+                  hetzner_baremetal_ansible_vault[
+                    'luks_header_schema_version'
+                  ] | int
+                }}
+              subject: "{{ inventory_hostname }}"
+              luks_format: luks2
+              luks_uuid: "{{ _wunderbox_luks_header_uuid.stdout | trim }}"
+              luks_header_b64: "{{ _wunderbox_luks_header_slurp.content }}"
+              luks_header_raw_size_bytes: >-
+                {{ _wunderbox_luks_header_raw_stat.stat.size | int }}
+              luks_header_sha256_raw: >-
+                {{ _wunderbox_luks_header_raw_stat.stat.checksum }}
+          no_log: true
+
+        - name: Persist the immutable encrypted controller escrow
+          lit.foundational.ansible_vault_document:
+            path: >-
+              {{ _wunderbox_luks_header_escrow_path_normalized }}
+            document: "{{ _wunderbox_luks_header_document }}"
+          register: _wunderbox_luks_header_escrow
+          no_log: true
+
+        - name: Read back and require the exact encrypted document
+          lit.foundational.ansible_vault_document:
+            path: >-
+              {{ _wunderbox_luks_header_escrow_path_normalized }}
+            document: "{{ _wunderbox_luks_header_document }}"
+          register: _wunderbox_luks_header_escrow_verified
+          no_log: true
+
+        - name: Require immutable ciphertext readback without disclosure
+          ansible.builtin.assert:
+            that:
+              - _wunderbox_luks_header_escrow.exists | default(false)
+              - >-
+                _wunderbox_luks_header_escrow_verified.exists
+                | default(false)
+              - >-
+                not (
+                  _wunderbox_luks_header_escrow_verified.created
+                  | default(false) | bool
+                )
+              - >-
+                not (
+                  _wunderbox_luks_header_escrow_verified.changed
+                  | default(false) | bool
+                )
+              - >-
+                _wunderbox_luks_header_escrow.ciphertext_sha256
+                ==
+                _wunderbox_luks_header_escrow_verified.ciphertext_sha256
+              - >-
+                _wunderbox_luks_header_escrow_verified.path
+                == _wunderbox_luks_header_escrow_path_normalized
+              - >-
+                _wunderbox_luks_header_escrow_verified.ciphertext_sha256
+                | default('') is match('^[0-9a-f]{64}$')
+            fail_msg: >-
+              The encrypted controller LUKS-header escrow did not pass exact
+              immutable readback verification.
+            quiet: true
+          no_log: true
+
+        - name: Report verified independent Wunderbox header escrow
+          ansible.builtin.debug:
+            msg: >-
+              Wunderbox LUKS2 header ciphertext exists at the
+              inventory-declared controller escrow path and passed exact
+              immutable readback verification.
+      always:
+        - name: Remove the raw remote LUKS-header directory
+          ansible.builtin.file:
+            path: "{{ _wunderbox_luks_header_temp.path }}"
+            state: absent
+          when:
+            - _wunderbox_luks_header_temp is defined
+            - _wunderbox_luks_header_temp.path is defined
+          no_log: true

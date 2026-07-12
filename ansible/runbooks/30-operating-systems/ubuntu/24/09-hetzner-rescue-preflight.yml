@@ -8,12 +8,6 @@
   become: false
   any_errors_fatal: true
 
-  vars:
-    _hetzner_robot_user: >-
-      {{ lookup('ansible.builtin.env', 'HETZNER_ROBOT_USER') }}
-    _hetzner_robot_password: >-
-      {{ lookup('ansible.builtin.env', 'HETZNER_ROBOT_PASSWORD') }}
-
   pre_tasks:
     - name: Require an explicit limit
       ansible.builtin.assert:
@@ -28,6 +22,11 @@
           hetzner_baremetal group. Partial preflight cannot prove exact vSwitch
           membership or peer MGMT reachability.
       run_once: true
+      tags: [always]
+
+    - name: Resolve encrypted Robot API credentials into protected memory
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
       tags: [always]
 
   tasks:
@@ -50,6 +49,42 @@
       ansible.builtin.assert:
         that:
           - inventory_hostname in hetzner_baremetal_install_order
+          - deploy_ssh_public_keys | type_debug == 'list'
+          - deploy_ssh_public_keys | length > 0
+          - breakglass_public_keys | type_debug == 'list'
+          - breakglass_public_keys | length > 0
+          - ansible_private_key_file | string | trim | length > 0
+          - >-
+            hetzner_baremetal_rescue_robot_user_keys_max_bytes
+            | type_debug == 'int'
+          - hetzner_baremetal_rescue_robot_user_keys_max_bytes > 0
+          - >-
+            hetzner_baremetal_rescue_robot_user_keys_max_bytes
+            <= 1048576
+          - hetzner_baremetal_robot_firewall.enabled is boolean
+          - hetzner_baremetal_robot_firewall.filter_ipv6 is boolean
+          - >-
+            hetzner_baremetal_robot_firewall.common_incoming_rules
+            | type_debug == 'list'
+          - >-
+            hetzner_baremetal_robot_firewall_extra_incoming_rules
+            | type_debug == 'list'
+          - >-
+            hetzner_baremetal_robot_firewall.allow_hetzner_services is boolean
+          - >-
+            hetzner_baremetal_robot_firewall.outgoing_policy
+            in ['accept', 'discard']
+          - >-
+            hetzner_baremetal_robot_firewall.outgoing_rule_name is string
+          - >-
+            hetzner_baremetal_robot_firewall.outgoing_rule_name
+            | trim | length > 0
+          - hetzner_baremetal_tang_host in groups['hetzner_baremetal']
+          - hetzner_baremetal_vault is mapping
+          - hetzner_baremetal_vault.host in groups['hetzner_baremetal']
+          - >-
+            hetzner_baremetal_vault.endpoint_fqdn
+            is match('^[A-Za-z0-9.-]+$')
           - ansible_host == hetzner_installimage_expected_identity.public_ipv4
           - hetzner_installimage_action == 'plan'
           - hetzner_installimage_expected_disks | length > 0
@@ -84,6 +119,178 @@
             ) in netplan_vlans[mgmt_network.vlan_interface].addresses
         fail_msg: >-
           The rendered host inventory does not satisfy the install contract.
+
+    - name: Require exact inventory Robot incoming-rule schema
+      vars:
+        _hetzner_inventory_robot_rule_fields:
+          - ip_version
+          - protocol
+          - source
+          - source_port
+          - destination_port
+          - tcp_flags
+          - comment
+        _hetzner_inventory_robot_actual_rule_fields: >-
+          {{ item.keys() | list if item is mapping else [] }}
+      ansible.builtin.assert:
+        that:
+          - item is mapping
+          - >-
+            _hetzner_inventory_robot_actual_rule_fields
+            | difference(_hetzner_inventory_robot_rule_fields)
+            | length == 0
+          - >-
+            item is mapping
+            and item.get('ip_version') == 'ipv4'
+          - >-
+            item is mapping
+            and item.get('protocol') is string
+            and item.get('protocol')
+            in ['tcp', 'udp', 'gre', 'icmp', 'ipip', 'ah', 'esp']
+          - >-
+            item is mapping
+            and item.get('comment') is string
+            and item.get('comment') | trim | length > 0
+          - >-
+            item is mapping
+            and (
+              item.get('source') is none
+              or (
+                item.get('source') is string
+                and item.get('source') | trim | length > 0
+              )
+            )
+          - >-
+            item is mapping
+            and (
+              item.get('source_port') is none
+              or (
+                item.get('source_port') is string
+                and item.get('source_port') | trim | length > 0
+              )
+            )
+          - >-
+            item is mapping
+            and (
+              item.get('destination_port') is none
+              or (
+                item.get('destination_port') is string
+                and item.get('destination_port') | trim | length > 0
+              )
+            )
+          - >-
+            item is mapping
+            and (
+              item.get('tcp_flags') is none
+              or (
+                item.get('tcp_flags') is string
+                and item.get('tcp_flags') | trim | length > 0
+              )
+            )
+        fail_msg: >-
+          An inventory Robot incoming rule is malformed or has undeclared
+          fields.
+        quiet: true
+      loop: >-
+        {{
+          hetzner_baremetal_robot_firewall.common_incoming_rules
+          + hetzner_baremetal_robot_firewall_extra_incoming_rules
+        }}
+      loop_control:
+        label: "{{ item.comment | default('invalid-rule') }}"
+      when: hetzner_baremetal_robot_firewall.enabled | bool
+
+    - name: Derive required deployment-key fingerprints
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -E
+          - sha256
+          - -lf
+          - '-'
+        stdin: "{{ item }}\n"
+        stdin_add_newline: false
+      loop: "{{ deploy_ssh_public_keys }}"
+      register: _hetzner_required_deploy_fingerprint_results
+      changed_when: false
+      no_log: true
+
+    - name: Derive required break-glass-key fingerprints
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -E
+          - sha256
+          - -lf
+          - '-'
+        stdin: "{{ item }}\n"
+        stdin_add_newline: false
+      loop: "{{ breakglass_public_keys }}"
+      register: _hetzner_required_breakglass_fingerprint_results
+      changed_when: false
+      no_log: true
+
+    - name: Read SHA-256 fingerprints held by the controller SSH agent
+      ansible.builtin.command:
+        argv:
+          - ssh-add
+          - -l
+          - -E
+          - sha256
+      register: _hetzner_agent_fingerprint_result
+      changed_when: false
+      failed_when: false
+
+    - name: Require deployment and break-glass identities in the SSH agent
+      vars:
+        _hetzner_required_deploy_fingerprints: >-
+          {{
+            _hetzner_required_deploy_fingerprint_results.results
+            | map(attribute='stdout')
+            | join('\n')
+            | regex_findall('SHA256:[A-Za-z0-9+/]{43}')
+          }}
+        _hetzner_required_breakglass_fingerprints: >-
+          {{
+            _hetzner_required_breakglass_fingerprint_results.results
+            | map(attribute='stdout')
+            | join('\n')
+            | regex_findall('SHA256:[A-Za-z0-9+/]{43}')
+          }}
+        _hetzner_agent_fingerprints: >-
+          {{
+            _hetzner_agent_fingerprint_result.stdout
+            | default('')
+            | regex_findall('SHA256:[A-Za-z0-9+/]{43}')
+          }}
+      ansible.builtin.assert:
+        that:
+          - _hetzner_agent_fingerprint_result.rc == 0
+          - >-
+            _hetzner_required_deploy_fingerprints | length
+            == deploy_ssh_public_keys | length
+          - >-
+            _hetzner_required_breakglass_fingerprints | length
+            == breakglass_public_keys | length
+          - >-
+            _hetzner_required_deploy_fingerprints | unique | length
+            == _hetzner_required_deploy_fingerprints | length
+          - >-
+            _hetzner_required_breakglass_fingerprints | unique | length
+            == _hetzner_required_breakglass_fingerprints | length
+          - >-
+            _hetzner_required_deploy_fingerprints
+            | difference(_hetzner_agent_fingerprints)
+            | length == 0
+          - >-
+            _hetzner_required_breakglass_fingerprints
+            | difference(_hetzner_agent_fingerprints)
+            | length == 0
+        fail_msg: >-
+          The controller SSH agent is unavailable, empty, or does not hold every
+          inventory-required deployment and break-glass identity. Load those
+          identities before running the live preflight.
+        quiet: true
 
     - name: Resolve the public A record
       ansible.builtin.set_fact:
@@ -138,6 +345,28 @@
           - _hetzner_tang_cname == hetzner_baremetal_tang_host
         fail_msg: "The Tang CNAME does not target the declared Tang host."
       when: inventory_hostname == hetzner_baremetal_tang_host
+
+    - name: Resolve the Vault CNAME on its declared host
+      ansible.builtin.set_fact:
+        _hetzner_vault_cname: >-
+          {{
+            lookup(
+              'community.general.dig',
+              hetzner_baremetal_vault.endpoint_fqdn,
+              '@' ~ hetzner_baremetal_dns_resolver,
+              qtype='CNAME',
+              fail_on_error=true
+            ) | regex_replace('\.$', '')
+          }}
+      changed_when: false
+      when: inventory_hostname == hetzner_baremetal_vault.host
+
+    - name: Require the Vault CNAME to target its inventory host
+      ansible.builtin.assert:
+        that:
+          - _hetzner_vault_cname == hetzner_baremetal_vault.host
+        fail_msg: "The Vault CNAME does not target the declared Vault host."
+      when: inventory_hostname == hetzner_baremetal_vault.host
 
     - name: Scan and pin the current Rescue SSH host key
       block:
@@ -221,26 +450,12 @@
       always:
         - name: Remove the temporary host-key file
           ansible.builtin.file:
-            path: >-
-              {{
-                _hetzner_rescue_key_file.path
-                | default('/nonexistent')
-              }}
+            path: "{{ _hetzner_rescue_key_file.path }}"
             state: absent
+          when:
+            - _hetzner_rescue_key_file is defined
+            - _hetzner_rescue_key_file.path is defined
           changed_when: false
-
-    - name: Require Robot API credentials for read-only platform validation
-      ansible.builtin.assert:
-        that:
-          - _hetzner_robot_user | length > 0
-          - _hetzner_robot_password | length > 0
-        fail_msg: >-
-          Set HETZNER_ROBOT_USER and HETZNER_ROBOT_PASSWORD for the
-          read-only vSwitch and firewall gates.
-      when: >-
-        mgmt_transport.provider == 'hetzner_robot_vswitch'
-        or (hetzner_baremetal_robot_firewall.enabled | bool)
-      no_log: true
 
     - name: Read the Robot vSwitch list
       ansible.builtin.uri:
@@ -396,6 +611,124 @@
       when: hetzner_baremetal_robot_firewall.enabled | bool
       no_log: true
 
+    - name: Require the documented Robot firewall response shape
+      vars:
+        _hetzner_robot_response_json: >-
+          {{ _hetzner_robot_firewall_result.json | default({}) }}
+        _hetzner_robot_response_firewall: >-
+          {{
+            _hetzner_robot_response_json.get('firewall', {})
+            if _hetzner_robot_response_json is mapping
+            else {}
+          }}
+        _hetzner_robot_response_rules: >-
+          {{
+            _hetzner_robot_response_firewall.get('rules', {})
+            if _hetzner_robot_response_firewall is mapping
+            else {}
+          }}
+        _hetzner_robot_firewall_fields:
+          - server_ip
+          - server_number
+          - status
+          - filter_ipv6
+          - whitelist_hos
+          - port
+          - rules
+      ansible.builtin.assert:
+        that:
+          - _hetzner_robot_response_json is mapping
+          - _hetzner_robot_response_firewall is mapping
+          - >-
+            _hetzner_robot_firewall_fields
+            | difference(
+                _hetzner_robot_response_firewall.keys() | list
+              )
+            | length == 0
+          - _hetzner_robot_response_rules is mapping
+          - >-
+            _hetzner_robot_response_rules.get('input', none)
+            | type_debug == 'list'
+          - >-
+            _hetzner_robot_response_rules.get('output', none)
+            | type_debug == 'list'
+          - >-
+            _hetzner_robot_response_firewall.get('filter_ipv6', none)
+            is boolean
+          - >-
+            _hetzner_robot_response_firewall.get('whitelist_hos', none)
+            is boolean
+        fail_msg: >-
+          Robot returned a firewall response outside the documented schema.
+        quiet: true
+      when: hetzner_baremetal_robot_firewall.enabled | bool
+
+    - name: Require the documented Robot firewall rule shape
+      vars:
+        _hetzner_robot_rule_fields:
+          - ip_version
+          - name
+          - dst_ip
+          - src_ip
+          - dst_port
+          - src_port
+          - protocol
+          - tcp_flags
+          - action
+        _hetzner_robot_actual_rule_fields: >-
+          {{ item.keys() | list if item is mapping else [] }}
+      ansible.builtin.assert:
+        that:
+          - item is mapping
+          - >-
+            _hetzner_robot_actual_rule_fields | sort
+            == _hetzner_robot_rule_fields | sort
+          - >-
+            item is mapping
+            and (item.get('ip_version') is none
+                 or item.get('ip_version') is string)
+          - >-
+            item is mapping
+            and (item.get('name') is none or item.get('name') is string)
+          - >-
+            item is mapping
+            and (item.get('dst_ip') is none or item.get('dst_ip') is string)
+          - >-
+            item is mapping
+            and (item.get('src_ip') is none or item.get('src_ip') is string)
+          - >-
+            item is mapping
+            and (item.get('dst_port') is none
+                 or item.get('dst_port') is string)
+          - >-
+            item is mapping
+            and (item.get('src_port') is none
+                 or item.get('src_port') is string)
+          - >-
+            item is mapping
+            and (item.get('protocol') is none
+                 or item.get('protocol') is string)
+          - >-
+            item is mapping
+            and (item.get('tcp_flags') is none
+                 or item.get('tcp_flags') is string)
+          - >-
+            item is mapping
+            and item.get('action') is string
+            and item.get('action') in ['accept', 'discard']
+        fail_msg: >-
+          Robot returned a firewall rule outside the documented schema.
+        quiet: true
+      loop: >-
+        {{
+          _hetzner_robot_firewall_result.json.firewall.rules.input
+          + _hetzner_robot_firewall_result.json.firewall.rules.output
+        }}
+      loop_control:
+        index_var: _hetzner_robot_rule_index
+        label: "{{ _hetzner_robot_rule_index }}"
+      when: hetzner_baremetal_robot_firewall.enabled | bool
+
     - name: Initialize normalized Robot firewall rules
       ansible.builtin.set_fact:
         _hetzner_robot_expected_input: []
@@ -409,12 +742,15 @@
             _hetzner_robot_expected_input
             + [
                 {
-                  'protocol': item.protocol | default('', true) | string,
-                  'tcp_flags': item.tcp_flags | default('', true) | string,
-                  'src_ip': item.source | default('', true) | string,
-                  'src_port': item.source_port | default('', true) | string,
+                  'ip_version': item.ip_version,
+                  'name': item.comment,
+                  'dst_ip': ansible_host,
+                  'src_ip': item.source | default(none),
                   'dst_port':
-                    item.destination_port | default('', true) | string,
+                    item.destination_port | default(none),
+                  'src_port': item.source_port | default(none),
+                  'protocol': item.protocol,
+                  'tcp_flags': item.tcp_flags | default(none),
                   'action': 'accept'
                 }
               ]
@@ -435,21 +771,24 @@
             _hetzner_robot_actual_input
             + [
                 {
-                  'protocol': item.protocol | default('', true) | string,
-                  'tcp_flags':
-                    item.tcp_flags | default('', true)
-                    | regex_replace('^\*$', '') | string,
+                  'ip_version': item.ip_version,
+                  'name': item.name,
+                  'dst_ip': (
+                    item.dst_ip | regex_replace('/32$', '')
+                    if item.dst_ip is string
+                    else none
+                  ),
                   'src_ip':
-                    item.src_ip | default('', true)
-                    | regex_replace('/32$', '')
-                    | regex_replace('^\*$', '') | string,
-                  'src_port':
-                    item.src_port | default('', true)
-                    | regex_replace('^\*$', '') | string,
-                  'dst_port':
-                    item.dst_port | default('', true)
-                    | regex_replace('^\*$', '') | string,
-                  'action': item.action | default('', true) | string
+                    (
+                      item.src_ip | regex_replace('/32$', '')
+                      if item.src_ip is string
+                      else none
+                    ),
+                  'dst_port': item.dst_port,
+                  'src_port': item.src_port,
+                  'protocol': item.protocol,
+                  'tcp_flags': item.tcp_flags,
+                  'action': item.action
                 }
               ]
           }}
@@ -473,16 +812,45 @@
       when: hetzner_baremetal_robot_firewall.enabled | bool
 
     - name: Require the declared Robot firewall baseline
+      vars:
+        _hetzner_robot_expected_output:
+          - ip_version: null
+            name: "{{ hetzner_baremetal_robot_firewall.outgoing_rule_name }}"
+            dst_ip: null
+            src_ip: null
+            dst_port: null
+            src_port: null
+            protocol: null
+            tcp_flags: null
+            action: "{{ hetzner_baremetal_robot_firewall.outgoing_policy }}"
       ansible.builtin.assert:
         that:
+          - >-
+            _hetzner_robot_firewall_result.json.firewall.server_ip
+            == ansible_host
+          - >-
+            _hetzner_robot_firewall_result.json.firewall.server_number | int
+            == _hetzner_robot_server_matches[0].server_number | int
           - >-
             _hetzner_robot_firewall_result.json.firewall.status == 'active'
           - >-
             _hetzner_robot_firewall_result.json.firewall.port == 'main'
           - >-
-            _hetzner_robot_firewall_result.json.firewall.filter_ipv6 | bool
+            _hetzner_robot_firewall_result.json.firewall.filter_ipv6
+            is boolean
           - >-
-            _hetzner_robot_firewall_result.json.firewall.whitelist_hos | bool
+            hetzner_baremetal_robot_firewall.filter_ipv6 is boolean
+          - >-
+            _hetzner_robot_firewall_result.json.firewall.filter_ipv6
+            == hetzner_baremetal_robot_firewall.filter_ipv6
+          - >-
+            _hetzner_robot_firewall_result.json.firewall.whitelist_hos
+            is boolean
+          - >-
+            hetzner_baremetal_robot_firewall.allow_hetzner_services is boolean
+          - >-
+            _hetzner_robot_firewall_result.json.firewall.whitelist_hos
+            == hetzner_baremetal_robot_firewall.allow_hetzner_services
           - >-
             _hetzner_robot_firewall_result.json.firewall.rules.input | length
             ==
@@ -494,8 +862,11 @@
             _hetzner_robot_firewall_result.json.firewall.rules.output
             | length == 1
           - >-
-            _hetzner_robot_firewall_result.json.firewall.rules.output[0].action
-            == 'accept'
+            hetzner_baremetal_robot_firewall.outgoing_policy
+            in ['accept', 'discard']
+          - >-
+            _hetzner_robot_firewall_result.json.firewall.rules.output
+            == _hetzner_robot_expected_output
           - _hetzner_robot_actual_input == _hetzner_robot_expected_input
         fail_msg: >-
           The active Robot firewall does not match the declared baseline shape.
@@ -514,15 +885,100 @@
     ansible_ssh_common_args: >-
       -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
       -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
 
   tasks:
-    - name: Install the inventory-managed deployment keys in Rescue
-      ansible.posix.authorized_key:
-        user: root
-        key: "{{ item }}"
-        state: present
-      loop: "{{ deploy_ssh_public_keys }}"
+    - name: Inspect the Hetzner-managed Rescue deployment-key file
+      ansible.builtin.stat:
+        path: /root/.ssh/robot_user_keys
+        follow: false
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: _hetzner_rescue_robot_user_keys_stat
+      changed_when: false
+
+    - name: Require safe Rescue deployment-key file metadata
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.exists
+            | default(false)
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.isreg
+            | default(false)
+          - >-
+            not (
+              _hetzner_rescue_robot_user_keys_stat.stat.islnk
+              | default(false)
+            )
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.uid
+            | default(-1) | int == 0
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.gid
+            | default(-1) | int == 0
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.nlink
+            | default(0) | int == 1
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.mode
+            | default('')
+            is match('^0[0-7][0145][0145]$')
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.size
+            | default(0) | int > 0
+          - >-
+            _hetzner_rescue_robot_user_keys_stat.stat.size
+            | default(
+                hetzner_baremetal_rescue_robot_user_keys_max_bytes | int + 1
+              )
+            | int
+            <= hetzner_baremetal_rescue_robot_user_keys_max_bytes | int
+        fail_msg: >-
+          /root/.ssh/robot_user_keys is absent or does not meet the safe
+          regular-file ownership, link-count, mode, and size contract.
+
+    - name: Read the Hetzner-managed Rescue deployment-key file
+      ansible.builtin.slurp:
+        src: /root/.ssh/robot_user_keys
+      register: _hetzner_rescue_robot_user_keys
+      changed_when: false
       no_log: true
+
+    - name: Require exact inventory deployment keys in Rescue
+      vars:
+        _hetzner_rescue_robot_user_key_lines: >-
+          {{
+            (_hetzner_rescue_robot_user_keys.content | b64decode).split('\n')
+            | map('trim')
+            | reject('equalto', '')
+            | map('regex_replace', '\\s+', ' ')
+            | list
+          }}
+        _hetzner_inventory_deploy_key_lines: >-
+          {{
+            deploy_ssh_public_keys
+            | map('trim')
+            | reject('equalto', '')
+            | map('regex_replace', '\\s+', ' ')
+            | list
+          }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_inventory_deploy_key_lines | length
+            == deploy_ssh_public_keys | length
+          - >-
+            _hetzner_inventory_deploy_key_lines | unique | length
+            == _hetzner_inventory_deploy_key_lines | length
+          - >-
+            _hetzner_rescue_robot_user_key_lines
+            == _hetzner_inventory_deploy_key_lines
+        fail_msg: >-
+          Hetzner Rescue was not activated with exactly the deployment public
+          keys declared by inventory.
+        quiet: true
 
     - name: Discover physical Rescue disks by serial
       ansible.builtin.command:
@@ -611,21 +1067,52 @@
 
     - name: Require a completed latest extended SMART test
       vars:
-        _smart_selftest_table: >-
+        _smart_selftest_json: "{{ item.stdout | from_json }}"
+        _smart_selftest_log: >-
           {{
-            (item.stdout | from_json)
-            .ata_smart_self_test_log.standard.table
-            | default([])
+            _smart_selftest_json.ata_smart_self_test_log
+            | default({}, true)
+          }}
+        _smart_selftest_standard_log: >-
+          {{ _smart_selftest_log.standard | default({}, true) }}
+        _smart_selftest_table: >-
+          {{ _smart_selftest_standard_log.table | default([], true) }}
+        _smart_latest_selftest: >-
+          {{ _smart_selftest_table | first | default({}) }}
+        _smart_latest_selftest_type: >-
+          {{
+            _smart_latest_selftest.get('type', {}).get('string', '')
+            if (
+              _smart_latest_selftest is mapping
+              and _smart_latest_selftest.get('type', {}) is mapping
+            )
+            else ''
+          }}
+        _smart_latest_selftest_status: >-
+          {{
+            _smart_latest_selftest.get('status', {}).get('string', '')
+            if (
+              _smart_latest_selftest is mapping
+              and _smart_latest_selftest.get('status', {}) is mapping
+            )
+            else ''
           }}
       ansible.builtin.assert:
         that:
           - _smart_selftest_table | length > 0
+          - _smart_latest_selftest is mapping
+          - _smart_latest_selftest.get('type', {}) is mapping
+          - _smart_latest_selftest_type is string
           - >-
-            'Completed without error'
-            in _smart_selftest_table[0].status.string
+            _smart_latest_selftest_type | trim
+            is match('(?i)^(extended|long)( offline)?$')
+          - _smart_latest_selftest.get('status', {}) is mapping
+          - _smart_latest_selftest_status is string
+          - >-
+            _smart_latest_selftest_status == 'Completed without error'
         fail_msg: >-
-          The latest SMART self-test is not successful for
-          {{ item.item.serial }}.
+          The latest SMART self-test is not a completed, error-free Extended
+          or Long test for {{ item.item.serial }}.
       loop: "{{ _hetzner_smart_selftests.results }}"
       loop_control:
         label: "{{ item.item.serial }}"
@@ -737,6 +1224,7 @@
     ansible_ssh_common_args: >-
       -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
       -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
     _hetzner_rescue_mgmt_probe_vlan_interface: >-
       litv{{ mgmt_transport.vlan_id }}
 
