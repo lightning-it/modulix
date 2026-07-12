@@ -20,8 +20,13 @@
         that:
           - ansible_limit is defined
           - ansible_limit | string | trim | length > 0
+          - >-
+            ansible_play_hosts_all | sort
+            == groups['hetzner_baremetal'] | sort
         fail_msg: >-
-          This runbook requires --limit with the intended host or group.
+          This runbook requires --limit selecting the complete
+          hetzner_baremetal group. Partial preflight cannot prove exact vSwitch
+          membership or peer MGMT reachability.
       run_once: true
       tags: [always]
 
@@ -52,9 +57,31 @@
             hetzner_rescue_ssh_ed25519_sha256
             is match('^SHA256:[A-Za-z0-9+/]{43}$')
           - mgmt_network.allocation_state == 'active'
+          - mgmt_network.parent_interface | string | trim | length > 0
+          - mgmt_network.vlan_interface | string | trim | length > 0
+          - mgmt_subnet.prefix_length | int > 0
+          - mgmt_subnet.prefix_length | int <= 32
+          - mgmt_subnet.gateway | string | trim | length > 0
+          - mgmt_transport.provider == 'hetzner_robot_vswitch'
           - mgmt_transport.deployment_state == 'active'
           - mgmt_transport.vlan_id | int == 4091
           - mgmt_transport.mtu | int == 1400
+          - mgmt_network.vlan_interface in netplan_vlans
+          - >-
+            netplan_vlans[mgmt_network.vlan_interface].id | int
+            == mgmt_transport.vlan_id | int
+          - >-
+            netplan_vlans[mgmt_network.vlan_interface].link
+            == mgmt_network.parent_interface
+          - >-
+            netplan_vlans[mgmt_network.vlan_interface].mtu | int
+            == mgmt_transport.mtu | int
+          - >-
+            (
+              mgmt_network.ipv4
+              ~ '/'
+              ~ (mgmt_subnet.prefix_length | string)
+            ) in netplan_vlans[mgmt_network.vlan_interface].addresses
         fail_msg: >-
           The rendered host inventory does not satisfy the install contract.
 
@@ -202,20 +229,129 @@
             state: absent
           changed_when: false
 
-    - name: Require Robot API credentials when firewall validation is enabled
+    - name: Require Robot API credentials for read-only platform validation
       ansible.builtin.assert:
         that:
           - _hetzner_robot_user | length > 0
           - _hetzner_robot_password | length > 0
         fail_msg: >-
           Set HETZNER_ROBOT_USER and HETZNER_ROBOT_PASSWORD for the
-          read-only firewall gate.
-      when: hetzner_baremetal_robot_firewall.enabled | bool
+          read-only vSwitch and firewall gates.
+      when: >-
+        mgmt_transport.provider == 'hetzner_robot_vswitch'
+        or (hetzner_baremetal_robot_firewall.enabled | bool)
       no_log: true
+
+    - name: Read the Robot vSwitch list
+      ansible.builtin.uri:
+        url: https://robot-ws.your-server.de/vswitch
+        method: GET
+        url_username: "{{ _hetzner_robot_user }}"
+        url_password: "{{ _hetzner_robot_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: _hetzner_robot_vswitches
+      run_once: true
+      no_log: true
+
+    - name: Select the non-cancelled inventory VLAN vSwitch
+      ansible.builtin.set_fact:
+        _hetzner_robot_vswitch_matches: >-
+          {{
+            _hetzner_robot_vswitches.json
+            | selectattr('cancelled', 'equalto', false)
+            | selectattr(
+                'vlan',
+                'equalto',
+                (mgmt_transport.vlan_id | int)
+              )
+            | list
+          }}
+      run_once: true
+      changed_when: false
+
+    - name: Require exactly one active Robot vSwitch for the inventory VLAN
+      ansible.builtin.assert:
+        that:
+          - _hetzner_robot_vswitch_matches | length == 1
+        fail_msg: >-
+          Robot did not return exactly one non-cancelled vSwitch for inventory
+          VLAN {{ mgmt_transport.vlan_id }}.
+        quiet: true
+      run_once: true
+
+    - name: Read the selected Robot vSwitch membership
+      ansible.builtin.uri:
+        url: >-
+          https://robot-ws.your-server.de/vswitch/{{
+            _hetzner_robot_vswitch_matches[0].id
+          }}
+        method: GET
+        url_username: "{{ _hetzner_robot_user }}"
+        url_password: "{{ _hetzner_robot_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: _hetzner_robot_vswitch
+      run_once: true
+      no_log: true
+
+    - name: Require exact ready Robot vSwitch membership
+      vars:
+        _hetzner_robot_vswitch_expected_ips: >-
+          {{
+            ansible_play_hosts_all
+            | map('extract', hostvars, 'ansible_host')
+            | map('string')
+            | sort
+            | list
+          }}
+        _hetzner_robot_vswitch_actual_ips: >-
+          {{
+            _hetzner_robot_vswitch.json.server
+            | default([])
+            | map(attribute='server_ip')
+            | map('string')
+            | sort
+            | list
+          }}
+        _hetzner_robot_vswitch_not_ready: >-
+          {{
+            _hetzner_robot_vswitch.json.server
+            | default([])
+            | rejectattr('status', 'equalto', 'ready')
+            | list
+          }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_robot_vswitch.json.id | int
+            == _hetzner_robot_vswitch_matches[0].id | int
+          - >-
+            _hetzner_robot_vswitch.json.vlan | int
+            == mgmt_transport.vlan_id | int
+          - not (_hetzner_robot_vswitch.json.cancelled | bool)
+          - >-
+            _hetzner_robot_vswitch_actual_ips
+            == _hetzner_robot_vswitch_expected_ips
+          - >-
+            _hetzner_robot_vswitch_expected_ips | unique | length
+            == ansible_play_hosts_all | length
+          - >-
+            _hetzner_robot_vswitch_actual_ips | unique | length
+            == _hetzner_robot_vswitch_actual_ips | length
+          - _hetzner_robot_vswitch_not_ready | length == 0
+        fail_msg: >-
+          The selected Robot vSwitch does not have the exact selected-play
+          public-IP membership in ready state.
+        quiet: true
+      run_once: true
 
     - name: Read the Robot server list
       ansible.builtin.uri:
         url: https://robot-ws.your-server.de/server
+        method: GET
         url_username: "{{ _hetzner_robot_user }}"
         url_password: "{{ _hetzner_robot_password }}"
         force_basic_auth: true
@@ -250,6 +386,7 @@
             'https://robot-ws.your-server.de/firewall/'
             ~ _hetzner_robot_server_matches[0].server_number
           }}
+        method: GET
         url_username: "{{ _hetzner_robot_user }}"
         url_password: "{{ _hetzner_robot_password }}"
         force_basic_auth: true
@@ -586,3 +723,306 @@
           - 301
           - 302
         timeout: 20
+
+- name: Validate Rescue vSwitch and MGMT data plane
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  strategy: linear
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+    _hetzner_rescue_mgmt_probe_vlan_interface: >-
+      litv{{ mgmt_transport.vlan_id }}
+
+  tasks:
+    - name: Read the inventory MGMT parent interface
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -j
+          - link
+          - show
+          - dev
+          - "{{ mgmt_network.parent_interface }}"
+      register: _hetzner_rescue_mgmt_probe_parent
+      changed_when: false
+      failed_when: false
+
+    - name: Require the inventory MGMT parent interface in Rescue
+      ansible.builtin.assert:
+        that:
+          - _hetzner_rescue_mgmt_probe_parent.rc == 0
+          - >-
+            _hetzner_rescue_mgmt_probe_parent.stdout | from_json
+            | length == 1
+        fail_msg: >-
+          Rescue does not expose inventory parent interface
+          {{ mgmt_network.parent_interface }} on {{ inventory_hostname }}.
+        quiet: true
+
+    - name: Read existing Rescue addresses
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -j
+          - address
+          - show
+      register: _hetzner_rescue_mgmt_probe_addresses_before
+      changed_when: false
+
+    - name: Check for a colliding Rescue probe VLAN interface
+      ansible.builtin.command:
+        argv:
+          - ip
+          - link
+          - show
+          - dev
+          - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+      register: _hetzner_rescue_mgmt_probe_vlan_before
+      changed_when: false
+      failed_when: false
+
+    - name: Refuse Rescue probe interface or address collisions
+      ansible.builtin.assert:
+        that:
+          - >-
+            mgmt_network.ipv4 not in
+            (
+              _hetzner_rescue_mgmt_probe_addresses_before.stdout
+              | from_json
+              | map(attribute='addr_info')
+              | flatten
+              | selectattr('family', 'equalto', 'inet')
+              | map(attribute='local')
+              | list
+            )
+          - _hetzner_rescue_mgmt_probe_vlan_before.rc != 0
+        fail_msg: >-
+          The probe-owned interface name or inventory MGMT address already
+          exists. Refusing to reuse or delete pre-existing Rescue state.
+        quiet: true
+
+    - name: Exercise the inventory MGMT network on a temporary VLAN
+      block:
+        - name: Create and own the inventory-tagged Rescue probe VLAN
+          ansible.builtin.command:
+            argv:
+              - ip
+              - link
+              - add
+              - link
+              - "{{ mgmt_network.parent_interface }}"
+              - name
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+              - type
+              - vlan
+              - id
+              - "{{ mgmt_transport.vlan_id | string }}"
+          register: _hetzner_rescue_mgmt_probe_vlan_create
+          changed_when: _hetzner_rescue_mgmt_probe_vlan_create.rc == 0
+
+        - name: Apply the inventory MTU to the Rescue probe VLAN
+          ansible.builtin.command:
+            argv:
+              - ip
+              - link
+              - set
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+              - mtu
+              - "{{ mgmt_transport.mtu | string }}"
+          changed_when: true
+
+        - name: Bring up the Rescue probe VLAN
+          ansible.builtin.command:
+            argv:
+              - ip
+              - link
+              - set
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+              - up
+          changed_when: true
+
+        - name: Assign the inventory MGMT address to the probe VLAN
+          ansible.builtin.command:
+            argv:
+              - ip
+              - address
+              - add
+              - >-
+                {{
+                  mgmt_network.ipv4
+                  ~ '/'
+                  ~ (mgmt_subnet.prefix_length | string)
+                }}
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+          changed_when: true
+
+        - name: Read the configured Rescue probe VLAN
+          ansible.builtin.command:
+            argv:
+              - ip
+              - -d
+              - -j
+              - link
+              - show
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+          register: _hetzner_rescue_mgmt_probe_vlan_state
+          changed_when: false
+
+        - name: Read the configured Rescue MGMT address
+          ansible.builtin.command:
+            argv:
+              - ip
+              - -j
+              - address
+              - show
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+          register: _hetzner_rescue_mgmt_probe_address_state
+          changed_when: false
+
+        - name: Require the inventory VLAN, MTU, and MGMT address in Rescue
+          vars:
+            _hetzner_rescue_mgmt_probe_vlan_json: >-
+              {{
+                (_hetzner_rescue_mgmt_probe_vlan_state.stdout | from_json)[0]
+              }}
+            _hetzner_rescue_mgmt_probe_address_json: >-
+              {{
+                (
+                  _hetzner_rescue_mgmt_probe_address_state.stdout
+                  | from_json
+                )[0]
+              }}
+          ansible.builtin.assert:
+            that:
+              - >-
+                _hetzner_rescue_mgmt_probe_vlan_json.linkinfo.info_data.id
+                | int == mgmt_transport.vlan_id | int
+              - >-
+                _hetzner_rescue_mgmt_probe_vlan_json.mtu | int
+                == mgmt_transport.mtu | int
+              - >-
+                mgmt_network.ipv4 in
+                (
+                  _hetzner_rescue_mgmt_probe_address_json.addr_info
+                  | selectattr('family', 'equalto', 'inet')
+                  | map(attribute='local')
+                  | list
+                )
+            fail_msg: >-
+              The temporary Rescue VLAN does not match the inventory MGMT
+              VLAN, MTU, or address.
+            quiet: true
+
+        - name: Build the selected-play peer MGMT address list
+          ansible.builtin.set_fact:
+            _hetzner_rescue_mgmt_probe_peer_ips: >-
+              {{
+                ansible_play_hosts_all
+                | reject('equalto', inventory_hostname)
+                | map('extract', hostvars)
+                | map(attribute='mgmt_network.ipv4')
+                | unique
+                | sort
+                | list
+              }}
+          changed_when: false
+
+        - name: Require every selected peer MGMT address
+          ansible.builtin.assert:
+            that:
+              - >-
+                _hetzner_rescue_mgmt_probe_peer_ips | length
+                == ansible_play_hosts_all | length - 1
+              - >-
+                mgmt_network.ipv4
+                not in _hetzner_rescue_mgmt_probe_peer_ips
+            fail_msg: >-
+              The selected-play MGMT peer address set is incomplete or
+              contains a duplicate inventory allocation.
+            quiet: true
+
+        - name: Probe every selected peer MGMT address
+          ansible.builtin.command:
+            argv:
+              - ping
+              - -n
+              - -c
+              - "3"
+              - -W
+              - "3"
+              - -I
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+              - "{{ item }}"
+          loop: "{{ _hetzner_rescue_mgmt_probe_peer_ips }}"
+          loop_control:
+            label: "{{ item }}"
+          changed_when: false
+
+        - name: Probe the inventory MGMT gateway
+          ansible.builtin.command:
+            argv:
+              - ping
+              - -n
+              - -c
+              - "3"
+              - -W
+              - "3"
+              - -I
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+              - "{{ mgmt_subnet.gateway }}"
+          changed_when: false
+
+      always:
+        - name: Remove the owned Rescue probe VLAN
+          ansible.builtin.command:
+            argv:
+              - ip
+              - link
+              - delete
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+          register: _hetzner_rescue_mgmt_probe_vlan_remove
+          changed_when: _hetzner_rescue_mgmt_probe_vlan_remove.rc == 0
+          failed_when: false
+          when:
+            - _hetzner_rescue_mgmt_probe_vlan_create is defined
+            - _hetzner_rescue_mgmt_probe_vlan_create.rc | default(1) == 0
+
+        - name: Check the probe VLAN after cleanup
+          ansible.builtin.command:
+            argv:
+              - ip
+              - link
+              - show
+              - dev
+              - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
+          register: _hetzner_rescue_mgmt_probe_vlan_after
+          changed_when: false
+          failed_when: false
+
+        - name: Require complete cleanup of owned Rescue probe state
+          ansible.builtin.assert:
+            that:
+              - >-
+                (
+                  _hetzner_rescue_mgmt_probe_vlan_create is not defined
+                  or _hetzner_rescue_mgmt_probe_vlan_create.rc
+                  | default(1) != 0
+                )
+                or _hetzner_rescue_mgmt_probe_vlan_after.rc != 0
+            fail_msg: >-
+              Cleanup did not remove all probe-owned Rescue network state.
+              Manual inspection is required before retrying.
+            quiet: true
