@@ -17,6 +17,16 @@
       run_once: true
       tags: [always]
 
+    - name: Require the HashiCorp Vault secret backend
+      ansible.builtin.assert:
+        that:
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+        fail_msg: >-
+          LUKS-header backup requires the hashicorp_vault backend after
+          verified bootstrap-secret migration.
+        quiet: true
+      tags: [always]
+
 - name: Back up LUKS headers to Vault
   hosts: ubuntu24
   gather_facts: false
@@ -116,6 +126,55 @@
               }}
           no_log: true
 
+        - name: Resolve any existing LUKS-header backup record
+          ansible.builtin.set_fact:
+            _luks_header_vault_existing_header: >-
+              {{
+                _luks_header_vault_current.secret.get(
+                  hetzner_baremetal_vault.luks_header_field,
+                  ''
+                )
+              }}
+            _luks_header_vault_existing_sha256: >-
+              {{
+                _luks_header_vault_current.secret.get(
+                  hetzner_baremetal_vault.luks_header_sha256_field,
+                  ''
+                )
+              }}
+            _luks_header_vault_existing_uuid: >-
+              {{
+                _luks_header_vault_current.secret.get(
+                  hetzner_baremetal_vault.luks_uuid_field,
+                  ''
+                )
+              }}
+          no_log: true
+
+        - name: Refuse to overwrite LUKS-header backup drift
+          ansible.builtin.assert:
+            that:
+              - >-
+                (
+                  _luks_header_vault_existing_header | length == 0
+                  and _luks_header_vault_existing_sha256 | length == 0
+                  and _luks_header_vault_existing_uuid | length == 0
+                )
+                or
+                (
+                  _luks_header_vault_existing_header
+                  == _luks_header_slurp.content
+                  and _luks_header_vault_existing_sha256
+                  == _luks_header_sha256
+                  and _luks_header_vault_existing_uuid
+                  == _luks_header_uuid.stdout | trim
+                )
+            fail_msg: >-
+              HashiCorp Vault already contains incomplete or different LUKS
+              header material. It will not be overwritten.
+            quiet: true
+          no_log: true
+
         - name: Persist the header with Vault CAS
           community.hashi_vault.vault_kv2_write:
             engine_mount_point: "{{ _luks_header_vault_mount }}"
@@ -124,6 +183,10 @@
             data: "{{ _luks_header_vault_data }}"
           delegate_to: localhost
           become: false
+          when:
+            - _luks_header_vault_existing_header | length == 0
+            - _luks_header_vault_existing_sha256 | length == 0
+            - _luks_header_vault_existing_uuid | length == 0
           no_log: true
 
         - name: Read back the persisted Vault document
@@ -137,6 +200,10 @@
         - name: Require matching persisted header metadata
           ansible.builtin.assert:
             that:
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_field
+                ] == _luks_header_slurp.content
               - >-
                 _luks_header_vault_verified.secret[
                   hetzner_baremetal_vault.luks_header_sha256_field

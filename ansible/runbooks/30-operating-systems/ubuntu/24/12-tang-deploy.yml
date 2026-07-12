@@ -25,6 +25,16 @@
       run_once: true
       tags: [always]
 
+    - name: Require the HashiCorp Vault secret backend
+      ansible.builtin.assert:
+        that:
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+        fail_msg: >-
+          Tang deployment requires the hashicorp_vault backend after verified
+          bootstrap-secret migration.
+        quiet: true
+      tags: [always]
+
 - name: Deploy and validate Tang
   hosts: wunderboxes
   gather_facts: true
@@ -64,6 +74,33 @@
       when: tang_deploy_enabled | default(false) | bool
       no_log: true
 
+    - name: Resolve any existing pinned Tang thumbprint
+      ansible.builtin.set_fact:
+        _tang_deploy_vault_thumbprint_current: >-
+          {{
+            _tang_deploy_vault_current.secret.get(
+              hetzner_baremetal_vault.tang_thumbprint_field,
+              ''
+            )
+          }}
+      when: tang_deploy_enabled | default(false) | bool
+      no_log: true
+
+    - name: Refuse to overwrite Tang trust drift
+      ansible.builtin.assert:
+        that:
+          - >-
+            _tang_deploy_vault_thumbprint_current | length == 0
+            or
+            _tang_deploy_vault_thumbprint_current
+            == tang_deploy_public_thumbprints[0]
+        fail_msg: >-
+          HashiCorp Vault already contains a different Tang thumbprint. It
+          will not be overwritten.
+        quiet: true
+      when: tang_deploy_enabled | default(false) | bool
+      no_log: true
+
     - name: Persist the pinned Tang thumbprint with Vault CAS
       community.hashi_vault.vault_kv2_write:
         engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
@@ -81,6 +118,30 @@
           }}
       delegate_to: localhost
       become: false
+      when:
+        - tang_deploy_enabled | default(false) | bool
+        - _tang_deploy_vault_thumbprint_current | length == 0
+      no_log: true
+
+    - name: Read back the pinned Tang trust document
+      community.hashi_vault.vault_kv2_get:
+        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+        path: "{{ hetzner_baremetal_vault_secret_path }}"
+      delegate_to: localhost
+      become: false
+      register: _tang_deploy_vault_verified
+      when: tang_deploy_enabled | default(false) | bool
+      no_log: true
+
+    - name: Require exact Tang thumbprint readback
+      ansible.builtin.assert:
+        that:
+          - >-
+            _tang_deploy_vault_verified.secret[
+              hetzner_baremetal_vault.tang_thumbprint_field
+            ] == tang_deploy_public_thumbprints[0]
+        fail_msg: "HashiCorp Vault Tang-thumbprint readback did not match."
+        quiet: true
       when: tang_deploy_enabled | default(false) | bool
       no_log: true
 

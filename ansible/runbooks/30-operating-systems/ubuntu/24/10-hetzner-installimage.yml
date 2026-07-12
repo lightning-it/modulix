@@ -73,25 +73,16 @@
       -o StrictHostKeyChecking=yes
 
   pre_tasks:
-    - name: Read the persisted recovery secret for installation
-      community.hashi_vault.vault_kv2_get:
-        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
-        path: "{{ hetzner_baremetal_vault_secret_path }}"
-      delegate_to: localhost
-      become: false
-      register: _hetzner_installimage_recovery_secret
-      when: hetzner_installimage_action == 'install'
+    - name: Resolve the persisted recovery secret for installation
+      ansible.builtin.include_tasks: tasks/resolve-recovery-secret.yml
+      when: hetzner_installimage_action | default('plan') == 'install'
       no_log: true
 
-    - name: Resolve the installation recovery passphrase from Vault
+    - name: Supply the resolved installation recovery passphrase
       ansible.builtin.set_fact:
         hetzner_installimage_crypt_password: >-
-          {{
-            _hetzner_installimage_recovery_secret.secret[
-              hetzner_baremetal_vault.recovery_passphrase_field
-            ]
-          }}
-      when: hetzner_installimage_action == 'install'
+          {{ _hetzner_baremetal_recovery_passphrase }}
+      when: hetzner_installimage_action | default('plan') == 'install'
       no_log: true
 
     - name: Require a valid persisted installation recovery passphrase
@@ -103,7 +94,7 @@
         fail_msg: >-
           No valid recovery passphrase was found. Run the recovery-secrets
           runbook for this host before authorizing installation.
-      when: hetzner_installimage_action == 'install'
+      when: hetzner_installimage_action | default('plan') == 'install'
       no_log: true
 
   tasks:

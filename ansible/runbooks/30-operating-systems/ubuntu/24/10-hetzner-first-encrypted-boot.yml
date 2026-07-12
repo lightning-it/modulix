@@ -23,6 +23,9 @@
           - ansible_limit is defined
           - ansible_play_hosts_all | length == 1
           - >-
+            hetzner_baremetal_secret_backend
+            in ['ansible_vault_bootstrap', 'hashicorp_vault']
+          - >-
             hetzner_first_boot_confirmation | default('')
             == 'BOOT:' ~ inventory_hostname
         fail_msg: >-
@@ -195,16 +198,14 @@
           become: false
           changed_when: false
 
-    - name: Pause for the one-time interactive encrypted-root unlock
+    - name: Pause for the operator-triggered no-output encrypted-root unlock
       ansible.builtin.pause:
         prompt: >-
-          In a second terminal, from the modulix-automation/ansible directory,
-          run: ./scripts/ansible-nav exec -- ssh -o
-          UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
-          -o StrictHostKeyChecking=yes -p
-          {{ luks_unlock_dropbear_port | int }} root@{{ inventory_hostname }}.
-          Enter the recovery passphrase from Vault through cryptroot-unlock,
-          then press Enter here.
+          The generated Dropbear key is verified and pinned. In a second
+          terminal run the dedicated 10-hetzner-bootstrap-unlock.yml command
+          from the private operator guide for this exact host. It decrypts the
+          bootstrap escrow only in memory and supplies the passphrase through
+          SSH stdin under no_log. After it reports success, press Enter here.
 
     - name: Wait for installed OpenSSH
       ansible.builtin.wait_for:

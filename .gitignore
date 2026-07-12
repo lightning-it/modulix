@@ -7,6 +7,7 @@ venv*
 collections-dev/ansible_collections/**
 !collections-dev/.gitkeep
 ansible/.vault-pass.txt
+ansible/.secrets/
 
 # AAP containerized installer archive (if stored in the repository for deployment).
 ansible/*.tar.gz

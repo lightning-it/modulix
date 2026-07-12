@@ -24,6 +24,16 @@
       run_once: true
       tags: [always]
 
+    - name: Require the HashiCorp Vault secret backend
+      ansible.builtin.assert:
+        that:
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+        fail_msg: >-
+          Encrypted-root keyslot management requires the hashicorp_vault
+          backend after verified bootstrap-secret migration.
+        quiet: true
+      tags: [always]
+
 - name: Configure encrypted-root unlock
   hosts: ubuntu24
   gather_facts: true
@@ -41,13 +51,18 @@
         fail_msg: "This runbook supports Ubuntu 24.04 only."
       tags: [always]
 
-    - name: Read the host recovery secret for Tang binding
-      community.hashi_vault.vault_kv2_get:
-        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
-        path: "{{ hetzner_baremetal_vault_secret_path }}"
-      delegate_to: localhost
-      become: false
-      register: _luks_unlock_recovery_secret
+    - name: Refuse Tang self-binding
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname != hetzner_baremetal_tang_host
+        fail_msg: >-
+          The Tang server must remain on Dropbear recovery and cannot bind its
+          own encrypted root to itself.
+        quiet: true
+      when: luks_unlock_method == 'clevis_tang'
+
+    - name: Resolve the host recovery document for Tang binding
+      ansible.builtin.include_tasks: tasks/resolve-recovery-secret.yml
       when: luks_unlock_method == 'clevis_tang'
       no_log: true
 
@@ -61,15 +76,85 @@
       when: luks_unlock_method == 'clevis_tang'
       no_log: true
 
-    - name: Resolve LUKS and Tang inputs from Vault
+    - name: Require an exact verified LUKS-header backup record
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_baremetal_recovery_document[
+              hetzner_baremetal_vault.luks_header_field
+            ] | default('', true) | length > 0
+          - >-
+            _hetzner_baremetal_recovery_document[
+              hetzner_baremetal_vault.luks_header_sha256_field
+            ] | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            _hetzner_baremetal_recovery_document[
+              hetzner_baremetal_vault.luks_header_field
+            ] | hash('sha256')
+            == _hetzner_baremetal_recovery_document[
+              hetzner_baremetal_vault.luks_header_sha256_field
+            ]
+          - >-
+            _hetzner_baremetal_recovery_document[
+              hetzner_baremetal_vault.luks_uuid_field
+            ] | default('', true) | length > 0
+          - luks_unlock_allow_luks_metadata_change | default(false) | bool
+          - luks_unlock_header_backup_confirmed | default(false) | bool
+        fail_msg: >-
+          Tang binding requires an exact, checksum-verified HashiCorp Vault
+          LUKS-header backup plus both explicit metadata-change gates.
+        quiet: true
+      when: luks_unlock_method == 'clevis_tang'
+      no_log: true
+
+    - name: Discover the installed encrypted-root source
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
+      args:
+        executable: /bin/bash
+      register: _luks_unlock_header_devices
+      changed_when: false
+      when: luks_unlock_method == 'clevis_tang'
+
+    - name: Require one installed encrypted-root source
+      ansible.builtin.assert:
+        that:
+          - _luks_unlock_header_devices.stdout_lines | length == 1
+          - _luks_unlock_header_devices.stdout_lines[0] is match('^/dev/')
+        fail_msg: "Expected exactly one resolvable crypttab source device."
+        quiet: true
+      when: luks_unlock_method == 'clevis_tang'
+
+    - name: Read the installed encrypted-root LUKS UUID
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksUUID
+          - "{{ _luks_unlock_header_devices.stdout_lines[0] }}"
+      register: _luks_unlock_installed_uuid
+      changed_when: false
+      when: luks_unlock_method == 'clevis_tang'
+
+    - name: Require the backed-up LUKS UUID to match the installed root
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_baremetal_recovery_document[
+              hetzner_baremetal_vault.luks_uuid_field
+            ] == _luks_unlock_installed_uuid.stdout | trim
+        fail_msg: >-
+          The HashiCorp Vault LUKS-header backup does not match the installed
+          encrypted-root UUID. No keyslot will be changed.
+        quiet: true
+      when: luks_unlock_method == 'clevis_tang'
+      no_log: true
+
+    - name: Resolve LUKS and Tang inputs from HashiCorp Vault
       ansible.builtin.set_fact:
         luks_unlock_existing_passphrases:
           root: >-
-            {{
-              _luks_unlock_recovery_secret.secret[
-                hetzner_baremetal_vault.recovery_passphrase_field
-              ]
-            }}
+            {{ _hetzner_baremetal_recovery_passphrase }}
         luks_unlock_clevis_tang_thumbprint: >-
           {{
             _luks_unlock_tang_secret.secret[
