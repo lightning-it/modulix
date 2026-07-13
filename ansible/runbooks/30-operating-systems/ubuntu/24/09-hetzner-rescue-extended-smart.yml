@@ -1,0 +1,442 @@
+---
+# Initiate and monitor one extended disk self-test at a time in Hetzner
+# Rescue. This runbook never mounts a disk, writes user data, retries a test
+# command, aborts a test, or changes a Robot/firewall/boot setting.
+
+- name: Validate the extended disk-test authorization and pinned Rescue trust
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+    - name: Require one exact inventory FQDN and fresh host authorization
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname in groups['hetzner_baremetal']
+          - >-
+            inventory_hostname
+            is match('^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$')
+          - hetzner_installimage_hostname == inventory_hostname
+          - >-
+            ansible_host
+            == hetzner_installimage_expected_identity.public_ipv4
+          - >-
+            ansible_host
+            is match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+          - not ansible_check_mode
+          - >-
+            hetzner_rescue_smart_extended_confirmation | default('')
+            == 'SMART_EXTENDED:' ~ inventory_hostname
+          - hetzner_installimage_expected_disks is sequence
+          - hetzner_installimage_expected_disks is not string
+          - hetzner_installimage_expected_disks | length > 0
+          - >-
+            hetzner_installimage_expected_disks
+            | map(attribute='serial') | list | unique | length
+            == hetzner_installimage_expected_disks | length
+          - >-
+            hetzner_rescue_ssh_ed25519_sha256
+            is match('^SHA256:[A-Za-z0-9+/]{43}$')
+          - ansible_private_key_file is string
+          - >-
+            ansible_private_key_file
+            ==
+            lookup('ansible.builtin.env', 'HOME')
+            ~ '/' ~ deploy_ssh_private_key_path
+        fail_msg: >-
+          Use --limit with one exact bare-metal inventory FQDN outside check
+          mode and pass the fresh confirmation
+          hetzner_rescue_smart_extended_confirmation=SMART_EXTENDED:<host>.
+          Inventory hostname, public identity, disk list, and Rescue pin must
+          all be complete and unambiguous.
+        quiet: true
+      tags: [always]
+
+    - name: Require the exact inventory disk identity schema
+      ansible.builtin.assert:
+        that:
+          - item is mapping
+          - item.serial is string
+          - item.serial | trim | length > 0
+          - item.serial == item.serial | trim
+          - item.model is string
+          - item.model | trim | length > 0
+          - item.model == item.model | trim
+          - item.size_bytes | type_debug == 'int'
+          - item.size_bytes | int > 0
+          - item.rotational is boolean
+          - item.purpose in ['system', 'preserve']
+        fail_msg: >-
+          Every expected disk must declare a non-empty exact serial and model,
+          a positive integer size_bytes, boolean rotational state, and an
+          approved purpose.
+        quiet: true
+      loop: "{{ hetzner_installimage_expected_disks }}"
+      loop_control:
+        label: "{{ item.serial | default('invalid-disk') }}"
+      tags: [always]
+
+    - name: Ensure the protected Rescue known-hosts directory exists
+      ansible.builtin.file:
+        path: "{{ hetzner_baremetal_rescue_known_hosts_path | dirname }}"
+        state: directory
+        mode: '0700'
+      tags: [always]
+
+    - name: Inspect any existing Rescue known-hosts path
+      ansible.builtin.stat:
+        path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+        follow: false
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: _hetzner_smart_known_hosts_before
+      changed_when: false
+      tags: [always]
+
+    - name: Refuse an unsafe existing Rescue known-hosts path
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (_hetzner_smart_known_hosts_before.stat.exists | default(false))
+            or
+            (
+              _hetzner_smart_known_hosts_before.stat.isreg | default(false)
+              and not (
+                _hetzner_smart_known_hosts_before.stat.islnk | default(false)
+              )
+            )
+        fail_msg: >-
+          The Rescue known-hosts path exists but is not a regular non-symlink
+          file.
+        quiet: true
+      tags: [always]
+
+    - name: Ensure the Rescue known-hosts file is owner-only
+      ansible.builtin.file:
+        path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+        state: touch
+        mode: '0600'
+        access_time: preserve
+        modification_time: preserve
+      tags: [always]
+
+    - name: Scan the live Rescue Ed25519 host key over IPv4
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - '-4'
+          - -T
+          - '10'
+          - -t
+          - ed25519
+          - "{{ ansible_host }}"
+      register: _hetzner_smart_live_keyscan
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Select the sole exact live Ed25519 host-key line
+      ansible.builtin.set_fact:
+        _hetzner_smart_live_key_lines: >-
+          {{
+            _hetzner_smart_live_keyscan.stdout_lines
+            | select(
+                'match',
+                '^' ~ (ansible_host | regex_escape)
+                ~ ' ssh-ed25519 [A-Za-z0-9+/=]+$'
+              )
+            | list
+          }}
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Require exactly one live Ed25519 key for the target address
+      ansible.builtin.assert:
+        that:
+          - _hetzner_smart_live_keyscan.rc == 0
+          - _hetzner_smart_live_key_lines | length == 1
+          - _hetzner_smart_live_key_lines[0].split() | length == 3
+          - _hetzner_smart_live_key_lines[0].split()[0] == ansible_host
+          - _hetzner_smart_live_key_lines[0].split()[1] == 'ssh-ed25519'
+        fail_msg: >-
+          The target public address did not return exactly one plain Ed25519
+          host key.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+    - name: Derive the live Rescue key SHA-256 fingerprint
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -E
+          - sha256
+          - -lf
+          - '-'
+        stdin: "{{ _hetzner_smart_live_key_lines[0] }}\n"
+        stdin_add_newline: false
+      register: _hetzner_smart_live_fingerprint
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Require the live key to equal the inventory Rescue fingerprint
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_smart_live_fingerprint.stdout
+            | regex_findall('SHA256:[A-Za-z0-9+/]{43}')
+            == [hetzner_rescue_ssh_ed25519_sha256]
+        fail_msg: >-
+          The live Rescue key does not equal the inventory pin.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+    - name: Pin only the independently verified Rescue Ed25519 key
+      ansible.builtin.known_hosts:
+        path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+        name: "{{ ansible_host }}"
+        key: >-
+          {{ ansible_host }}
+          {{ _hetzner_smart_live_key_lines[0].split(' ', 1)[1] }}
+        state: present
+      no_log: true
+      tags: [always]
+
+    - name: Inspect the protected Rescue known-hosts file
+      ansible.builtin.stat:
+        path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+        follow: false
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: _hetzner_smart_known_hosts_stat
+      changed_when: false
+      tags: [always]
+
+    - name: Require a protected regular Rescue known-hosts file
+      ansible.builtin.assert:
+        that:
+          - _hetzner_smart_known_hosts_stat.stat.exists | default(false)
+          - _hetzner_smart_known_hosts_stat.stat.isreg | default(false)
+          - not (_hetzner_smart_known_hosts_stat.stat.islnk | default(false))
+          - _hetzner_smart_known_hosts_stat.stat.mode | default('') == '0600'
+          - _hetzner_smart_known_hosts_stat.stat.size | default(0) | int > 0
+          - _hetzner_smart_known_hosts_stat.stat.size | int <= 1048576
+        fail_msg: >-
+          The verified Rescue known-hosts file is absent or unsafe.
+        quiet: true
+      tags: [always]
+
+- name: Run sequential inventory-owned extended disk self-tests in Rescue
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+    _hetzner_smart_observe_interval_seconds: 5
+    _hetzner_smart_observe_timeout_seconds: 60
+    _hetzner_smart_poll_interval_seconds: 30
+    _hetzner_smart_completion_grace_seconds: 900
+    _hetzner_smart_max_estimated_minutes: 1440
+
+  pre_tasks:
+    - name: Require bounded self-test monitoring policy
+      ansible.builtin.assert:
+        that:
+          - _hetzner_smart_observe_interval_seconds | type_debug == 'int'
+          - _hetzner_smart_observe_interval_seconds > 0
+          - _hetzner_smart_observe_timeout_seconds | type_debug == 'int'
+          - >-
+            _hetzner_smart_observe_timeout_seconds
+            >= _hetzner_smart_observe_interval_seconds
+          - _hetzner_smart_poll_interval_seconds | type_debug == 'int'
+          - _hetzner_smart_poll_interval_seconds > 0
+          - _hetzner_smart_completion_grace_seconds | type_debug == 'int'
+          - _hetzner_smart_completion_grace_seconds >= 60
+          - _hetzner_smart_max_estimated_minutes | type_debug == 'int'
+          - _hetzner_smart_max_estimated_minutes > 0
+          - _hetzner_smart_max_estimated_minutes <= 1440
+          - ansible_user == 'root'
+          - not (ansible_become | bool)
+          - >-
+            hetzner_rescue_smart_target_serials is not defined
+            or
+            (
+              hetzner_rescue_smart_target_serials is sequence
+              and hetzner_rescue_smart_target_serials is not string
+              and hetzner_rescue_smart_target_serials | length > 0
+              and hetzner_rescue_smart_target_serials | unique | length
+              == hetzner_rescue_smart_target_serials | length
+              and
+              hetzner_rescue_smart_target_serials
+              | difference(
+                  hetzner_installimage_expected_disks
+                  | map(attribute='serial') | list
+                )
+              | length == 0
+            )
+        fail_msg: >-
+          The runbook's bounded observation, polling, grace, or maximum
+          duration policy is invalid, or the connection is not direct Rescue
+          root.
+        quiet: true
+      tags: [always]
+
+    - name: Inspect the inventory-declared Rescue installimage executable
+      ansible.builtin.stat:
+        path: "{{ hetzner_installimage_binary }}"
+        follow: false
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: _hetzner_smart_installimage_stat
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Require the target to remain in Hetzner Rescue
+      ansible.builtin.assert:
+        that:
+          - _hetzner_smart_installimage_stat.stat.exists | default(false)
+          - _hetzner_smart_installimage_stat.stat.isreg | default(false)
+          - not (_hetzner_smart_installimage_stat.stat.islnk | default(false))
+          - _hetzner_smart_installimage_stat.stat.uid | default(-1) | int == 0
+          - _hetzner_smart_installimage_stat.stat.executable | default(false)
+        fail_msg: >-
+          The pinned endpoint is not the expected Hetzner Rescue environment.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+    - name: Discover all physical Rescue disks with immutable identity fields
+      ansible.builtin.command:
+        argv:
+          - lsblk
+          - --json
+          - --bytes
+          - --nodeps
+          - --output
+          - PATH,KNAME,SERIAL,MODEL,SIZE,ROTA,TYPE,TRAN
+      register: _hetzner_smart_lsblk
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Decode physical Rescue disk inventory
+      ansible.builtin.set_fact:
+        _hetzner_smart_rescue_disks: >-
+          {{
+            (_hetzner_smart_lsblk.stdout | from_json).blockdevices
+            | selectattr('type', 'equalto', 'disk')
+            | list
+          }}
+        _hetzner_smart_tested_nvme_controllers: []
+        _hetzner_smart_tested_nvme_subsystems: []
+      changed_when: false
+      no_log: true
+      tags: [always]
+
+    - name: Require exact physical-disk serial-set equality
+      vars:
+        _hetzner_smart_actual_serials: >-
+          {{ _hetzner_smart_rescue_disks | map(attribute='serial') | list }}
+        _hetzner_smart_expected_serials: >-
+          {{
+            hetzner_installimage_expected_disks
+            | map(attribute='serial') | list
+          }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_smart_actual_serials
+            | select('string') | reject('equalto', '') | list | length
+            == _hetzner_smart_rescue_disks | length
+          - _hetzner_smart_actual_serials | unique | length
+            == _hetzner_smart_actual_serials | length
+          - _hetzner_smart_actual_serials | difference(_hetzner_smart_expected_serials)
+            | length == 0
+          - _hetzner_smart_expected_serials | difference(_hetzner_smart_actual_serials)
+            | length == 0
+          - _hetzner_smart_actual_serials | length
+            == _hetzner_smart_expected_serials | length
+        fail_msg: >-
+          Rescue physical disks do not exactly equal the inventory serial set;
+          no self-test was initiated.
+        quiet: true
+      no_log: true
+      tags: [always]
+
+    - name: Revalidate serial model size rotational state and transport
+      vars:
+        _hetzner_smart_matches: >-
+          {{
+            _hetzner_smart_rescue_disks
+            | selectattr('serial', 'equalto', item.serial)
+            | list
+          }}
+      ansible.builtin.assert:
+        that:
+          - _hetzner_smart_matches | length == 1
+          - _hetzner_smart_matches[0].path is match('^/dev/[A-Za-z0-9._+-]+$')
+          - _hetzner_smart_matches[0].kname is match('^[A-Za-z0-9._+-]+$')
+          - _hetzner_smart_matches[0].serial == item.serial
+          - _hetzner_smart_matches[0].model == item.model
+          - _hetzner_smart_matches[0].size | int == item.size_bytes
+          - (_hetzner_smart_matches[0].rota | bool) == item.rotational
+          - _hetzner_smart_matches[0].tran in ['sata', 'nvme']
+        fail_msg: >-
+          Disk identity or supported ATA/NVMe transport drifted from inventory;
+          no self-test was initiated.
+        quiet: true
+      loop: "{{ hetzner_installimage_expected_disks }}"
+      loop_control:
+        label: "{{ item.serial }}"
+      no_log: true
+      tags: [always]
+
+  tasks:
+    - name: Initiate monitor and verify each inventory disk sequentially
+      ansible.builtin.include_tasks:
+        file: tasks/hetzner-rescue-extended-smart-disk.yml
+      loop: >-
+        {{
+          hetzner_installimage_expected_disks
+          if hetzner_rescue_smart_target_serials is not defined
+          else
+          hetzner_installimage_expected_disks
+          | selectattr(
+              'serial',
+              'in',
+              hetzner_rescue_smart_target_serials
+            )
+          | list
+        }}
+      loop_control:
+        loop_var: _hetzner_smart_expected_disk
+        label: "{{ _hetzner_smart_expected_disk.serial }}"

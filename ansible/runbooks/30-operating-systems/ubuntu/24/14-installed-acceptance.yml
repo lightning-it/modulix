@@ -383,7 +383,7 @@
         fail_msg: >-
           Inventory produced duplicate or self-referential MGMT probes.
 
-    - name: Probe the inventory gateway and selected management peers
+    - name: Probe the declared gateway and selected management peers
       ansible.builtin.command:
         argv:
           - ping

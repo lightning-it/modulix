@@ -158,7 +158,7 @@
         test "${normalized_robot_keys}" = "${LIT_EXPECTED_DEPLOY_KEYS}"
       args:
         executable: /bin/bash
-      delegate_to: "{{ item }}"
+      delegate_to: "{{ lookup('vars', ansible_loop_var) }}"
       become: false
       vars:
         ansible_user: root

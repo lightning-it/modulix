@@ -1,0 +1,663 @@
+---
+- name: Resolve the one already-revalidated disk device
+  ansible.builtin.set_fact:
+    _hetzner_smart_disk: >-
+      {{
+        _hetzner_smart_rescue_disks
+        | selectattr('serial', 'equalto', _hetzner_smart_expected_disk.serial)
+        | first
+      }}
+  changed_when: false
+  no_log: true
+
+- name: Run and prove one ATA extended self-test
+  when: _hetzner_smart_disk.tran == 'sata'
+  block:
+    - name: Read exact ATA identity capability and polling metadata
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -i
+          - -c
+          - -j
+          - "{{ _hetzner_smart_disk.path }}"
+      register: _hetzner_ata_capability_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode ATA identity capability and polling metadata
+      ansible.builtin.set_fact:
+        _hetzner_ata_capability: >-
+          {{ _hetzner_ata_capability_raw.stdout | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Require exact ATA identity and extended-test capability
+      ansible.builtin.assert:
+        that:
+          - _hetzner_ata_capability is mapping
+          - _hetzner_ata_capability.device is mapping
+          - _hetzner_ata_capability.device.protocol == 'ATA'
+          - >-
+            _hetzner_ata_capability.serial_number
+            == _hetzner_smart_expected_disk.serial
+          - >-
+            _hetzner_ata_capability.model_name
+            == _hetzner_smart_expected_disk.model
+          - _hetzner_ata_capability.user_capacity is mapping
+          - >-
+            _hetzner_ata_capability.user_capacity.bytes | type_debug == 'int'
+          - >-
+            _hetzner_ata_capability.user_capacity.bytes
+            == _hetzner_smart_expected_disk.size_bytes
+          - _hetzner_ata_capability.smart_support is mapping
+          - _hetzner_ata_capability.smart_support.available is true
+          - _hetzner_ata_capability.smart_support.enabled is true
+          - _hetzner_ata_capability.ata_smart_data is mapping
+          - _hetzner_ata_capability.ata_smart_data.capabilities is mapping
+          - >-
+            _hetzner_ata_capability.ata_smart_data.capabilities.self_tests_supported
+            is true
+          - _hetzner_ata_capability.ata_smart_data.self_test is mapping
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.polling_minutes
+            is mapping
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.polling_minutes.extended
+            | type_debug == 'int'
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.polling_minutes.extended
+            > 0
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.polling_minutes.extended
+            <= _hetzner_smart_max_estimated_minutes
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.status is mapping
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.status.value
+            | type_debug == 'int'
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.status.value >= 0
+          - >-
+            _hetzner_ata_capability.ata_smart_data.self_test.status.value < 240
+        fail_msg: >-
+          ATA identity/capability metadata is incomplete, drifted, unsupported,
+          outside the duration ceiling, or reports a test already in progress.
+        quiet: true
+      no_log: true
+
+    - name: Capture the ATA self-test log before initiation
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -l
+          - selftest
+          - -j
+          - "{{ _hetzner_smart_disk.path }}"
+      register: _hetzner_ata_pre_log_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode the ATA pre-test log and bounded timeout
+      ansible.builtin.set_fact:
+        _hetzner_ata_pre_log: >-
+          {{ _hetzner_ata_pre_log_raw.stdout | from_json }}
+        _hetzner_ata_timeout_seconds: >-
+          {{
+            (
+              _hetzner_ata_capability.ata_smart_data.self_test.polling_minutes.extended
+              * 60
+            )
+            + _hetzner_smart_completion_grace_seconds
+          }}
+      changed_when: false
+      no_log: true
+
+    - name: Require an exact ATA standard pre-test log shape
+      ansible.builtin.assert:
+        that:
+          - _hetzner_ata_pre_log is mapping
+          - _hetzner_ata_pre_log.ata_smart_self_test_log is mapping
+          - _hetzner_ata_pre_log.ata_smart_self_test_log.standard is mapping
+          - >-
+            _hetzner_ata_pre_log.ata_smart_self_test_log.standard.table
+            is sequence
+          - >-
+            _hetzner_ata_pre_log.ata_smart_self_test_log.standard.table
+            is not string
+        fail_msg: >-
+          ATA pre-test self-test log is missing its exact standard table.
+        quiet: true
+      no_log: true
+
+    - name: Initiate the ATA extended self-test exactly once
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -t
+          - long
+          - "{{ _hetzner_smart_disk.path }}"
+      register: _hetzner_ata_start
+      changed_when: true
+      no_log: true
+
+    - name: Observe the initiated ATA test in progress
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -c
+          - -j
+          - "{{ _hetzner_smart_disk.path }}"
+      register: _hetzner_ata_observe
+      changed_when: false
+      failed_when: >-
+        _hetzner_ata_observe.rc != 0
+        or
+        (_hetzner_ata_observe.stdout | from_json).ata_smart_data.self_test.status.value
+        | type_debug != 'int'
+        or
+        (_hetzner_ata_observe.stdout | from_json).ata_smart_data.self_test.status.value
+        < 0
+        or
+        (_hetzner_ata_observe.stdout | from_json).ata_smart_data.self_test.status.value
+        > 255
+      until: >-
+        (_hetzner_ata_observe.stdout | from_json).ata_smart_data.self_test.status.value
+        >= 240
+      retries: >-
+        {{
+          (
+            _hetzner_smart_observe_timeout_seconds
+            // _hetzner_smart_observe_interval_seconds
+          ) + 1
+        }}
+      delay: "{{ _hetzner_smart_observe_interval_seconds }}"
+      no_log: true
+
+    - name: Poll the ATA test to an idle state within its declared bound
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -c
+          - -j
+          - "{{ _hetzner_smart_disk.path }}"
+      register: _hetzner_ata_poll
+      changed_when: false
+      failed_when: >-
+        _hetzner_ata_poll.rc != 0
+        or
+        (_hetzner_ata_poll.stdout | from_json).ata_smart_data.self_test.status.value
+        | type_debug != 'int'
+        or
+        (_hetzner_ata_poll.stdout | from_json).ata_smart_data.self_test.status.value
+        < 0
+        or
+        (_hetzner_ata_poll.stdout | from_json).ata_smart_data.self_test.status.value
+        > 255
+      until: >-
+        (_hetzner_ata_poll.stdout | from_json).ata_smart_data.self_test.status.value
+        < 240
+      retries: >-
+        {{
+          (
+            _hetzner_ata_timeout_seconds | int
+            // _hetzner_smart_poll_interval_seconds
+          ) + 1
+        }}
+      delay: "{{ _hetzner_smart_poll_interval_seconds }}"
+      no_log: true
+
+    - name: Read the completed ATA self-test log
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -l
+          - selftest
+          - -j
+          - "{{ _hetzner_smart_disk.path }}"
+      register: _hetzner_ata_final_log_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode the completed ATA self-test log
+      ansible.builtin.set_fact:
+        _hetzner_ata_final_log: >-
+          {{ _hetzner_ata_final_log_raw.stdout | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Require ATA log advancement and exact extended success
+      vars:
+        _hetzner_ata_pre_table: >-
+          {{ _hetzner_ata_pre_log.ata_smart_self_test_log.standard.table }}
+        _hetzner_ata_final_table: >-
+          {{ _hetzner_ata_final_log.ata_smart_self_test_log.standard.table }}
+      ansible.builtin.assert:
+        that:
+          - _hetzner_ata_final_log is mapping
+          - _hetzner_ata_final_log.ata_smart_self_test_log is mapping
+          - _hetzner_ata_final_log.ata_smart_self_test_log.standard is mapping
+          - _hetzner_ata_final_table is sequence
+          - _hetzner_ata_final_table is not string
+          - _hetzner_ata_final_table | length > 0
+          - _hetzner_ata_final_table != _hetzner_ata_pre_table
+          - >-
+            _hetzner_ata_pre_table | length == 0
+            or _hetzner_ata_final_table[0] != _hetzner_ata_pre_table[0]
+          - _hetzner_ata_final_table[0] is mapping
+          - _hetzner_ata_final_table[0].type is mapping
+          - _hetzner_ata_final_table[0].type.value | type_debug == 'int'
+          - _hetzner_ata_final_table[0].type.value == 2
+          - _hetzner_ata_final_table[0].status is mapping
+          - _hetzner_ata_final_table[0].status.value | type_debug == 'int'
+          - _hetzner_ata_final_table[0].status.value == 0
+          - _hetzner_ata_final_table[0].status.passed is true
+        fail_msg: >-
+          ATA self-test log did not advance to a fresh Extended offline test
+          completed without error. No abort or retry was attempted.
+        quiet: true
+      no_log: true
+
+    - name: Report the proven ATA extended-test completion
+      ansible.builtin.debug:
+        msg: >-
+          Fresh ATA extended self-test completed successfully for inventory
+          disk {{ _hetzner_smart_expected_disk.serial }} on
+          {{ inventory_hostname }}.
+
+- name: Run and prove one NVMe extended device self-test
+  when: _hetzner_smart_disk.tran == 'nvme'
+  block:
+    - name: Resolve the NVMe namespace sysfs device
+      ansible.builtin.command:
+        argv:
+          - readlink
+          - -f
+          - >-
+            /sys/class/block/{{ _hetzner_smart_disk.kname }}/device
+      register: _hetzner_nvme_namespace_sysfs
+      changed_when: false
+      no_log: true
+
+    - name: Derive the exact parent NVMe controller name
+      ansible.builtin.set_fact:
+        _hetzner_nvme_controller_name: >-
+          {{ _hetzner_nvme_namespace_sysfs.stdout | basename }}
+        _hetzner_nvme_controller_device: >-
+          /dev/{{ _hetzner_nvme_namespace_sysfs.stdout | basename }}
+      changed_when: false
+      no_log: true
+
+    - name: Inspect the mapped NVMe controller character device
+      ansible.builtin.stat:
+        path: "{{ _hetzner_nvme_controller_device }}"
+        follow: false
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: _hetzner_nvme_controller_stat
+      changed_when: false
+      no_log: true
+
+    - name: Require strict namespace to controller mapping
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_nvme_namespace_sysfs.stdout
+            is match('^/sys/devices/.*/nvme/nvme[0-9]+$')
+          - _hetzner_nvme_controller_name is match('^nvme[0-9]+$')
+          - >-
+            _hetzner_smart_disk.kname
+            is match('^' ~ _hetzner_nvme_controller_name ~ 'n[0-9]+$')
+          - _hetzner_nvme_controller_stat.stat.exists | default(false)
+          - _hetzner_nvme_controller_stat.stat.ischr | default(false)
+          - >-
+            _hetzner_nvme_controller_name
+            not in _hetzner_smart_tested_nvme_controllers
+        fail_msg: >-
+          NVMe namespace/controller mapping is ambiguous, unsafe, or would
+          repeat a controller-wide all-namespace test.
+        quiet: true
+      no_log: true
+
+    - name: Read exact NVMe controller identity capability and EDSTT
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - id-ctrl
+          - "{{ _hetzner_nvme_controller_device }}"
+          - --output-format=json
+      register: _hetzner_nvme_id_ctrl_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode NVMe controller identity capability and EDSTT
+      ansible.builtin.set_fact:
+        _hetzner_nvme_id_ctrl: >-
+          {{ _hetzner_nvme_id_ctrl_raw.stdout | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Require exact NVMe serial model OACS EDSTT and subsystem identity
+      ansible.builtin.assert:
+        that:
+          - _hetzner_nvme_id_ctrl is mapping
+          - _hetzner_nvme_id_ctrl.sn is string
+          - >-
+            _hetzner_nvme_id_ctrl.sn | trim
+            == _hetzner_smart_expected_disk.serial
+          - _hetzner_nvme_id_ctrl.mn is string
+          - >-
+            _hetzner_nvme_id_ctrl.mn | trim
+            == _hetzner_smart_expected_disk.model
+          - _hetzner_nvme_id_ctrl.oacs | type_debug == 'int'
+          - _hetzner_nvme_id_ctrl.oacs >= 0
+          - _hetzner_nvme_id_ctrl.oacs <= 65535
+          - ((_hetzner_nvme_id_ctrl.oacs // 16) % 2) == 1
+          - _hetzner_nvme_id_ctrl.edstt | type_debug == 'int'
+          - _hetzner_nvme_id_ctrl.edstt > 0
+          - >-
+            _hetzner_nvme_id_ctrl.edstt
+            <= _hetzner_smart_max_estimated_minutes
+          - _hetzner_nvme_id_ctrl.subnqn is string
+          - _hetzner_nvme_id_ctrl.subnqn | trim | length > 0
+          - >-
+            _hetzner_nvme_id_ctrl.subnqn
+            not in _hetzner_smart_tested_nvme_subsystems
+        fail_msg: >-
+          NVMe serial/model identity drifted, OACS bit 4 is not exactly set,
+          EDSTT is invalid/outside the duration ceiling, or this subsystem was
+          already tested in this run.
+        quiet: true
+      no_log: true
+
+    - name: Capture the exact NVMe self-test log before initiation
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - self-test-log
+          - "{{ _hetzner_nvme_controller_device }}"
+          - --dst-entries=20
+          - --output-format=json
+      register: _hetzner_nvme_pre_log_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode the NVMe pre-test log and EDSTT-derived timeout
+      ansible.builtin.set_fact:
+        _hetzner_nvme_pre_log: >-
+          {{ _hetzner_nvme_pre_log_raw.stdout | from_json }}
+        _hetzner_nvme_timeout_seconds: >-
+          {{
+            (_hetzner_nvme_id_ctrl.edstt * 60)
+            + _hetzner_smart_completion_grace_seconds
+          }}
+      changed_when: false
+      no_log: true
+
+    - name: Require the exact idle NVMe pre-test log shape
+      vars:
+        _hetzner_nvme_log_fields:
+          - Current Device Self-Test Operation
+          - Current Device Self-Test Completion
+          - List of Valid Reports
+      ansible.builtin.assert:
+        that:
+          - _hetzner_nvme_pre_log is mapping
+          - >-
+            _hetzner_nvme_pre_log.keys() | list | sort
+            == _hetzner_nvme_log_fields | sort
+          - >-
+            _hetzner_nvme_pre_log['Current Device Self-Test Operation']
+            | type_debug == 'int'
+          - >-
+            _hetzner_nvme_pre_log['Current Device Self-Test Operation']
+            in [0, 2]
+          - >-
+            _hetzner_nvme_pre_log['Current Device Self-Test Completion']
+            | type_debug == 'int'
+          - >-
+            _hetzner_nvme_pre_log['Current Device Self-Test Completion'] >= 0
+          - >-
+            _hetzner_nvme_pre_log['Current Device Self-Test Completion'] <= 100
+          - >-
+            _hetzner_nvme_pre_log['Current Device Self-Test Operation'] == 2
+            or
+            _hetzner_nvme_pre_log['Current Device Self-Test Completion'] == 0
+          - >-
+            _hetzner_nvme_pre_log['List of Valid Reports'] is sequence
+          - >-
+            _hetzner_nvme_pre_log['List of Valid Reports'] is not string
+          - >-
+            _hetzner_nvme_pre_log['List of Valid Reports'] | length == 20
+        fail_msg: >-
+          NVMe pre-test log is not the exact supported JSON shape or a device
+          self-test operation is already active.
+        quiet: true
+      no_log: true
+
+    - name: Reserve the unique NVMe controller and subsystem for this run
+      ansible.builtin.set_fact:
+        _hetzner_smart_tested_nvme_controllers: >-
+          {{
+            _hetzner_smart_tested_nvme_controllers
+            + [_hetzner_nvme_controller_name]
+          }}
+        _hetzner_smart_tested_nvme_subsystems: >-
+          {{
+            _hetzner_smart_tested_nvme_subsystems
+            + [_hetzner_nvme_id_ctrl.subnqn]
+          }}
+      changed_when: false
+      no_log: true
+
+    - name: Initiate the NVMe extended all-namespace self-test exactly once
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - device-self-test
+          - "{{ _hetzner_nvme_controller_device }}"
+          - --namespace-id=0xffffffff
+          - --self-test-code=2
+      register: _hetzner_nvme_start
+      changed_when: true
+      no_log: true
+      when: >-
+        _hetzner_nvme_pre_log['Current Device Self-Test Operation'] == 0
+
+    - name: Observe NVMe current operation code 2 after initiation
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - self-test-log
+          - "{{ _hetzner_nvme_controller_device }}"
+          - --dst-entries=20
+          - --output-format=json
+      register: _hetzner_nvme_observe
+      changed_when: false
+      failed_when: false
+      until: >-
+        _hetzner_nvme_observe.rc == 0
+        and
+        (_hetzner_nvme_observe.stdout | from_json).keys() | list | sort
+        == _hetzner_nvme_pre_log.keys() | list | sort
+        and
+        (_hetzner_nvme_observe.stdout | from_json)['Current Device Self-Test Operation']
+        == 2
+        and
+        (_hetzner_nvme_observe.stdout | from_json)['Current Device Self-Test Completion']
+        | type_debug == 'int'
+        and
+        (_hetzner_nvme_observe.stdout | from_json)['Current Device Self-Test Completion']
+        >= 0
+        and
+        (_hetzner_nvme_observe.stdout | from_json)['Current Device Self-Test Completion']
+        <= 100
+      retries: >-
+        {{
+          (
+            _hetzner_smart_observe_timeout_seconds
+            // _hetzner_smart_observe_interval_seconds
+          ) + 1
+        }}
+      delay: "{{ _hetzner_smart_observe_interval_seconds }}"
+      no_log: true
+
+    - name: Poll NVMe operation 2 to idle within EDSTT plus grace
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - self-test-log
+          - "{{ _hetzner_nvme_controller_device }}"
+          - --dst-entries=20
+          - --output-format=json
+      register: _hetzner_nvme_poll
+      changed_when: false
+      failed_when: false
+      until: >-
+        _hetzner_nvme_poll.rc == 0
+        and
+        (_hetzner_nvme_poll.stdout | from_json).keys() | list | sort
+        == _hetzner_nvme_pre_log.keys() | list | sort
+        and
+        (_hetzner_nvme_poll.stdout | from_json)['Current Device Self-Test Operation']
+        == 0
+        and
+        (_hetzner_nvme_poll.stdout | from_json)['Current Device Self-Test Completion']
+        | type_debug == 'int'
+        and
+        (_hetzner_nvme_poll.stdout | from_json)['Current Device Self-Test Completion']
+        == 0
+      retries: >-
+        {{
+          (
+            _hetzner_nvme_timeout_seconds | int
+            // _hetzner_smart_poll_interval_seconds
+          ) + 1
+        }}
+      delay: "{{ _hetzner_smart_poll_interval_seconds }}"
+      no_log: true
+
+    - name: Read the completed NVMe self-test log
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - self-test-log
+          - "{{ _hetzner_nvme_controller_device }}"
+          - --dst-entries=20
+          - --output-format=json
+      register: _hetzner_nvme_final_log_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode the completed NVMe self-test log
+      ansible.builtin.set_fact:
+        _hetzner_nvme_final_log: >-
+          {{ _hetzner_nvme_final_log_raw.stdout | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Require NVMe log advancement and exact code 2 result 0
+      vars:
+        _hetzner_nvme_pre_reports: >-
+          {{ _hetzner_nvme_pre_log['List of Valid Reports'] }}
+        _hetzner_nvme_final_reports: >-
+          {{ _hetzner_nvme_final_log['List of Valid Reports'] }}
+        _hetzner_nvme_required_success_fields:
+          - Power on hours
+          - Segment number
+          - Self test code
+          - Self test result
+          - Valid Diagnostic Information
+        _hetzner_nvme_allowed_success_fields:
+          - Failing LBA
+          - Namespace Identifier
+          - Power on hours
+          - Segment number
+          - Self test code
+          - Self test result
+          - Status Code
+          - Status Code Type
+          - Valid Diagnostic Information
+          - Vendor Specific
+      ansible.builtin.assert:
+        that:
+          - _hetzner_nvme_final_log is mapping
+          - >-
+            _hetzner_nvme_final_log.keys() | list | sort
+            == _hetzner_nvme_pre_log.keys() | list | sort
+          - >-
+            _hetzner_nvme_final_log['Current Device Self-Test Operation'] == 0
+          - >-
+            _hetzner_nvme_final_log['Current Device Self-Test Completion'] == 0
+          - _hetzner_nvme_final_reports is sequence
+          - _hetzner_nvme_final_reports is not string
+          - _hetzner_nvme_final_reports | length == 20
+          - _hetzner_nvme_final_reports != _hetzner_nvme_pre_reports
+          - >-
+            _hetzner_nvme_final_reports[0]
+            != _hetzner_nvme_pre_reports[0]
+          - >-
+            _hetzner_nvme_final_reports[1]
+            == _hetzner_nvme_pre_reports[0]
+          - _hetzner_nvme_final_reports[0] is mapping
+          - >-
+            _hetzner_nvme_required_success_fields
+            | difference(_hetzner_nvme_final_reports[0].keys() | list)
+            | length == 0
+          - >-
+            _hetzner_nvme_final_reports[0].keys() | list
+            | difference(_hetzner_nvme_allowed_success_fields)
+            | length == 0
+          - >-
+            _hetzner_nvme_final_reports[0]['Self test code']
+            | type_debug == 'int'
+          - _hetzner_nvme_final_reports[0]['Self test code'] == 2
+          - >-
+            _hetzner_nvme_final_reports[0]['Self test result']
+            | type_debug == 'int'
+          - _hetzner_nvme_final_reports[0]['Self test result'] == 0
+          - >-
+            _hetzner_nvme_final_reports[0][
+              'Valid Diagnostic Information'
+            ] | type_debug == 'int'
+          - >-
+            _hetzner_nvme_final_reports[0][
+              'Valid Diagnostic Information'
+            ] >= 0
+          - >-
+            _hetzner_nvme_final_reports[0][
+              'Valid Diagnostic Information'
+            ] <= 15
+          - >-
+            _hetzner_nvme_final_reports[0][
+              'Valid Diagnostic Information'
+            ]
+            not in [1, 3, 5, 7, 9, 11, 13, 15]
+            or
+            _hetzner_nvme_final_reports[0]['Namespace Identifier']
+            | type_debug == 'int'
+          - >-
+            (
+              _hetzner_nvme_final_reports[0][
+                'Valid Diagnostic Information'
+              ]
+              in [1, 3, 5, 7, 9, 11, 13, 15]
+            )
+            ==
+            (
+              'Namespace Identifier'
+              in _hetzner_nvme_final_reports[0]
+            )
+        fail_msg: >-
+          NVMe self-test log did not advance to a fresh extended code 2,
+          successful result 0 record. No abort or retry was attempted.
+        quiet: true
+      no_log: true
+
+    - name: Report the proven NVMe extended-test completion
+      ansible.builtin.debug:
+        msg: >-
+          Fresh NVMe extended device self-test completed successfully for
+          inventory disk {{ _hetzner_smart_expected_disk.serial }} on
+          {{ inventory_hostname }}.

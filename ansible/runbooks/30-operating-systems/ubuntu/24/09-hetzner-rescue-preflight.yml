@@ -70,6 +70,11 @@
             hetzner_baremetal_robot_firewall_extra_incoming_rules
             | type_debug == 'list'
           - >-
+            (
+              hetzner_baremetal_robot_firewall.common_incoming_rules
+              + hetzner_baremetal_robot_firewall_extra_incoming_rules
+            ) | length <= 10
+          - >-
             hetzner_baremetal_robot_firewall.allow_hetzner_services is boolean
           - >-
             hetzner_baremetal_robot_firewall.outgoing_policy
@@ -96,7 +101,12 @@
           - mgmt_network.vlan_interface | string | trim | length > 0
           - mgmt_subnet.prefix_length | int > 0
           - mgmt_subnet.prefix_length | int <= 32
-          - mgmt_subnet.gateway | string | trim | length > 0
+          - >-
+            mgmt_subnet.gateway is none
+            or (
+              mgmt_subnet.gateway is string
+              and mgmt_subnet.gateway | trim | length > 0
+            )
           - mgmt_transport.provider == 'hetzner_robot_vswitch'
           - mgmt_transport.deployment_state == 'active'
           - mgmt_transport.vlan_id | int == 4091
@@ -127,6 +137,7 @@
           - protocol
           - source
           - source_port
+          - destination
           - destination_port
           - tcp_flags
           - comment
@@ -172,6 +183,15 @@
           - >-
             item is mapping
             and (
+              item.destination is not defined
+              or (
+                item.get('destination') is none
+                and item.get('protocol') == 'icmp'
+              )
+            )
+          - >-
+            item is mapping
+            and (
               item.get('destination_port') is none
               or (
                 item.get('destination_port') is string
@@ -198,6 +218,85 @@
         }}
       loop_control:
         label: "{{ item.comment | default('invalid-rule') }}"
+      when: hetzner_baremetal_robot_firewall.enabled | bool
+
+    - name: Require Robot access to the declared Dropbear listen port
+      vars:
+        _hetzner_inventory_robot_rules: >-
+          {{
+            hetzner_baremetal_robot_firewall.common_incoming_rules
+            + hetzner_baremetal_robot_firewall_extra_incoming_rules
+          }}
+        _hetzner_inventory_tcp_destination_ports: >-
+          {{
+            _hetzner_inventory_robot_rules
+            | selectattr('ip_version', 'equalto', 'ipv4')
+            | selectattr('protocol', 'equalto', 'tcp')
+            | selectattr('destination_port', 'defined')
+            | map(attribute='destination_port')
+            | map('string')
+            | select('equalto', luks_unlock_dropbear_port | string)
+            | list
+          }}
+        _hetzner_inventory_unrestricted_tcp_destination_ports: >-
+          {{
+            _hetzner_inventory_robot_rules
+            | selectattr('ip_version', 'equalto', 'ipv4')
+            | selectattr('protocol', 'equalto', 'tcp')
+            | selectattr('destination_port', 'defined')
+            | rejectattr('source', 'defined')
+            | map(attribute='destination_port')
+            | map('string')
+            | select('equalto', luks_unlock_dropbear_port | string)
+            | list
+          }}
+        _hetzner_inventory_unrestricted_ssh_rules: >-
+          {{
+            _hetzner_inventory_robot_rules
+            | selectattr('ip_version', 'equalto', 'ipv4')
+            | selectattr('protocol', 'equalto', 'tcp')
+            | selectattr('destination_port', 'defined')
+            | rejectattr('source', 'defined')
+            | selectattr('destination_port', 'equalto', '22')
+            | list
+          }}
+        _hetzner_inventory_unrestricted_hardened_ssh_rules: >-
+          {{
+            _hetzner_inventory_robot_rules
+            | selectattr('ip_version', 'equalto', 'ipv4')
+            | selectattr('protocol', 'equalto', 'tcp')
+            | selectattr('destination_port', 'defined')
+            | rejectattr('source', 'defined')
+            | selectattr('destination_port', 'equalto', '1905')
+            | list
+          }}
+        _hetzner_inventory_wildcard_icmp_rules: >-
+          {{
+            _hetzner_inventory_robot_rules
+            | selectattr('ip_version', 'equalto', 'ipv4')
+            | selectattr('protocol', 'equalto', 'icmp')
+            | selectattr('destination', 'defined')
+            | selectattr('destination', 'none')
+            | list
+          }}
+      ansible.builtin.assert:
+        that:
+          - luks_unlock_dropbear_port | type_debug == 'int'
+          - luks_unlock_dropbear_port > 0
+          - luks_unlock_dropbear_port <= 65535
+          - _hetzner_inventory_tcp_destination_ports | length == 1
+          - >-
+            _hetzner_inventory_unrestricted_tcp_destination_ports
+            | length == 1
+          - _hetzner_inventory_unrestricted_ssh_rules | length == 1
+          - >-
+            _hetzner_inventory_unrestricted_hardened_ssh_rules
+            | length == 1
+          - _hetzner_inventory_wildcard_icmp_rules | length == 1
+        fail_msg: >-
+          Bootstrap SSH, hardened SSH, Dropbear, or wildcard ICMP is not
+          represented by exactly one matching Robot input rule.
+        quiet: true
       when: hetzner_baremetal_robot_firewall.enabled | bool
 
     - name: Derive required deployment-key fingerprints
@@ -744,7 +843,12 @@
                 {
                   'ip_version': item.ip_version,
                   'name': item.comment,
-                  'dst_ip': ansible_host,
+                  'dst_ip': (
+                    none
+                    if item.destination is defined
+                       and item.destination is none
+                    else ansible_host
+                  ),
                   'src_ip': item.source | default(none),
                   'dst_port':
                     item.destination_port | default(none),
@@ -797,15 +901,17 @@
         label: "{{ item.name | default(item.protocol) }}"
       when: hetzner_baremetal_robot_firewall.enabled | bool
 
-    - name: Require every Robot rule to target this public address
+    - name: Require every Robot rule to target the public address or wildcard
       ansible.builtin.assert:
         that:
           - >-
-            (
-              item.dst_ip | default('', true)
-              | regex_replace('/32$', '')
+            item.dst_ip is none
+            or (
+              item.dst_ip | regex_replace('/32$', '')
             ) == ansible_host
-        fail_msg: "A Robot firewall rule has the wrong destination address."
+        fail_msg: >-
+          A Robot firewall rule has neither the public destination nor the
+          explicitly inventory-resolved wildcard destination.
       loop: "{{ _hetzner_robot_firewall_result.json.firewall.rules.input }}"
       loop_control:
         label: "{{ item.name | default(item.protocol) }}"
@@ -988,7 +1094,7 @@
           - --bytes
           - --nodeps
           - --output
-          - PATH,SERIAL,TYPE
+          - PATH,SERIAL,MODEL,SIZE,ROTA,TYPE
       register: _hetzner_rescue_lsblk
       changed_when: false
 
@@ -998,19 +1104,202 @@
           {{ (_hetzner_rescue_lsblk.stdout | from_json).blockdevices }}
       changed_when: false
 
-    - name: Require every inventory disk exactly once
+    - name: Require the exact complete physical-disk serial set
+      vars:
+        _hetzner_rescue_live_disk_serials: >-
+          {{
+            _hetzner_rescue_disks
+            | selectattr('type', 'equalto', 'disk')
+            | map(attribute='serial')
+            | list
+          }}
+        _hetzner_rescue_expected_disk_serials: >-
+          {{ hetzner_installimage_expected_disks | map(attribute='serial') | list }}
       ansible.builtin.assert:
         that:
           - >-
+            _hetzner_rescue_live_disk_serials | length
+            == _hetzner_rescue_expected_disk_serials | length
+          - >-
+            _hetzner_rescue_live_disk_serials | reject('none') | list | length
+            == _hetzner_rescue_live_disk_serials | length
+          - >-
+            _hetzner_rescue_live_disk_serials | map('trim') | reject('equalto', '') | list | length
+            == _hetzner_rescue_live_disk_serials | length
+          - >-
+            _hetzner_rescue_live_disk_serials | unique | length
+            == _hetzner_rescue_live_disk_serials | length
+          - >-
+            _hetzner_rescue_expected_disk_serials | unique | length
+            == _hetzner_rescue_expected_disk_serials | length
+          - >-
+            _hetzner_rescue_live_disk_serials | sort
+            == _hetzner_rescue_expected_disk_serials | sort
+        fail_msg: >-
+          Rescue physical disks are incomplete, extra, serial-less, duplicate,
+          or differ from the exact inventory disk set.
+
+    - name: Require every inventory disk's complete identity exactly once
+      vars:
+        _hetzner_rescue_disk_matches: >-
+          {{
             _hetzner_rescue_disks
             | selectattr('serial', 'equalto', item.serial)
             | selectattr('type', 'equalto', 'disk')
             | list
-            | length == 1
-        fail_msg: "Disk {{ item.serial }} is absent or ambiguous in Rescue."
+          }}
+      ansible.builtin.assert:
+        that:
+          - _hetzner_rescue_disk_matches | length == 1
+          - _hetzner_rescue_disk_matches[0].path is string
+          - _hetzner_rescue_disk_matches[0].path is match('^/dev/[A-Za-z0-9._/-]+$')
+          - >-
+            _hetzner_rescue_disk_matches[0].model | default('') | trim
+            == item.model | trim
+          - _hetzner_rescue_disk_matches[0].size | int == item.size_bytes | int
+          - _hetzner_rescue_disk_matches[0].rota is boolean
+          - _hetzner_rescue_disk_matches[0].rota == item.rotational
+        fail_msg: >-
+          Disk {{ item.serial }} is absent, ambiguous, or differs from the
+          inventory model, byte size, or rotational identity.
       loop: "{{ hetzner_installimage_expected_disks }}"
       loop_control:
         label: "{{ item.serial }}"
+
+    - name: Read SMART device identity as JSON
+      ansible.builtin.command:
+        argv:
+          - smartctl
+          - -i
+          - -j
+          - >-
+            {{
+              (
+                _hetzner_rescue_disks
+                | selectattr('serial', 'equalto', item.serial)
+                | map(attribute='path')
+                | first
+              )
+            }}
+      loop: "{{ hetzner_installimage_expected_disks }}"
+      loop_control:
+        label: "{{ item.serial }}"
+      register: _hetzner_smart_identities
+      changed_when: false
+
+    - name: Require exact SMART serial and supported protocol identity
+      vars:
+        _smart_identity: "{{ item.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - _smart_identity is mapping
+          - _smart_identity.serial_number is string
+          - _smart_identity.serial_number | trim == item.item.serial
+          - _smart_identity.device is mapping
+          - _smart_identity.device.protocol is string
+          - _smart_identity.device.protocol in ['ATA', 'NVMe']
+        fail_msg: >-
+          SMART identity or protocol does not match inventory for
+          {{ item.item.serial }}.
+      loop: "{{ _hetzner_smart_identities.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+
+    - name: Initialize serial-bound SMART protocol map
+      ansible.builtin.set_fact:
+        _hetzner_smart_protocol_by_serial: {}
+      changed_when: false
+
+    - name: Record each serial-bound SMART protocol
+      vars:
+        _smart_identity: "{{ item.stdout | from_json }}"
+      ansible.builtin.set_fact:
+        _hetzner_smart_protocol_by_serial: >-
+          {{
+            _hetzner_smart_protocol_by_serial
+            | combine({item.item.serial: _smart_identity.device.protocol})
+          }}
+      loop: "{{ _hetzner_smart_identities.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+      changed_when: false
+
+    - name: Resolve each NVMe namespace through sysfs
+      ansible.builtin.command:
+        argv:
+          - readlink
+          - -f
+          - >-
+            /sys/class/block/{{
+              (
+                _hetzner_rescue_disks
+                | selectattr('serial', 'equalto', item.serial)
+                | map(attribute='path')
+                | first
+                | basename
+              )
+            }}/device
+      loop: "{{ hetzner_installimage_expected_disks }}"
+      loop_control:
+        label: "{{ item.serial }}"
+      register: _hetzner_nvme_sysfs_namespaces
+      changed_when: false
+      when: _hetzner_smart_protocol_by_serial[item.serial] == 'NVMe'
+
+    - name: Require exact NVMe namespace-to-controller sysfs paths
+      ansible.builtin.assert:
+        that:
+          - item.stdout_lines | length == 1
+          - >-
+            item.stdout
+            is match(
+              '^/sys/devices/.*/nvme/nvme[0-9]+$'
+            )
+          - item.stdout.split('/')[-1] is match('^nvme[0-9]+$')
+          - >-
+            (
+              _hetzner_rescue_disks
+              | selectattr('serial', 'equalto', item.item.serial)
+              | map(attribute='path')
+              | first
+              | basename
+            )
+            is match('^' ~ item.stdout.split('/')[-1] ~ 'n[0-9]+$')
+      loop: "{{ _hetzner_nvme_sysfs_namespaces.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+      when: not (item.skipped | default(false))
+
+    - name: Initialize serial-bound NVMe controller map
+      ansible.builtin.set_fact:
+        _hetzner_nvme_controller_by_serial: {}
+      changed_when: false
+
+    - name: Record each serial-bound NVMe controller
+      ansible.builtin.set_fact:
+        _hetzner_nvme_controller_by_serial: >-
+          {{
+            _hetzner_nvme_controller_by_serial
+            | combine({item.item.serial: '/dev/' ~ item.stdout.split('/')[-1]})
+          }}
+      loop: "{{ _hetzner_nvme_sysfs_namespaces.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+      changed_when: false
+      when: not (item.skipped | default(false))
+
+    - name: Require one unique NVMe controller per inventory disk
+      vars:
+        _hetzner_nvme_controllers: >-
+          {{ _hetzner_nvme_controller_by_serial.values() | list }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            _hetzner_nvme_controllers | unique | length
+            == _hetzner_nvme_controllers | length
+        fail_msg: >-
+          Multiple inventory disks resolve to one NVMe controller; refusing an
+          ambiguous physical-device SMART contract.
 
     - name: Read SMART health as JSON
       ansible.builtin.command:
@@ -1043,7 +1332,7 @@
         label: "{{ item.item.serial }}"
       when: hetzner_baremetal_smart_policy.require_passed_health | bool
 
-    - name: Read SMART self-test history as JSON
+    - name: Read ATA SMART self-test history as JSON
       ansible.builtin.command:
         argv:
           - smartctl
@@ -1064,8 +1353,13 @@
         label: "{{ item.serial }}"
       register: _hetzner_smart_selftests
       changed_when: false
+      when:
+        - >-
+          hetzner_baremetal_smart_policy.require_completed_extended_test
+          | bool
+        - _hetzner_smart_protocol_by_serial[item.serial] == 'ATA'
 
-    - name: Require a completed latest extended SMART test
+    - name: Require a completed latest extended ATA SMART test
       vars:
         _smart_selftest_json: "{{ item.stdout | from_json }}"
         _smart_selftest_log: >-
@@ -1118,6 +1412,100 @@
         label: "{{ item.item.serial }}"
       when: >-
         hetzner_baremetal_smart_policy.require_completed_extended_test | bool
+        and not (item.skipped | default(false))
+
+    - name: Read NVMe controller identity as JSON
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - id-ctrl
+          - --output-format=json
+          - "{{ _hetzner_nvme_controller_by_serial[item.serial] }}"
+      loop: "{{ hetzner_installimage_expected_disks }}"
+      loop_control:
+        label: "{{ item.serial }}"
+      register: _hetzner_nvme_identities
+      changed_when: false
+      when: _hetzner_smart_protocol_by_serial[item.serial] == 'NVMe'
+
+    - name: Require exact serial-bound NVMe self-test capability
+      vars:
+        _nvme_identity: "{{ item.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - _nvme_identity is mapping
+          - _nvme_identity.sn is string
+          - _nvme_identity.sn | trim == item.item.serial
+          - _nvme_identity.oacs | type_debug == 'int'
+          - _nvme_identity.oacs | int >= 16
+          - ((_nvme_identity.oacs | int) // 16) % 2 == 1
+        fail_msg: >-
+          NVMe controller identity or Device Self-test capability failed for
+          {{ item.item.serial }}.
+      loop: "{{ _hetzner_nvme_identities.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+      when: not (item.skipped | default(false))
+
+    - name: Read NVMe device self-test history as JSON
+      ansible.builtin.command:
+        argv:
+          - nvme
+          - self-test-log
+          - --output-format=json
+          - "{{ _hetzner_nvme_controller_by_serial[item.serial] }}"
+      loop: "{{ hetzner_installimage_expected_disks }}"
+      loop_control:
+        label: "{{ item.serial }}"
+      register: _hetzner_nvme_selftests
+      changed_when: false
+      when:
+        - >-
+          hetzner_baremetal_smart_policy.require_completed_extended_test
+          | bool
+        - _hetzner_smart_protocol_by_serial[item.serial] == 'NVMe'
+
+    - name: Require a completed latest extended NVMe device self-test
+      vars:
+        _nvme_selftest: "{{ item.stdout | from_json }}"
+        _nvme_selftest_reports: >-
+          {{ _nvme_selftest.get('List of Valid Reports', []) }}
+        _nvme_latest_selftest: >-
+          {{ _nvme_selftest_reports | first | default({}) }}
+      ansible.builtin.assert:
+        that:
+          - _nvme_selftest is mapping
+          - >-
+            _nvme_selftest.keys() | list | sort
+            ==
+            [
+              'Current Device Self-Test Operation',
+              'Current Device Self-Test Completion',
+              'List of Valid Reports'
+            ] | sort
+          - _nvme_selftest['Current Device Self-Test Operation'] | type_debug == 'int'
+          - _nvme_selftest['Current Device Self-Test Operation'] | int == 0
+          - >-
+            _nvme_selftest['Current Device Self-Test Completion']
+            | type_debug == 'int'
+          - _nvme_selftest_reports | type_debug == 'list'
+          - _nvme_selftest_reports | length > 0
+          - _nvme_latest_selftest is mapping
+          - _nvme_latest_selftest.get('Self test code', none) | type_debug == 'int'
+          - _nvme_latest_selftest.get('Self test code', -1) | int == 2
+          - >-
+            _nvme_latest_selftest.get('Self test result', none)
+            | type_debug == 'int'
+          - _nvme_latest_selftest.get('Self test result', -1) | int == 0
+        fail_msg: >-
+          The latest NVMe Device Self-test is not an idle, completed,
+          error-free extended test for {{ item.item.serial }}.
+      loop: "{{ _hetzner_nvme_selftests.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+      when: >-
+        hetzner_baremetal_smart_policy.require_completed_extended_test | bool
+        and not (item.skipped | default(false))
 
     - name: Read SMART attributes as JSON
       ansible.builtin.command:
@@ -1140,12 +1528,13 @@
       register: _hetzner_smart_attributes
       changed_when: false
 
-    - name: Require SMART sector counters within inventory policy
+    - name: Require ATA SMART sector counters within inventory policy
       vars:
+        _smart_attribute_json: "{{ item.stdout | from_json }}"
         _smart_attribute_table: >-
           {{
-            (item.stdout | from_json).ata_smart_attributes.table
-            | default([])
+            _smart_attribute_json.ata_smart_attributes.table
+            | default([], true)
           }}
         _smart_policy_effective: >-
           {{
@@ -1186,6 +1575,9 @@
           }}
       ansible.builtin.assert:
         that:
+          - _smart_attribute_json is mapping
+          - _smart_attribute_json.ata_smart_attributes is mapping
+          - _smart_attribute_table | type_debug == 'list'
           - >-
             _smart_reallocated | int
             <= _smart_policy_effective.reallocated_sectors_max | int
@@ -1199,6 +1591,119 @@
       loop: "{{ _hetzner_smart_attributes.results }}"
       loop_control:
         label: "{{ item.item.serial }}"
+      when: _hetzner_smart_protocol_by_serial[item.item.serial] == 'ATA'
+
+    - name: Require NVMe health and endurance within explicit inventory policy
+      vars:
+        _smart_attribute_json: "{{ item.stdout | from_json }}"
+        _nvme_health: >-
+          {{
+            _smart_attribute_json.nvme_smart_health_information_log
+            | default({}, true)
+          }}
+        _smart_policy_effective: >-
+          {{
+            hetzner_baremetal_smart_policy
+            | combine(
+                (hetzner_baremetal_smart_overrides | default({}))[
+                  item.item.serial
+                ]
+                | default({})
+              )
+          }}
+        _nvme_required_policy_fields:
+          - nvme_critical_warning_allowed_mask
+          - nvme_media_errors_max
+          - nvme_error_log_entries_max
+          - nvme_percentage_used_max
+          - nvme_available_spare_min
+      ansible.builtin.assert:
+        that:
+          - _smart_attribute_json is mapping
+          - _nvme_health is mapping
+          - >-
+            _nvme_required_policy_fields
+            | difference(_smart_policy_effective.keys() | list)
+            | length == 0
+          - >-
+            _smart_policy_effective.get(
+              'nvme_critical_warning_allowed_mask', none
+            )
+            | type_debug == 'int'
+          - >-
+            _smart_policy_effective.get(
+              'nvme_critical_warning_allowed_mask', -1
+            ) | int
+            == 0
+          - >-
+            _smart_policy_effective.get('nvme_media_errors_max', none)
+            | type_debug == 'int'
+          - _smart_policy_effective.get('nvme_media_errors_max', -1) | int >= 0
+          - >-
+            _smart_policy_effective.get('nvme_error_log_entries_max', none)
+            | type_debug == 'int'
+          - >-
+            _smart_policy_effective.get('nvme_error_log_entries_max', -1)
+            | int >= 0
+          - >-
+            _smart_policy_effective.get('nvme_percentage_used_max', none)
+            | type_debug == 'int'
+          - >-
+            _smart_policy_effective.get('nvme_percentage_used_max', -1) | int
+            >= 0
+          - >-
+            _smart_policy_effective.get('nvme_percentage_used_max', 101) | int
+            <= 100
+          - >-
+            _smart_policy_effective.get('nvme_available_spare_min', none)
+            | type_debug == 'int'
+          - >-
+            _smart_policy_effective.get('nvme_available_spare_min', -1) | int
+            >= 0
+          - >-
+            _smart_policy_effective.get('nvme_available_spare_min', 101) | int
+            <= 100
+          - _nvme_health.critical_warning | type_debug == 'int'
+          - >-
+            _nvme_health.critical_warning | int
+            ==
+            _smart_policy_effective.get(
+              'nvme_critical_warning_allowed_mask', -1
+            ) | int
+          - _nvme_health.media_errors | type_debug == 'int'
+          - >-
+            _nvme_health.media_errors | int
+            <= _smart_policy_effective.get('nvme_media_errors_max', -1) | int
+          - _nvme_health.percentage_used | type_debug == 'int'
+          - _nvme_health.num_err_log_entries | type_debug == 'int'
+          - >-
+            _nvme_health.num_err_log_entries | int
+            <=
+            _smart_policy_effective.get('nvme_error_log_entries_max', -1)
+            | int
+          - >-
+            _nvme_health.percentage_used | int
+            <=
+            _smart_policy_effective.get('nvme_percentage_used_max', -1) | int
+          - _nvme_health.available_spare | type_debug == 'int'
+          - _nvme_health.available_spare_threshold | type_debug == 'int'
+          - >-
+            _nvme_health.available_spare | int
+            >=
+            [
+              _nvme_health.available_spare_threshold | int,
+              _smart_policy_effective.get('nvme_available_spare_min', 101)
+              | int
+            ] | max
+        fail_msg: >-
+          NVMe critical warning, media-error, error-log, endurance, or spare
+          policy failed for {{ item.item.serial }}. NVMe thresholds must be
+          explicit in inventory and critical-warning exceptions are not
+          accepted.
+      loop: "{{ _hetzner_smart_attributes.results }}"
+      loop_control:
+        label: "{{ item.item.serial }}"
+      when: _hetzner_smart_protocol_by_serial[item.item.serial] == 'NVMe'
 
     - name: Verify Rescue DNS and HTTPS egress
       ansible.builtin.uri:
@@ -1458,7 +1963,7 @@
             label: "{{ item }}"
           changed_when: false
 
-        - name: Probe the inventory MGMT gateway
+        - name: Probe the declared inventory MGMT gateway
           ansible.builtin.command:
             argv:
               - ping
@@ -1471,6 +1976,12 @@
               - "{{ _hetzner_rescue_mgmt_probe_vlan_interface }}"
               - "{{ mgmt_subnet.gateway }}"
           changed_when: false
+          when: >-
+            mgmt_subnet.gateway
+            | default('', true)
+            | string
+            | trim
+            | length > 0
 
       always:
         - name: Remove the owned Rescue probe VLAN
