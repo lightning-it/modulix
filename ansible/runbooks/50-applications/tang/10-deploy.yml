@@ -57,7 +57,8 @@
       tags: [always]
 
     - name: Verify the migrated recovery document before Tang mutation
-      ansible.builtin.include_tasks: tasks/resolve-recovery-secret.yml
+      ansible.builtin.include_tasks: >-
+        ../../00-common/tasks/resolve-recovery-secret.yml
       no_log: true
 
   tasks:

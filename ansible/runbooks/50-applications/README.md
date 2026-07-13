@@ -24,6 +24,8 @@ Application-stack runbooks:
 - `aio/10-deploy.yml`: Ubuntu Semaphore plus PostgreSQL AIO.
 - `atlas/10-deploy.yml`: LIT Atlas observability appliance with Grafana,
   Prometheus, Loki, Alloy, Alertmanager, rsyslog, and Checkmk.
+- `tang/10-deploy.yml`: Ubuntu Tang network-bound disk-encryption service and
+  signing-thumbprint trust persistence.
 - `wunderbox/10-deploy.yml`: Wunderbox platform applications such as Vault,
   Nessus, Nexus, Forgejo, Keycloak, CoreDNS, and DHCP.
 

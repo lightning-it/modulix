@@ -279,7 +279,9 @@
             that:
               - _wunderbox_luks_header_raw_stat.stat.exists | default(false)
               - _wunderbox_luks_header_raw_stat.stat.isreg | default(false)
-              - _wunderbox_luks_header_raw_stat.stat.mode == '0600'
+              # cryptsetup creates LUKS header backups root-readable and
+              # non-writable. Require that stricter protection explicitly.
+              - _wunderbox_luks_header_raw_stat.stat.mode == '0400'
               - _wunderbox_luks_header_raw_stat.stat.size | int > 0
               - >-
                 _wunderbox_luks_header_raw_stat.stat.size | int

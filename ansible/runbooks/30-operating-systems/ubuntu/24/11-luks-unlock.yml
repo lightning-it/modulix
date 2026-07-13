@@ -76,7 +76,8 @@
       when: luks_unlock_method == 'clevis_tang'
 
     - name: Resolve the host recovery document for Tang binding
-      ansible.builtin.include_tasks: tasks/resolve-recovery-secret.yml
+      ansible.builtin.include_tasks: >-
+        ../../../00-common/tasks/resolve-recovery-secret.yml
       when: luks_unlock_method == 'clevis_tang'
       no_log: true
 

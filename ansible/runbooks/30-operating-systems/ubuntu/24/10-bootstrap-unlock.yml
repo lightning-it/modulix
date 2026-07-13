@@ -47,7 +47,8 @@
 
   tasks:
     - name: Resolve the Ansible Vault bootstrap recovery secret
-      ansible.builtin.include_tasks: tasks/resolve-recovery-secret.yml
+      ansible.builtin.include_tasks: >-
+        ../../../00-common/tasks/resolve-recovery-secret.yml
       no_log: true
 
     - name: Submit the recovery passphrase through pinned SSH stdin
@@ -66,7 +67,9 @@
           - "{{ luks_unlock_dropbear_port | int }}"
           - "root@{{ inventory_hostname }}"
         stdin: "{{ _hetzner_baremetal_recovery_passphrase }}"
-        stdin_add_newline: true
+        # cryptroot-unlock's non-interactive path copies stdin byte-for-byte
+        # into its passphrase FIFO. Do not append a newline to the secret.
+        stdin_add_newline: false
       register: _hetzner_bootstrap_unlock_result
       changed_when: true
       no_log: true

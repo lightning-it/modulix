@@ -12,6 +12,8 @@ collections:
     version: "7.1.0"
   - name: community.general
     version: "13.2.0"
+  - name: community.hrobot
+    version: "2.7.2"
   - name: fedora.linux_system_roles
     version: "1.127.2"
   - name: lit.supplementary

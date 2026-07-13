@@ -63,7 +63,7 @@
 
         expected_serials() {
           printf '%s\n' "${LIT_EXPECTED_SYSTEM_SERIALS}" |
-            sed '/^$/d' | sort -u
+            tr ' ' '\n' | sed '/^$/d' | sort -u
         }
 
         device_serials() {
@@ -144,7 +144,7 @@
           {{
             hetzner_installimage_expected_disks
             | selectattr('purpose', 'equalto', 'system')
-            | map(attribute='serial') | list | sort | join('\n')
+            | map(attribute='serial') | list | sort | join(' ')
           }}
         LIT_EXPECTED_RAID_ENABLED: >-
           {{
@@ -205,6 +205,7 @@
       poll: 0
       changed_when: true
       failed_when: false
+      when: not (hetzner_first_boot_resume | default(false) | bool)
 
     - name: Wait for Dropbear recovery SSH
       ansible.builtin.wait_for:
@@ -220,6 +221,7 @@
       ansible.builtin.command:
         argv:
           - ssh-keyscan
+          - -q
           - -T
           - "10"
           - -p
@@ -337,7 +339,7 @@
       ansible.builtin.pause:
         prompt: >-
           The generated Dropbear key is verified and pinned. In a second
-          terminal run the dedicated 10-hetzner-bootstrap-unlock.yml command
+          terminal run the dedicated 10-bootstrap-unlock.yml command
           from the private operator guide for this exact host. It decrypts the
           bootstrap escrow only in memory and supplies the passphrase through
           SSH stdin under no_log. After it reports success, press Enter here.
@@ -356,6 +358,7 @@
       ansible.builtin.command:
         argv:
           - ssh-keyscan
+          - -q
           - -T
           - "10"
           - -t
