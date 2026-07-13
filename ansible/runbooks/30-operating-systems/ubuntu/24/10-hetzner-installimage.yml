@@ -79,121 +79,23 @@
       tags: [always]
 
     - name: Prove every predecessor completed encrypted Ubuntu base setup
-      ansible.builtin.shell: |
-        set -euo pipefail
-        export LC_ALL=C
-
-        test "$(hostname -f)" = "${LIT_EXPECTED_HOSTNAME}"
-        source /etc/os-release
-        test "${ID}" = ubuntu
-        test "${VERSION_ID}" = 24.04
-        test -s /etc/crypttab
-
-        root_source="$(findmnt -n -o SOURCE /)"
-        test -n "${root_source}"
-        lsblk -srno TYPE -- "${root_source}" | grep -Fxq crypt
-
-        test "$(
-          ip -4 -o address show dev "${LIT_EXPECTED_MGMT_INTERFACE}" |
-            awk '{print $4}' |
-            grep -Fxc "${LIT_EXPECTED_MGMT_ADDRESS}"
-        )" -eq 1
-      args:
-        executable: /bin/bash
-      delegate_to: "{{ item }}"
-      become: true
-      vars:
-        ansible_user: "{{ hostvars[item].deploy_ssh_user }}"
-        ansible_private_key_file: >-
-          {{ hostvars[item].ansible_private_key_file }}
-        ansible_ssh_common_args: >-
-          {{ hostvars[item].ansible_ssh_common_args }}
-        ansible_become: true
-        ansible_become_flags: "-n"
-      environment:
-        LIT_EXPECTED_HOSTNAME: "{{ item }}"
-        LIT_EXPECTED_MGMT_INTERFACE: >-
-          {{ hostvars[item].mgmt_network.vlan_interface }}
-        LIT_EXPECTED_MGMT_ADDRESS: >-
-          {{
-            hostvars[item].mgmt_network.ipv4
-            ~ '/'
-            ~ (hostvars[item].mgmt_subnet.prefix_length | string)
-          }}
+      ansible.builtin.include_tasks:
+        file: tasks/hetzner-installimage-prove-installed-predecessor.yml
       loop: >-
         {{ hetzner_baremetal_install_order[: _hetzner_install_order_position | int] }}
       loop_control:
-        label: "{{ item }}"
-      changed_when: false
-      check_mode: false
+        loop_var: hetzner_installimage_order_host
+        label: "{{ hetzner_installimage_order_host }}"
       tags: [always]
 
     - name: Prove the target and every successor remain in Hetzner Rescue
-      ansible.builtin.shell: |
-        set -euo pipefail
-        export LC_ALL=C
-
-        test -f "${LIT_INSTALLIMAGE_BINARY}"
-        test -x "${LIT_INSTALLIMAGE_BINARY}"
-        test "$(stat -c '%u' "${LIT_INSTALLIMAGE_BINARY}")" -eq 0
-        test -f "${LIT_INSTALLIMAGE_IMAGE}"
-        test "$(
-          sha256sum "${LIT_INSTALLIMAGE_IMAGE}" | awk '{print $1}'
-        )" = "${LIT_EXPECTED_IMAGE_SHA256}"
-
-        robot_keys=/root/.ssh/robot_user_keys
-        test -f "${robot_keys}"
-        test ! -L "${robot_keys}"
-        IFS=: read -r keys_uid keys_gid keys_nlink keys_mode keys_size < <(
-          stat -c '%u:%g:%h:%a:%s' "${robot_keys}"
-        )
-        test "${keys_uid}" -eq 0
-        test "${keys_gid}" -eq 0
-        test "${keys_nlink}" -eq 1
-        [[ "${keys_mode}" =~ ^[0-7][0145][0145]$ ]]
-        test "${keys_size}" -gt 0
-        test "${keys_size}" -le "${LIT_ROBOT_KEYS_MAX_BYTES}"
-
-        normalized_robot_keys="$(awk 'NF {$1=$1; print}' "${robot_keys}")"
-        test "${normalized_robot_keys}" = "${LIT_EXPECTED_DEPLOY_KEYS}"
-      args:
-        executable: /bin/bash
-      delegate_to: "{{ lookup('vars', ansible_loop_var) }}"
-      become: false
-      vars:
-        ansible_user: root
-        ansible_private_key_file: >-
-          {{ hostvars[item].ansible_private_key_file }}
-        ansible_ssh_common_args: >-
-          -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
-          -o StrictHostKeyChecking=yes
-          -o IdentitiesOnly=yes
-        ansible_become: false
-      environment:
-        LIT_INSTALLIMAGE_BINARY: >-
-          {{ hostvars[item].hetzner_installimage_binary }}
-        LIT_INSTALLIMAGE_IMAGE: >-
-          {{ hostvars[item].hetzner_installimage_image }}
-        LIT_EXPECTED_IMAGE_SHA256: >-
-          {{ hostvars[item].hetzner_installimage_expected_image_sha256 }}
-        LIT_ROBOT_KEYS_MAX_BYTES: >-
-          {{
-            hostvars[item].hetzner_baremetal_rescue_robot_user_keys_max_bytes
-            | string
-          }}
-        LIT_EXPECTED_DEPLOY_KEYS: >-
-          {{
-            hostvars[item].deploy_ssh_public_keys
-            | map('trim')
-            | map('regex_replace', '\\s+', ' ')
-            | join('\n')
-          }}
+      ansible.builtin.include_tasks:
+        file: tasks/hetzner-installimage-prove-rescue-successor.yml
       loop: >-
         {{ hetzner_baremetal_install_order[_hetzner_install_order_position | int :] }}
       loop_control:
-        label: "{{ item }}"
-      changed_when: false
-      check_mode: false
+        loop_var: hetzner_installimage_order_host
+        label: "{{ hetzner_installimage_order_host }}"
       tags: [always]
 
     - name: Require an explicit Rescue root connection
