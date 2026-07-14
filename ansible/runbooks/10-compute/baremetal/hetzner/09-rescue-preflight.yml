@@ -10,7 +10,7 @@
   any_errors_fatal: true
 
   pre_tasks:
-    - name: Require the complete bare-metal fleet limit
+    - name: Require the complete bare-metal fleet limit  # noqa run-once[task]
       ansible.builtin.assert:
         that:
           - ansible_limit is defined

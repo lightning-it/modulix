@@ -6,7 +6,7 @@ layers. These are implementation helpers rather than standalone entrypoints.
 ## VAULT login
 
 ```bash
-VAULT_ADDR=https://ansible03.core.corp.l-it.io:8201 vault login
+VAULT_ADDR=https://vault.example.com:8200 vault login
 ```
 
 ## Print all vars

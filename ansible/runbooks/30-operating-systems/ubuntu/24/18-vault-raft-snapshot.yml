@@ -6,6 +6,18 @@
   any_errors_fatal: true
   serial: 1
 
+  vars:
+    _vault_raft_snapshot_manifest_field_names:
+      - "{{ hetzner_baremetal_vault.luks_header_format_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_path_prefix_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_count_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_sha256s_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_sha256_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_raw_sha256_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_raw_size_field }}"
+      - "{{ hetzner_baremetal_vault.luks_uuid_field }}"
+
   pre_tasks:
     - name: Require one exact Vault host and snapshot action
       ansible.builtin.assert:
@@ -209,6 +221,99 @@
           no_log: true
           tags: [always]
 
+        - name: Require the immutable LUKS-header manifest contract
+          ansible.builtin.assert:
+            that:
+              - >-
+                _vault_raft_snapshot_manifest_field_names
+                | select('string') | reject('equalto', '') | unique | list
+                | length == 9
+              - >-
+                hetzner_baremetal_vault.luks_header_storage_format
+                == 'raw-base64-chunks-v1'
+              - >-
+                hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int
+                == 393216
+              - >-
+                hetzner_baremetal_vault.luks_header_chunk_path_suffix
+                is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+              - >-
+                hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+                | int > 0
+              - >-
+                hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+                | int <= 20971520
+            fail_msg: >-
+              Raft verification requires the fixed immutable LUKS-header
+              manifest and bounded chunk contract.
+            quiet: true
+          no_log: true
+
+        - name: Select root documents that may reference LUKS-header chunks
+          ansible.builtin.set_fact:
+            _vault_raft_snapshot_root_kv_paths: >-
+              {{
+                hetzner_baremetal_vault.backup.verification_kv_paths
+                | selectattr('path', 'match', '^.*/root$') | list
+              }}
+            _vault_raft_snapshot_verification_kv_paths_resolved: >-
+              {{ hetzner_baremetal_vault.backup.verification_kv_paths }}
+          changed_when: false
+          no_log: true
+
+        - name: Read selected Vault root documents for Raft verification
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: >-
+              {{ _hetzner_hashicorp_vault_auth.validate_certs }}
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: >-
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ item.mount_point }}"
+            path: "{{ item.path }}"
+          loop: "{{ _vault_raft_snapshot_root_kv_paths }}"
+          loop_control:
+            label: "vault-root-document"
+          register: _vault_raft_snapshot_root_documents
+          delegate_to: localhost
+          become: false
+          no_log: true
+
+        - name: Extend Raft verification from every complete header manifest
+          ansible.builtin.include_tasks: >-
+            tasks/extend-vault-raft-verification-from-luks-manifest.yml
+          loop: "{{ _vault_raft_snapshot_root_documents.results }}"
+          loop_control:
+            loop_var: _vault_raft_snapshot_root_document
+            label: "vault-root-document"
+          no_log: true
+
+        - name: Require unique expanded Raft verification paths
+          ansible.builtin.assert:
+            that:
+              - >-
+                _vault_raft_snapshot_verification_kv_paths_resolved | length
+                >= hetzner_baremetal_vault.backup.verification_kv_paths | length
+              - >-
+                _vault_raft_snapshot_verification_kv_paths_resolved | unique
+                | length
+                == _vault_raft_snapshot_verification_kv_paths_resolved | length
+            fail_msg: >-
+              Expanded Raft verification paths are incomplete or duplicated.
+            quiet: true
+          no_log: true
+
         - name: Run encrypted Raft snapshot lifecycle role
           ansible.builtin.include_role:
             name: lit.supplementary.vault_raft_snapshot
@@ -247,7 +352,7 @@
             vault_raft_snapshot_max_raw_bytes: >-
               {{ hetzner_baremetal_vault.backup.max_raw_bytes }}
             vault_raft_snapshot_verification_kv_paths: >-
-              {{ hetzner_baremetal_vault.backup.verification_kv_paths }}
+              {{ _vault_raft_snapshot_verification_kv_paths_resolved }}
             vault_raft_snapshot_image: >-
               {{ hetzner_baremetal_vault.image.reference }}
             vault_raft_snapshot_production_cert_dir: >-

@@ -143,12 +143,32 @@
       changed_when: false
       no_log: true
 
+    - name: Split the current Clevis Tang binding description
+      ansible.builtin.set_fact:
+        _tang_reboot_binding_before_parts: >-
+          {{ (_tang_reboot_binding_before.stdout | trim).split(None, 2) }}
+      no_log: true
+
+    - name: Validate the current Clevis Tang binding description
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_binding_before_parts | length == 3
+          - >-
+            _tang_reboot_binding_before_parts[0]
+            == (luks_unlock_devices[0].keyslot | string) ~ ':'
+          - _tang_reboot_binding_before_parts[1] == 'tang'
+          - _tang_reboot_binding_before_parts[2].startswith("'")
+          - _tang_reboot_binding_before_parts[2].endswith("'")
+        fail_msg: >-
+          Clevis returned an unexpected Tang binding description before reboot.
+        quiet: true
+      no_log: true
+
     - name: Decode the current Clevis Tang binding
       ansible.builtin.set_fact:
         _tang_reboot_binding_before_config: >-
           {{
-            _tang_reboot_binding_before.stdout
-            | regex_replace('^[0-9]+:\\s+tang\\s+', '')
+            _tang_reboot_binding_before_parts[2][1:-1]
             | from_json
           }}
         _tang_reboot_pinned_thumbprint: >-
@@ -187,9 +207,6 @@
     - name: Require the exact live Tang trust and binding before reboot
       ansible.builtin.assert:
         that:
-          - >-
-            _tang_reboot_binding_before.stdout
-            is match('^[0-9]+:\\s+tang\\s+\\{.*\\}$')
           - _tang_reboot_binding_before_config is mapping
           - >-
             _tang_reboot_binding_before_config.keys() | list | sort
@@ -248,12 +265,32 @@
       changed_when: false
       no_log: true
 
+    - name: Split the retained Clevis Tang binding description
+      ansible.builtin.set_fact:
+        _tang_reboot_binding_after_parts: >-
+          {{ (_tang_reboot_binding_after.stdout | trim).split(None, 2) }}
+      no_log: true
+
+    - name: Validate the retained Clevis Tang binding description
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_binding_after_parts | length == 3
+          - >-
+            _tang_reboot_binding_after_parts[0]
+            == (luks_unlock_devices[0].keyslot | string) ~ ':'
+          - _tang_reboot_binding_after_parts[1] == 'tang'
+          - _tang_reboot_binding_after_parts[2].startswith("'")
+          - _tang_reboot_binding_after_parts[2].endswith("'")
+        fail_msg: >-
+          Clevis returned an unexpected Tang binding description after reboot.
+        quiet: true
+      no_log: true
+
     - name: Decode the retained Clevis Tang binding
       ansible.builtin.set_fact:
         _tang_reboot_binding_after_config: >-
           {{
-            _tang_reboot_binding_after.stdout
-            | regex_replace('^[0-9]+:\\s+tang\\s+', '')
+            _tang_reboot_binding_after_parts[2][1:-1]
             | from_json
           }}
       no_log: true
@@ -264,9 +301,6 @@
           - >-
             _tang_reboot_boot_id_after.stdout | trim
             != _tang_reboot_boot_id_before.stdout | trim
-          - >-
-            _tang_reboot_binding_after.stdout
-            is match('^[0-9]+:\\s+tang\\s+\\{.*\\}$')
           - _tang_reboot_binding_after_config is mapping
           - >-
             _tang_reboot_binding_after_config
