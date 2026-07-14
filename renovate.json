@@ -63,6 +63,26 @@
         "pyvmomi",
         "requests"
       ]
+    },
+    {
+      "description": "Keep community.general compatible with linux_system_roles and lit collections",
+      "matchDepNames": [
+        "community.general"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "allowedVersions": "/^11\\./"
+    },
+    {
+      "description": "Pin community.vmware for the ansible-core 2.18 collection baseline",
+      "matchDepNames": [
+        "community.vmware"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "allowedVersions": "/^5\\.10\\.0$/"
     }
   ],
   "customManagers": [

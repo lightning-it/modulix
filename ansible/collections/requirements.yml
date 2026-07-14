@@ -3,7 +3,7 @@ collections:
   - name: ansible.posix
     version: "2.2.2"
   - name: community.vmware
-    version: "6.2.0"
+    version: "5.10.0"
   - name: vmware.vmware
     version: "2.9.0"
   - name: community.crypto
@@ -11,18 +11,18 @@ collections:
   - name: community.hashi_vault
     version: "7.1.0"
   - name: community.general
-    version: "13.2.0"
+    version: "11.4.9"
   - name: community.hrobot
     version: "2.7.2"
   - name: fedora.linux_system_roles
     version: "1.127.2"
   - name: lit.supplementary
-    version: "1.37.0"
+    version: "1.39.0"
   - name: lit.foundational
-    version: "1.29.0"
+    version: "1.30.0"
   - name: lit.rhel
     version: "1.21.0"
-  - name: https://github.com/lightning-it/ansible-collection-ubuntu/releases/download/v1.5.0/lit-ubuntu-1.5.0.tar.gz
-    type: url
+  - name: lit.ubuntu
+    version: "1.7.0"
   - name: lit.ocp
     version: "1.6.0"
