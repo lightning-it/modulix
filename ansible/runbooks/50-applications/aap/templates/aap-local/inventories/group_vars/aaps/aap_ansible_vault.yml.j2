@@ -3,7 +3,7 @@ aap_password_seed_enabled: false
 aap_preflight_vault_enabled: false
 
 aap_username: {{ aap_username | default('admin', true) | to_json }}
-aap_validate_certs: false
+aap_validate_certs: true
 
 aap_gateway_admin_password_input: {{ aap_gateway_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}
 aap_controller_admin_password_input: {{ aap_controller_admin_password_input | default(aap_admin_password_input | default('', true), true) | to_json }}

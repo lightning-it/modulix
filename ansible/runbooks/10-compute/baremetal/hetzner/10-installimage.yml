@@ -214,41 +214,40 @@
         | length > 0
       }}
 
-  pre_tasks:
-    - name: Resolve the persisted recovery secret for installation
-      ansible.builtin.include_tasks: >-
-        ../../../00-common/tasks/resolve-recovery-secret.yml
-      when:
-        - hetzner_installimage_action | default('plan') == 'install'
-        - _hetzner_installimage_encryption_requested | bool
-      no_log: true
-
-    - name: Supply the resolved installation recovery passphrase
-      ansible.builtin.set_fact:
-        hetzner_installimage_crypt_password: >-
-          {{ _hetzner_baremetal_recovery_passphrase }}
-      when:
-        - hetzner_installimage_action | default('plan') == 'install'
-        - _hetzner_installimage_encryption_requested | bool
-      no_log: true
-
-    - name: Require a valid persisted installation recovery passphrase
-      ansible.builtin.assert:
-        that:
-          - >-
-            hetzner_installimage_crypt_password
-            | default('', true) | length >= 40
-        fail_msg: >-
-          No valid recovery passphrase was found. Run the recovery-secrets
-          runbook for this host before authorizing installation.
-      when:
-        - hetzner_installimage_action | default('plan') == 'install'
-        - _hetzner_installimage_encryption_requested | bool
-      no_log: true
-
   tasks:
     - name: Build or execute the guarded installimage plan
       block:
+        - name: Resolve the persisted recovery secret for installation
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-recovery-secret.yml
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
+        - name: Supply the resolved installation recovery passphrase
+          ansible.builtin.set_fact:
+            hetzner_installimage_crypt_password: >-
+              {{ _hetzner_baremetal_recovery_passphrase }}
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
+        - name: Require a valid persisted installation recovery passphrase
+          ansible.builtin.assert:
+            that:
+              - >-
+                hetzner_installimage_crypt_password
+                | default('', true) | length >= 40
+            fail_msg: >-
+              No valid recovery passphrase was found. Run the recovery-secrets
+              runbook for this host before authorizing installation.
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
         - name: Build or execute the guarded installimage plan
           ansible.builtin.include_role:
             name: lit.foundational.hetzner_installimage
@@ -286,6 +285,11 @@
                 hetzner_installimage_plan_sha256
               }}
       always:
+        - name: Close any controller Vault transport opened for installation
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
         - name: Remove the explicitly ephemeral post-install hook
           ansible.builtin.file:
             path: "{{ hetzner_installimage_post_install_script_path }}"

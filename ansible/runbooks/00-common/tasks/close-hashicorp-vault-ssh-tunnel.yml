@@ -1,0 +1,141 @@
+---
+# Idempotently retire only the control socket validated and owned by the
+# current tunnel lifecycle. The outer always block resets facts even when
+# listener shutdown cannot be confirmed.
+- name: Close the controller Vault SSH tunnel
+  block:
+    - name: Reset controller Vault SSH close-path safety state
+      ansible.builtin.set_fact:
+        _hetzner_vault_tunnel_close_path_safe: false
+      delegate_to: localhost
+      delegate_facts: false
+      become: false
+      changed_when: false
+      run_once: true
+
+    - name: Inspect the validated controller Vault SSH control path
+      ansible.builtin.stat:
+        path: "{{ _hetzner_vault_tunnel_control_path }}"
+        follow: false
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+      register: _hetzner_vault_tunnel_close_control_stat
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      run_once: true
+      when: _hetzner_vault_tunnel_control_path_validated | default(false) | bool
+
+    - name: Require a safe controller Vault SSH close path
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (
+              _hetzner_vault_tunnel_close_control_stat.stat.exists
+              | default(false)
+            )
+            or (
+              _hetzner_vault_tunnel_close_control_stat.stat.issock
+              | default(false)
+              and not (
+                _hetzner_vault_tunnel_close_control_stat.stat.islnk
+                | default(false)
+              )
+              and _hetzner_vault_tunnel_close_control_stat.stat.uid | int
+                  == _hetzner_vault_tunnel_controller_uid | int
+            )
+        fail_msg: >-
+          Refusing to close or remove a controller Vault SSH path that is no
+          longer an owner-controlled Unix socket.
+        quiet: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: _hetzner_vault_tunnel_control_path_validated | default(false) | bool
+
+    - name: Record the safe controller Vault SSH close path
+      ansible.builtin.set_fact:
+        _hetzner_vault_tunnel_close_path_safe: true
+      delegate_to: localhost
+      delegate_facts: false
+      become: false
+      changed_when: false
+      run_once: true
+      when: _hetzner_vault_tunnel_control_path_validated | default(false) | bool
+
+    - name: Request controller Vault SSH master shutdown
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -S
+          - "{{ _hetzner_vault_tunnel_control_path }}"
+          - -O
+          - exit
+          - -p
+          - "{{ hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | string }}"
+          - >-
+            {{
+              hetzner_baremetal_vault.network.ssh_tunnel.ssh_user
+              ~ '@'
+              ~ hetzner_baremetal_vault.network.ssh_tunnel.ssh_host
+            }}
+      register: _hetzner_vault_tunnel_close_exit
+      delegate_to: localhost
+      become: false
+      changed_when: _hetzner_vault_tunnel_close_exit.rc == 0
+      failed_when: false
+      check_mode: false
+      run_once: true
+      when:
+        - _hetzner_vault_tunnel_close_path_safe | default(false) | bool
+        - >-
+          _hetzner_vault_tunnel_close_control_stat.stat.exists
+          | default(false)
+
+    - name: Require the controller Vault tunnel listener to stop
+      ansible.builtin.wait_for:
+        host: "{{ hetzner_baremetal_vault.network.ssh_tunnel.local_address }}"
+        port: "{{ hetzner_baremetal_vault.network.ssh_tunnel.local_port | int }}"
+        state: stopped
+        timeout: 10
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      run_once: true
+      when:
+        - _hetzner_vault_tunnel_control_path_validated | default(false) | bool
+        - >-
+          _hetzner_vault_tunnel_lifecycle_started | default(false) | bool
+          or
+          _hetzner_vault_tunnel_close_control_stat.stat.exists
+          | default(false)
+
+  always:
+    - name: Remove the retired controller Vault SSH control socket
+      ansible.builtin.file:
+        path: "{{ _hetzner_vault_tunnel_control_path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: _hetzner_vault_tunnel_close_path_safe | default(false) | bool
+
+    - name: Reset controller Vault SSH tunnel facts
+      ansible.builtin.set_fact:
+        _hetzner_vault_ssh_tunnel_ready: false
+        _hetzner_vault_tunnel_control_path_validated: false
+        _hetzner_vault_tunnel_lifecycle_started: false
+        _hetzner_vault_tunnel_close_path_safe: false
+        _hetzner_vault_tunnel_control_path: null
+        _hetzner_vault_tunnel_control_canonical: null
+        _hetzner_vault_tunnel_key_path: null
+        _hetzner_vault_tunnel_key_canonical: null
+        _hetzner_vault_tunnel_known_hosts_path: null
+        _hetzner_vault_tunnel_known_hosts_canonical: null
+      delegate_to: localhost
+      delegate_facts: false
+      become: false
+      changed_when: false
+      no_log: true
+      run_once: true

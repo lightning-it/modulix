@@ -1,0 +1,298 @@
+---
+- name: Escrow or restore-prove the LIT Vault Raft snapshot
+  hosts: hetzner_baremetal
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one exact Vault host and snapshot action
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_vault.host
+          - vault_raft_snapshot_operation in ['backup', 'restore_drill']
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+        fail_msg: >-
+          Use --limit with the exact Vault host, select backup or restore_drill,
+          and run only after the verified HashiCorp Vault backend transition.
+        quiet: true
+      tags: [always]
+
+    - name: Generate one fresh encrypted Raft snapshot escrow path
+      ansible.builtin.set_fact:
+        _vault_raft_snapshot_selected_path: >-
+          {{
+            hetzner_baremetal_vault.backup.controller_snapshot_dir
+            ~ '/vault-raft-'
+            ~ now(utc=true, fmt='%Y%m%dT%H%M%S%fZ')
+            ~ '.vault.yml'
+          }}
+      changed_when: false
+      when: vault_raft_snapshot_operation == 'backup'
+      no_log: true
+
+    - name: Select exact encrypted Raft snapshot for restore drill
+      ansible.builtin.set_fact:
+        _vault_raft_snapshot_selected_path: >-
+          {{ vault_raft_snapshot_document_path | default('') | normpath }}
+      changed_when: false
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Require selected Raft snapshot below the inventory escrow directory
+      ansible.builtin.assert:
+        that:
+          - _vault_raft_snapshot_selected_path is match('^/')
+          - >-
+            _vault_raft_snapshot_selected_path.startswith(
+              hetzner_baremetal_vault.backup.controller_snapshot_dir ~ '/'
+            )
+          - >-
+            _vault_raft_snapshot_selected_path
+            is match('^.*\/vault-raft-[0-9]{8}T[0-9]{12}Z\.vault\.yml$')
+        fail_msg: "Selected Raft snapshot path is outside the exact inventory escrow contract."
+        quiet: true
+      no_log: true
+
+    - name: Inspect selected restore-drill ciphertext
+      ansible.builtin.stat:
+        path: "{{ _vault_raft_snapshot_selected_path }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_attributes: false
+        get_mime: false
+      register: _vault_raft_snapshot_restore_ciphertext_stat
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Require exact restore-drill ciphertext and authorization
+      ansible.builtin.assert:
+        that:
+          - _vault_raft_snapshot_restore_ciphertext_stat.stat.exists | default(false)
+          - _vault_raft_snapshot_restore_ciphertext_stat.stat.isreg | default(false)
+          - >-
+            _vault_raft_snapshot_restore_ciphertext_stat.stat.mode
+            in ['0400', '0600']
+          - >-
+            _vault_raft_snapshot_restore_ciphertext_stat.stat.checksum
+            is match('^[0-9a-f]{64}$')
+          - >-
+            vault_raft_snapshot_restore_confirmation | default('')
+            == 'RESTORE_DRILL:'
+            ~ _vault_raft_snapshot_restore_ciphertext_stat.stat.checksum
+        fail_msg: >-
+          Restore drill requires a safe exact encrypted snapshot and
+          RESTORE_DRILL:<ciphertext-sha256> confirmation.
+        quiet: true
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Inspect authoritative controller Vault init escrow for restore drill
+      ansible.builtin.stat:
+        path: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_attributes: false
+        get_mime: false
+      register: _vault_raft_snapshot_init_ciphertext_stat
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Resolve current controller user identity for restore drill
+      ansible.builtin.command:
+        argv:
+          - id
+          - -u
+      register: _vault_raft_snapshot_controller_uid
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Read only the controller init ciphertext signature for restore drill
+      ansible.builtin.command:
+        argv:
+          - head
+          - -c
+          - "15"
+          - "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+      register: _vault_raft_snapshot_init_ciphertext_signature
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      when:
+        - vault_raft_snapshot_operation == 'restore_drill'
+        - _vault_raft_snapshot_init_ciphertext_stat.stat.exists | default(false)
+      no_log: true
+
+    - name: Require safe controller init ciphertext for restore drill
+      ansible.builtin.assert:
+        that:
+          - _vault_raft_snapshot_init_ciphertext_stat.stat.exists | default(false)
+          - _vault_raft_snapshot_init_ciphertext_stat.stat.isreg | default(false)
+          - >-
+            not (
+              _vault_raft_snapshot_init_ciphertext_stat.stat.islnk
+              | default(false)
+            )
+          - _vault_raft_snapshot_init_ciphertext_stat.stat.nlink | int == 1
+          - >-
+            _vault_raft_snapshot_init_ciphertext_stat.stat.uid | int
+            == _vault_raft_snapshot_controller_uid.stdout | int
+          - >-
+            _vault_raft_snapshot_init_ciphertext_stat.stat.mode
+            in ['0400', '0600']
+          - _vault_raft_snapshot_init_ciphertext_stat.stat.size | int > 0
+          - _vault_raft_snapshot_init_ciphertext_stat.stat.size | int <= 1048576
+          - >-
+            _vault_raft_snapshot_init_ciphertext_stat.stat.checksum
+            is match('^[0-9a-f]{64}$')
+          - >-
+            _vault_raft_snapshot_init_ciphertext_signature.stdout
+            == '$ANSIBLE_VAULT;'
+        fail_msg: >-
+          Controller init escrow is not safe owner-only Ansible Vault ciphertext.
+        quiet: true
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Load authoritative controller Vault init escrow for restore drill
+      ansible.builtin.include_vars:
+        file: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+        name: _vault_raft_snapshot_init_document
+      delegate_to: localhost
+      become: false
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+    - name: Require exact production Shamir material for restore drill
+      ansible.builtin.assert:
+        that:
+          - _vault_raft_snapshot_init_document is mapping
+          - _vault_raft_snapshot_init_document.keys() | list == ['vault_init']
+          - _vault_raft_snapshot_init_document.vault_init is mapping
+          - >-
+            _vault_raft_snapshot_init_document.vault_init.unseal_keys_b64
+            is sequence
+          - >-
+            _vault_raft_snapshot_init_document.vault_init.unseal_keys_b64
+            is not string
+          - >-
+            _vault_raft_snapshot_init_document.vault_init.unseal_keys_b64 | length
+            == hetzner_baremetal_vault.seal.key_shares | int
+        fail_msg: "Controller init escrow does not contain the exact production Shamir material."
+        quiet: true
+      when: vault_raft_snapshot_operation == 'restore_drill'
+      no_log: true
+
+  tasks:
+    - name: Run the snapshot lifecycle through an ephemeral Vault transport
+      block:
+        - name: Resolve scoped controller HashiCorp Vault authentication
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+          no_log: true
+          tags: [always]
+
+        - name: Run encrypted Raft snapshot lifecycle role
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_raft_snapshot
+          vars:
+            vault_raft_snapshot_action: "{{ vault_raft_snapshot_operation }}"
+            vault_raft_snapshot_api_url: >-
+              {{ hetzner_baremetal_vault.network.controller_api_addr }}
+            vault_raft_snapshot_health_url: >-
+              {{ vault_raft_snapshot_api_url }}/v1/sys/health
+            vault_raft_snapshot_api_delegate_to: localhost
+            vault_raft_snapshot_validate_certs: true
+            vault_raft_snapshot_controller_ca_cert_path: >-
+              {{ hetzner_baremetal_vault.ca_cert_path }}
+            vault_raft_snapshot_target_ca_cert_path: >-
+              {{ hetzner_baremetal_vault.tls.target_ca_cert_path }}
+            vault_raft_snapshot_timeout: "{{ hetzner_baremetal_vault.timeout }}"
+            vault_raft_snapshot_auth_mount_point: >-
+              {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+            vault_raft_snapshot_role_id: >-
+              {{ _hetzner_vault_auth_document.role_id }}
+            vault_raft_snapshot_secret_id: >-
+              {{ _hetzner_vault_auth_document.secret_id }}
+            vault_raft_snapshot_controller_escrow_root_path: >-
+              {{ hetzner_baremetal_vault.backup.controller_escrow_root_path }}
+            vault_raft_snapshot_controller_document_path: >-
+              {{ _vault_raft_snapshot_selected_path }}
+            vault_raft_snapshot_expected_ciphertext_sha256: >-
+              {{
+                _vault_raft_snapshot_restore_ciphertext_stat.stat.checksum
+                if vault_raft_snapshot_operation == 'restore_drill'
+                else ''
+              }}
+            vault_raft_snapshot_document_schema_version: 1
+            vault_raft_snapshot_document_subject: >-
+              {{ hetzner_baremetal_vault.endpoint_fqdn }}
+            vault_raft_snapshot_max_raw_bytes: >-
+              {{ hetzner_baremetal_vault.backup.max_raw_bytes }}
+            vault_raft_snapshot_verification_kv_paths: >-
+              {{ hetzner_baremetal_vault.backup.verification_kv_paths }}
+            vault_raft_snapshot_image: >-
+              {{ hetzner_baremetal_vault.image.reference }}
+            vault_raft_snapshot_production_cert_dir: >-
+              {{ hetzner_baremetal_vault.tls.target_cert_dir }}
+            vault_raft_snapshot_restore_bind_address: >-
+              {{ hetzner_baremetal_vault.backup.restore_drill.bind_address }}
+            vault_raft_snapshot_restore_api_port: >-
+              {{ hetzner_baremetal_vault.backup.restore_drill.api_port }}
+            vault_raft_snapshot_restore_cluster_port: >-
+              {{ hetzner_baremetal_vault.backup.restore_drill.cluster_port }}
+            vault_raft_snapshot_restore_work_root: >-
+              {{ hetzner_baremetal_vault.backup.restore_drill.work_root }}
+            vault_raft_snapshot_restore_node_id: >-
+              {{ hetzner_baremetal_vault.storage.node_id }}
+            vault_raft_snapshot_restore_unseal_keys: >-
+              {{
+                _vault_raft_snapshot_init_document.vault_init.unseal_keys_b64
+                if vault_raft_snapshot_operation == 'restore_drill'
+                else []
+              }}
+            vault_raft_snapshot_restore_key_threshold: >-
+              {{
+                hetzner_baremetal_vault.seal.key_threshold
+                if vault_raft_snapshot_operation == 'restore_drill'
+                else 0
+              }}
+          no_log: true
+
+        - name: Report safe encrypted Raft snapshot result
+          ansible.builtin.debug:
+            msg: >-
+              {{
+                'Encrypted off-host Raft snapshot escrow verified at '
+                ~ vault_raft_snapshot_escrow_path
+                ~ ' with ciphertext SHA-256 '
+                ~ vault_raft_snapshot_escrow_ciphertext_sha256
+                ~ ' with raw SHA-256 '
+                ~ vault_raft_snapshot_raw_sha256
+                if vault_raft_snapshot_operation == 'backup'
+                else 'Isolated Raft restore proof passed for raw SHA-256 '
+                     ~ vault_raft_snapshot_restore_sha256
+              }}
+
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

@@ -51,6 +51,10 @@ aap_effective_env_file: >-
 aap_effective_secrets_dir: >-
   {{ aap_secrets_dir
      | default(aap_effective_appl_root ~ '/secrets', true) }}
+aap_effective_known_hosts_file: >-
+  {{ aap_known_hosts_file
+     | default(aap_effective_secrets_dir ~ '/bootstrap_known_hosts', true) }}
+aap_known_hosts_container: /runner/secrets/bootstrap_known_hosts
 aap_effective_automation_dir: >-
   {{ aap_automation_dir
      | default(aap_effective_appl_root ~ '/src/modulix-automation', true) }}
@@ -72,6 +76,15 @@ aap_automation_source_dir_effective: "{{ aap_automation_source_dir | default('',
 aap_effective_ee_transfer_enabled: "{{ aap_ee_transfer_enabled | default(true) | bool }}"
 modulix_run_ee_archive: >-
   {{ (modulix_run_ee_image | regex_replace('^.*/', '') | regex_replace(':', '-')) ~ '.tar' }}
+modulix_run_ee_digest_effective: "{{ modulix_run_ee_digest | default('', true) | string | trim }}"
+modulix_run_ee_repository: >-
+  {{ modulix_run_ee_image | regex_replace(':[^/:@]+$', '') }}
+modulix_run_ee_runtime_image: >-
+  {{
+    (modulix_run_ee_repository ~ '@' ~ modulix_run_ee_digest_effective)
+    if (modulix_run_ee_digest_effective | length > 0)
+    else modulix_run_ee_image
+  }}
 machine_a_effective_ee_archive_path: >-
   {{ machine_a_modulix_run_ee_archive_path
      | default(machine_a_effective_appl_root ~ '/artifacts/' ~ modulix_run_ee_archive, true) }}
@@ -89,6 +102,12 @@ ansible_collections_path_effective: >-
 ansible_vault_password_file_effective: >-
   {{ ansible_vault_password_file
      | default(aap_effective_secrets_dir ~ '/.vault-pass.txt', true) }}
+aap_host_ca_trust_dir_effective: "{{ aap_host_ca_trust_dir | default('/etc/pki/ca-trust', true) }}"
+aap_requests_ca_bundle_effective: >-
+  {{
+    aap_requests_ca_bundle
+    | default(aap_host_ca_trust_dir_effective ~ '/extracted/pem/tls-ca-bundle.pem', true)
+  }}
 aap_podman_storage_conf_effective: >-
   {{ aap_podman_storage_conf
      | default(aap_effective_appl_root ~ '/etc/containers-storage.conf', true) }}
@@ -107,6 +126,12 @@ vault_token_effective: >-
     | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | string | trim, true)
     | string
     | trim
+  }}
+vault_validate_certs_effective: >-
+  {{
+    vault_validate_certs
+    | default(not (vault_skip_verify | default(false) | bool))
+    | bool
   }}
 aap_vault_host_key_effective: "{{ aap_vault_host_key | default(aap_effective_shortname, true) }}"
 aap_vault_admin_passwords_kv_path_effective: >-

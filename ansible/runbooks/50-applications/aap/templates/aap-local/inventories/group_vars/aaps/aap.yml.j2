@@ -26,6 +26,7 @@ aap_deploy_growth_hub_host: {{ aap_inventory_host | to_json }}
 aap_deploy_growth_eda_host: {{ aap_inventory_host | to_json }}
 aap_deploy_growth_automationmetrics_host: {{ aap_inventory_host | to_json }}
 aap_deploy_growth_postgresql_host: {{ aap_inventory_host | to_json }}
+aap_deploy_host_alias_address: "{{ '{{' }} ansible_default_ipv4.address {{ '}}' }}"
 aap_deploy_gateway_pg_host: {{ (aap_ansible_host | default(aap_fqdn, true)) | to_json }}
 aap_deploy_controller_pg_host: {{ (aap_ansible_host | default(aap_fqdn, true)) | to_json }}
 aap_deploy_hub_pg_host: {{ (aap_ansible_host | default(aap_fqdn, true)) | to_json }}
@@ -50,8 +51,8 @@ aap_deploy_install_environment:
 
 aap_cac_gateway_hostname: "https://{{ aap_fqdn }}"
 
-aap_ops_health_url: "https://127.0.0.1/"
-aap_ops_validate_certs: false
+aap_ops_health_url: "https://{{ aap_fqdn }}/"
+aap_ops_validate_certs: true
 aap_ops_manage_systemd: false
 
 aap_prepare_bundle_required: true
@@ -98,6 +99,3 @@ aap_cac_controller_organizations:
 controller_settings:
   - name: TOWER_URL_BASE
     value: "https://{{ aap_fqdn }}"
-  - name: AWX_TASK_ENV
-    value:
-      GIT_SSL_NO_VERIFY: "true"

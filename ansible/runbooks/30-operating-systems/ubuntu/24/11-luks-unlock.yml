@@ -46,393 +46,630 @@
   any_errors_fatal: true
   serial: 1
 
+  vars:
+    _luks_unlock_header_chunk_path_prefix: >-
+      {{
+        hetzner_baremetal_vault_secret_path
+        ~ '/'
+        ~ hetzner_baremetal_vault.luks_header_chunk_path_suffix
+      }}
+
   pre_tasks:
     - name: Require Ubuntu 24.04
       ansible.builtin.assert:
         that:
-          - ansible_distribution == 'Ubuntu'
-          - ansible_distribution_version is version('24.04', '>=')
-          - ansible_distribution_version is version('25.04', '<')
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('24.04', '>=')
+          - ansible_facts['distribution_version'] is version('25.04', '<')
           - >-
             [
-              hetzner_baremetal_vault.luks_header_field,
+              hetzner_baremetal_vault.luks_header_format_field,
+              hetzner_baremetal_vault.luks_header_chunk_path_prefix_field,
+              hetzner_baremetal_vault.luks_header_chunk_count_field,
+              hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field,
+              hetzner_baremetal_vault.luks_header_chunk_sha256s_field,
               hetzner_baremetal_vault.luks_header_sha256_field,
               hetzner_baremetal_vault.luks_header_raw_sha256_field,
               hetzner_baremetal_vault.luks_header_raw_size_field,
               hetzner_baremetal_vault.luks_uuid_field
             ] | select('string') | reject('equalto', '') | unique | list
-            | length == 5
+            | length == 9
+          - >-
+            hetzner_baremetal_vault.luks_header_storage_format
+            == 'raw-base64-chunks-v1'
+          - >-
+            hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int
+            == 393216
+          - >-
+            _luks_unlock_header_chunk_path_prefix
+            is match('^[A-Za-z0-9][A-Za-z0-9/_.-]*$')
         fail_msg: "This runbook supports Ubuntu 24.04 only."
       tags: [always]
 
-    - name: Refuse Tang self-binding
-      ansible.builtin.assert:
-        that:
-          - inventory_hostname != hetzner_baremetal_tang_host
-        fail_msg: >-
-          The Tang server must remain on Dropbear recovery and cannot bind its
-          own encrypted root to itself.
-        quiet: true
-      when: luks_unlock_method == 'clevis_tang'
-
-    - name: Resolve the host recovery document for Tang binding
-      ansible.builtin.include_tasks: >-
-        ../../../00-common/tasks/resolve-recovery-secret.yml
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
-
-    - name: Read the pinned Tang trust document
-      community.hashi_vault.vault_kv2_get:
-        engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
-        path: "{{ hetzner_baremetal_tang_vault_secret_path }}"
-      delegate_to: localhost
-      become: false
-      register: _luks_unlock_tang_secret
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
-
-    - name: Require an exact verified LUKS-header backup record
-      ansible.builtin.assert:
-        that:
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_field
-            ] | default('', true) | length > 0
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_sha256_field
-            ] | default('') is match('^[0-9a-f]{64}$')
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_field
-            ] | hash('sha256')
-            == _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_sha256_field
-            ]
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_uuid_field
-            ] | default('', true) | length > 0
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_raw_sha256_field
-            ] | default('') is match('^[0-9a-f]{64}$')
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_raw_size_field
-            ] | default(none) | type_debug == 'int'
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_raw_size_field
-            ] > 0
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_raw_size_field
-            ]
-            <=
-            hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes | int
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_field
-            ] | length
-            ==
-            (
-              (
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_header_raw_size_field
-                ] + 2
-              ) // 3
-            ) * 4
-          - >-
-            luks_unlock_metadata_confirmation | default('')
-            ==
-            'BIND_TANG:'
-            ~ inventory_hostname
-            ~ ':'
-            ~ _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_header_raw_sha256_field
-            ]
-        fail_msg: >-
-          Tang binding requires an exact, checksum-verified HashiCorp Vault
-          LUKS-header backup and the fresh confirmation
-          BIND_TANG:<inventory-host>:<raw-header-sha256>.
-        quiet: true
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
-
-    - name: Discover the installed encrypted-root source
-      ansible.builtin.shell: |
-        set -o pipefail
-        awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
-      args:
-        executable: /bin/bash
-      register: _luks_unlock_header_devices
-      changed_when: false
-      when: luks_unlock_method == 'clevis_tang'
-
-    - name: Require one installed encrypted-root source
-      ansible.builtin.assert:
-        that:
-          - _luks_unlock_header_devices.stdout_lines | length == 1
-          - _luks_unlock_header_devices.stdout_lines[0] is match('^/dev/')
-        fail_msg: "Expected exactly one resolvable crypttab source device."
-        quiet: true
-      when: luks_unlock_method == 'clevis_tang'
-
-    - name: Read the installed encrypted-root LUKS UUID
-      ansible.builtin.command:
-        argv:
-          - cryptsetup
-          - luksUUID
-          - "{{ _luks_unlock_header_devices.stdout_lines[0] }}"
-      register: _luks_unlock_installed_uuid
-      changed_when: false
-      when: luks_unlock_method == 'clevis_tang'
-
-    - name: Require the backed-up LUKS UUID to match the installed root
-      ansible.builtin.assert:
-        that:
-          - >-
-            _hetzner_baremetal_recovery_document[
-              hetzner_baremetal_vault.luks_uuid_field
-            ] == _luks_unlock_installed_uuid.stdout | trim
-        fail_msg: >-
-          The HashiCorp Vault LUKS-header backup does not match the installed
-          encrypted-root UUID. No keyslot will be changed.
-        quiet: true
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
-
-    - name: Prove the approved and current live headers before keyslot mutation
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
+    - name: Validate Tang binding through an ephemeral Vault transport
       block:
-        - name: Allocate a protected header-verification directory
-          ansible.builtin.tempfile:
-            state: directory
-            path: /run
-            prefix: lit-bind-verify-
-          register: _luks_unlock_header_verify_temp
-
-        - name: Enforce owner-only access to the verification directory
-          ansible.builtin.file:
-            path: "{{ _luks_unlock_header_verify_temp.path }}"
-            state: directory
-            owner: root
-            group: root
-            mode: '0700'
-
-        - name: Resolve the initially absent verification header paths
-          ansible.builtin.set_fact:
-            _luks_unlock_header_approved_path: >-
-              {{ _luks_unlock_header_verify_temp.path }}/header.luks
-            _luks_unlock_header_live_path: >-
-              {{ _luks_unlock_header_verify_temp.path }}/header-live.luks
-
-        - name: Verify the protected directory identity
-          ansible.builtin.stat:
-            path: "{{ _luks_unlock_header_verify_temp.path }}"
-            follow: false
-          register: _luks_unlock_header_verify_dir_stat
-          changed_when: false
-
-        - name: Require an owner-only root verification directory
+        - name: Refuse Tang self-binding
           ansible.builtin.assert:
             that:
-              - _luks_unlock_header_verify_dir_stat.stat.exists | default(false)
-              - _luks_unlock_header_verify_dir_stat.stat.isdir | default(false)
-              - _luks_unlock_header_verify_dir_stat.stat.islnk | default(false) == false
-              - _luks_unlock_header_verify_dir_stat.stat.mode | default('') == '0700'
-              - _luks_unlock_header_verify_dir_stat.stat.uid | default(-1) == 0
-              - _luks_unlock_header_verify_dir_stat.stat.gid | default(-1) == 0
+              - inventory_hostname != hetzner_baremetal_tang_host
             fail_msg: >-
-              The temporary live-header verification directory is not an
-              owner-only root directory below /run.
+              The Tang server must remain on Dropbear recovery and cannot bind its
+              own encrypted root to itself.
             quiet: true
+          when: luks_unlock_method == 'clevis_tang'
 
-        - name: Decode the approved Vault header under owner-only umask
-          ansible.builtin.command:
-            argv:
-              - /bin/bash
-              - -c
-              - >-
-                umask 077;
-                base64 --decode > "$1"
-              - lit-luks-header-verify
-              - "{{ _luks_unlock_header_approved_path }}"
-            stdin: >-
-              {{
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_header_field
-                ]
-              }}
-            stdin_add_newline: false
-          changed_when: false
-
-        - name: Back up the current live LUKS2 header under owner-only umask
-          ansible.builtin.command:
-            argv:
-              - /bin/bash
-              - -c
-              - >-
-                umask 077;
-                exec cryptsetup luksHeaderBackup "$1"
-                --header-backup-file "$2"
-              - lit-luks-header-live-backup
-              - "{{ _luks_unlock_header_devices.stdout_lines[0] }}"
-              - "{{ _luks_unlock_header_live_path }}"
-          changed_when: false
-
-        - name: Calculate approved raw-header metadata
-          ansible.builtin.stat:
-            path: "{{ _luks_unlock_header_approved_path }}"
-            get_checksum: true
-            checksum_algorithm: sha256
-            follow: false
-          register: _luks_unlock_header_approved_stat
-          changed_when: false
-
-        - name: Calculate current live raw-header metadata
-          ansible.builtin.stat:
-            path: "{{ _luks_unlock_header_live_path }}"
-            get_checksum: true
-            checksum_algorithm: sha256
-            follow: false
-          register: _luks_unlock_header_live_stat
-          changed_when: false
-
-        - name: Read the approved backup LUKS UUID
-          ansible.builtin.command:
-            argv:
-              - cryptsetup
-              - luksUUID
-              - "{{ _luks_unlock_header_approved_path }}"
-          register: _luks_unlock_header_approved_uuid
-          changed_when: false
-
-        - name: Read the current live backup LUKS UUID
-          ansible.builtin.command:
-            argv:
-              - cryptsetup
-              - luksUUID
-              - "{{ _luks_unlock_header_live_path }}"
-          register: _luks_unlock_header_live_uuid
-          changed_when: false
-
-        - name: Require approved backup LUKS2 JSON metadata
-          ansible.builtin.command:
-            argv:
-              - cryptsetup
-              - luksDump
-              - --dump-json-metadata
-              - "{{ _luks_unlock_header_approved_path }}"
-          changed_when: false
-
-        - name: Require current live backup LUKS2 JSON metadata
-          ansible.builtin.command:
-            argv:
-              - cryptsetup
-              - luksDump
-              - --dump-json-metadata
-              - "{{ _luks_unlock_header_live_path }}"
-          changed_when: false
-
-        - name: Require exact approved and current live raw-header identity
-          ansible.builtin.assert:
-            that:
-              - _luks_unlock_header_approved_stat.stat.exists | default(false)
-              - _luks_unlock_header_approved_stat.stat.isreg | default(false)
-              - _luks_unlock_header_approved_stat.stat.islnk | default(false) == false
-              - _luks_unlock_header_approved_stat.stat.mode | default('') == '0600'
-              - _luks_unlock_header_approved_stat.stat.uid | default(-1) == 0
-              - _luks_unlock_header_approved_stat.stat.gid | default(-1) == 0
-              - _luks_unlock_header_approved_stat.stat.nlink | default(0) == 1
-              - >-
-                _luks_unlock_header_approved_stat.stat.size
-                ==
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_header_raw_size_field
-                ]
-              - >-
-                _luks_unlock_header_approved_stat.stat.checksum
-                ==
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_header_raw_sha256_field
-                ]
-              - _luks_unlock_header_live_stat.stat.exists | default(false)
-              - _luks_unlock_header_live_stat.stat.isreg | default(false)
-              - _luks_unlock_header_live_stat.stat.islnk | default(false) == false
-              - _luks_unlock_header_live_stat.stat.mode | default('') == '0600'
-              - _luks_unlock_header_live_stat.stat.uid | default(-1) == 0
-              - _luks_unlock_header_live_stat.stat.gid | default(-1) == 0
-              - _luks_unlock_header_live_stat.stat.nlink | default(0) == 1
-              - >-
-                _luks_unlock_header_live_stat.stat.size
-                ==
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_header_raw_size_field
-                ]
-              - >-
-                _luks_unlock_header_live_stat.stat.checksum
-                ==
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_header_raw_sha256_field
-                ]
-              - >-
-                _luks_unlock_header_approved_uuid.stdout | trim
-                == _luks_unlock_installed_uuid.stdout | trim
-              - >-
-                _luks_unlock_header_live_uuid.stdout | trim
-                == _luks_unlock_installed_uuid.stdout | trim
-              - >-
-                _luks_unlock_header_approved_uuid.stdout | trim
-                ==
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_uuid_field
-                ]
-              - >-
-                _luks_unlock_header_live_uuid.stdout | trim
-                ==
-                _hetzner_baremetal_recovery_document[
-                  hetzner_baremetal_vault.luks_uuid_field
-                ]
-            fail_msg: >-
-              The approved Vault header and a fresh backup of the current live
-              LUKS2 header do not both match the exact stored byte size,
-              SHA-256, ownership, mode, and installed encrypted-root UUID.
-            quiet: true
-      always:
-        - name: Remove the approved and current live header copies
-          ansible.builtin.file:
-            path: "{{ _luks_unlock_header_verify_temp.path }}"
-            state: absent
-          when:
-            - _luks_unlock_header_verify_temp is defined
-            - _luks_unlock_header_verify_temp.path is defined
+        - name: Resolve the host recovery document for Tang binding
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-recovery-secret.yml
+          when: luks_unlock_method == 'clevis_tang'
           no_log: true
 
-    - name: Enable role metadata gates after exact live-header equality
-      ansible.builtin.set_fact:
-        luks_unlock_allow_luks_metadata_change: true
-        luks_unlock_header_backup_confirmed: true
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
+        - name: Read the pinned Tang trust document
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+            path: "{{ hetzner_baremetal_tang_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _luks_unlock_tang_secret
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
 
-    - name: Resolve LUKS and Tang inputs from HashiCorp Vault
-      ansible.builtin.set_fact:
-        luks_unlock_existing_passphrases:
-          root: >-
-            {{ _hetzner_baremetal_recovery_passphrase }}
-        luks_unlock_clevis_tang_thumbprint: >-
-          {{
-            _luks_unlock_tang_secret.secret[
-              hetzner_baremetal_vault.tang_thumbprint_field
-            ]
-          }}
-      when: luks_unlock_method == 'clevis_tang'
-      no_log: true
+        - name: Require an exact verified chunked LUKS-header manifest
+          ansible.builtin.assert:
+            that:
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_format_field
+                ] | default('')
+                == hetzner_baremetal_vault.luks_header_storage_format
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_path_prefix_field
+                ] | default('') == _luks_unlock_header_chunk_path_prefix
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ] | default(none) | type_debug == 'int'
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ] > 0
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ]
+                <=
+                (
+                  (
+                    hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes | int
+                  )
+                  + (hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int)
+                  - 1
+                )
+                // (hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int)
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field
+                ] | default(none) | type_debug == 'int'
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field
+                ] == hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+                ] | default(none) | type_debug == 'list'
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+                ] | length
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ]
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_sha256_field
+                ] | default('') is match('^[0-9a-f]{64}$')
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ] | default('', true) | length > 0
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_sha256_field
+                ] | default('') is match('^[0-9a-f]{64}$')
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] | default(none) | type_debug == 'int'
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] > 0
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ]
+                <=
+                hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes | int
+              - >-
+                luks_unlock_metadata_confirmation | default('')
+                ==
+                'BIND_TANG:'
+                ~ inventory_hostname
+                ~ ':'
+                ~ _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_sha256_field
+                ]
+            fail_msg: >-
+              Tang binding requires an exact, checksum-verified HashiCorp Vault
+              LUKS-header backup and the fresh confirmation
+              BIND_TANG:<inventory-host>:<raw-header-sha256>.
+            quiet: true
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Require valid manifest chunk hashes
+          ansible.builtin.assert:
+            that:
+              - item is string
+              - item is match('^[0-9a-f]{64}$')
+            fail_msg: "The Vault LUKS-header manifest has an invalid chunk hash."
+            quiet: true
+          loop: >-
+            {{
+              _hetzner_baremetal_recovery_document[
+                hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+              ]
+            }}
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Read every immutable approved LUKS-header chunk
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+            path: >-
+              {{
+                _luks_unlock_header_chunk_path_prefix
+                ~ '/chunk-'
+                ~ ('%04d' | format(item))
+              }}
+          loop: >-
+            {{
+              range(
+                0,
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ] | int
+              ) | list
+            }}
+          delegate_to: localhost
+          become: false
+          register: _luks_unlock_header_chunks
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Validate every immutable approved LUKS-header chunk
+          ansible.builtin.assert:
+            that:
+              - item.secret.schema_version | type_debug == 'int'
+              - item.secret.schema_version == 1
+              - item.secret.subject == inventory_hostname
+              - >-
+                item.secret.format
+                == hetzner_baremetal_vault.luks_header_storage_format
+              - item.secret.chunk_index | type_debug == 'int'
+              - item.secret.chunk_index == ansible_loop.index0
+              - item.secret.chunk_count | type_debug == 'int'
+              - >-
+                item.secret.chunk_count
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ]
+              - item.secret.raw_offset_bytes | type_debug == 'int'
+              - >-
+                item.secret.raw_offset_bytes
+                ==
+                ansible_loop.index0
+                * (hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int)
+              - item.secret.raw_size_bytes | type_debug == 'int'
+              - item.secret.raw_size_bytes > 0
+              - >-
+                item.secret.raw_size_bytes
+                ==
+                [
+                  hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int,
+                  _hetzner_baremetal_recovery_document[
+                    hetzner_baremetal_vault.luks_header_raw_size_field
+                  ] - item.secret.raw_offset_bytes
+                ] | min
+              - item.secret.chunk_b64 is string
+              - >-
+                item.secret.chunk_b64 | length
+                == ((item.secret.raw_size_bytes + 2) // 3) * 4
+              - >-
+                item.secret.chunk_b64 | hash('sha256')
+                == item.secret.chunk_b64_sha256
+              - >-
+                item.secret.chunk_b64_sha256
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+                ][ansible_loop.index0]
+              - >-
+                item.secret.header_raw_sha256
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_sha256_field
+                ]
+              - >-
+                item.secret.luks_uuid
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ]
+            fail_msg: "An immutable Vault LUKS-header chunk is invalid."
+            quiet: true
+          loop: "{{ _luks_unlock_header_chunks.results }}"
+          loop_control:
+            extended: true
+            label: "protected-luks-header-chunk"
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Require complete ordered approved LUKS-header chunk coverage
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_unlock_header_chunks.results | length
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ]
+              - >-
+                _luks_unlock_header_chunks.results
+                | map(attribute='secret.raw_size_bytes') | sum
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ]
+              - >-
+                _luks_unlock_header_chunks.results
+                | map(attribute='secret.chunk_b64') | join('') | hash('sha256')
+                == _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_sha256_field
+                ]
+            fail_msg: >-
+              The immutable Vault chunks do not reconstruct the approved ordered
+              LUKS-header envelope.
+            quiet: true
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Discover the installed encrypted-root source
+          ansible.builtin.shell: |
+            set -o pipefail
+            awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
+          args:
+            executable: /bin/bash
+          register: _luks_unlock_header_devices
+          changed_when: false
+          when: luks_unlock_method == 'clevis_tang'
+
+        - name: Require one installed encrypted-root source
+          ansible.builtin.assert:
+            that:
+              - _luks_unlock_header_devices.stdout_lines | length == 1
+              - _luks_unlock_header_devices.stdout_lines[0] is match('^/dev/')
+            fail_msg: "Expected exactly one resolvable crypttab source device."
+            quiet: true
+          when: luks_unlock_method == 'clevis_tang'
+
+        - name: Read the installed encrypted-root LUKS UUID
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksUUID
+              - "{{ _luks_unlock_header_devices.stdout_lines[0] }}"
+          register: _luks_unlock_installed_uuid
+          changed_when: false
+          when: luks_unlock_method == 'clevis_tang'
+
+        - name: Require the backed-up LUKS UUID to match the installed root
+          ansible.builtin.assert:
+            that:
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ] == _luks_unlock_installed_uuid.stdout | trim
+            fail_msg: >-
+              The HashiCorp Vault LUKS-header backup does not match the installed
+              encrypted-root UUID. No keyslot will be changed.
+            quiet: true
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Prove the approved and current live headers before keyslot mutation
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+          block:
+            - name: Allocate a protected header-verification directory
+              ansible.builtin.tempfile:
+                state: directory
+                path: /run
+                prefix: lit-bind-verify-
+              register: _luks_unlock_header_verify_temp
+
+            - name: Enforce owner-only access to the verification directory
+              ansible.builtin.file:
+                path: "{{ _luks_unlock_header_verify_temp.path }}"
+                state: directory
+                owner: root
+                group: root
+                mode: '0700'
+
+            - name: Resolve the initially absent verification header paths
+              ansible.builtin.set_fact:
+                _luks_unlock_header_approved_path: >-
+                  {{ _luks_unlock_header_verify_temp.path }}/header.luks
+                _luks_unlock_header_live_path: >-
+                  {{ _luks_unlock_header_verify_temp.path }}/header-live.luks
+
+            - name: Verify the protected directory identity
+              ansible.builtin.stat:
+                path: "{{ _luks_unlock_header_verify_temp.path }}"
+                follow: false
+              register: _luks_unlock_header_verify_dir_stat
+              changed_when: false
+
+            - name: Require an owner-only root verification directory
+              ansible.builtin.assert:
+                that:
+                  - _luks_unlock_header_verify_dir_stat.stat.exists | default(false)
+                  - _luks_unlock_header_verify_dir_stat.stat.isdir | default(false)
+                  - _luks_unlock_header_verify_dir_stat.stat.islnk | default(false) == false
+                  - _luks_unlock_header_verify_dir_stat.stat.mode | default('') == '0700'
+                  - _luks_unlock_header_verify_dir_stat.stat.uid | default(-1) == 0
+                  - _luks_unlock_header_verify_dir_stat.stat.gid | default(-1) == 0
+                fail_msg: >-
+                  The temporary live-header verification directory is not an
+                  owner-only root directory below /run.
+                quiet: true
+
+            - name: Initialize the protected approved Vault header file
+              ansible.builtin.copy:
+                content: ""
+                dest: "{{ _luks_unlock_header_approved_path }}"
+                owner: root
+                group: root
+                mode: '0600'
+
+            - name: Decode each approved Vault header chunk in manifest order
+              ansible.builtin.command:
+                argv:
+                  - /bin/bash
+                  - -c
+                  - >-
+                    umask 077;
+                    base64 --decode >> "$1"
+                  - lit-luks-header-verify
+                  - "{{ _luks_unlock_header_approved_path }}"
+                stdin: "{{ item.secret.chunk_b64 }}"
+                stdin_add_newline: false
+              loop: "{{ _luks_unlock_header_chunks.results }}"
+              loop_control:
+                label: "protected-luks-header-chunk"
+              changed_when: false
+
+            - name: Back up the current live LUKS2 header under owner-only umask
+              ansible.builtin.command:
+                argv:
+                  - /bin/bash
+                  - -c
+                  - >-
+                    umask 077;
+                    exec cryptsetup luksHeaderBackup "$1"
+                    --header-backup-file "$2"
+                  - lit-luks-header-live-backup
+                  - "{{ _luks_unlock_header_devices.stdout_lines[0] }}"
+                  - "{{ _luks_unlock_header_live_path }}"
+              changed_when: false
+
+            - name: Calculate approved raw-header metadata
+              ansible.builtin.stat:
+                path: "{{ _luks_unlock_header_approved_path }}"
+                get_checksum: true
+                checksum_algorithm: sha256
+                follow: false
+              register: _luks_unlock_header_approved_stat
+              changed_when: false
+
+            - name: Calculate current live raw-header metadata
+              ansible.builtin.stat:
+                path: "{{ _luks_unlock_header_live_path }}"
+                get_checksum: true
+                checksum_algorithm: sha256
+                follow: false
+              register: _luks_unlock_header_live_stat
+              changed_when: false
+
+            - name: Read the approved backup LUKS UUID
+              ansible.builtin.command:
+                argv:
+                  - cryptsetup
+                  - luksUUID
+                  - "{{ _luks_unlock_header_approved_path }}"
+              register: _luks_unlock_header_approved_uuid
+              changed_when: false
+
+            - name: Read the current live backup LUKS UUID
+              ansible.builtin.command:
+                argv:
+                  - cryptsetup
+                  - luksUUID
+                  - "{{ _luks_unlock_header_live_path }}"
+              register: _luks_unlock_header_live_uuid
+              changed_when: false
+
+            - name: Require approved backup LUKS2 JSON metadata
+              ansible.builtin.command:
+                argv:
+                  - cryptsetup
+                  - luksDump
+                  - --dump-json-metadata
+                  - "{{ _luks_unlock_header_approved_path }}"
+              changed_when: false
+
+            - name: Require current live backup LUKS2 JSON metadata
+              ansible.builtin.command:
+                argv:
+                  - cryptsetup
+                  - luksDump
+                  - --dump-json-metadata
+                  - "{{ _luks_unlock_header_live_path }}"
+              changed_when: false
+
+            - name: Require exact approved and current live raw-header identity
+              ansible.builtin.assert:
+                that:
+                  - _luks_unlock_header_approved_stat.stat.exists | default(false)
+                  - _luks_unlock_header_approved_stat.stat.isreg | default(false)
+                  - _luks_unlock_header_approved_stat.stat.islnk | default(false) == false
+                  - _luks_unlock_header_approved_stat.stat.mode | default('') == '0600'
+                  - _luks_unlock_header_approved_stat.stat.uid | default(-1) == 0
+                  - _luks_unlock_header_approved_stat.stat.gid | default(-1) == 0
+                  - _luks_unlock_header_approved_stat.stat.nlink | default(0) == 1
+                  - >-
+                    _luks_unlock_header_approved_stat.stat.size
+                    ==
+                    _hetzner_baremetal_recovery_document[
+                      hetzner_baremetal_vault.luks_header_raw_size_field
+                    ]
+                  - >-
+                    _luks_unlock_header_approved_stat.stat.checksum
+                    ==
+                    _hetzner_baremetal_recovery_document[
+                      hetzner_baremetal_vault.luks_header_raw_sha256_field
+                    ]
+                  - _luks_unlock_header_live_stat.stat.exists | default(false)
+                  - _luks_unlock_header_live_stat.stat.isreg | default(false)
+                  - _luks_unlock_header_live_stat.stat.islnk | default(false) == false
+                  - _luks_unlock_header_live_stat.stat.mode | default('') == '0400'
+                  - _luks_unlock_header_live_stat.stat.uid | default(-1) == 0
+                  - _luks_unlock_header_live_stat.stat.gid | default(-1) == 0
+                  - _luks_unlock_header_live_stat.stat.nlink | default(0) == 1
+                  - >-
+                    _luks_unlock_header_live_stat.stat.size
+                    ==
+                    _hetzner_baremetal_recovery_document[
+                      hetzner_baremetal_vault.luks_header_raw_size_field
+                    ]
+                  - >-
+                    _luks_unlock_header_live_stat.stat.checksum
+                    ==
+                    _hetzner_baremetal_recovery_document[
+                      hetzner_baremetal_vault.luks_header_raw_sha256_field
+                    ]
+                  - >-
+                    _luks_unlock_header_approved_uuid.stdout | trim
+                    == _luks_unlock_installed_uuid.stdout | trim
+                  - >-
+                    _luks_unlock_header_live_uuid.stdout | trim
+                    == _luks_unlock_installed_uuid.stdout | trim
+                  - >-
+                    _luks_unlock_header_approved_uuid.stdout | trim
+                    ==
+                    _hetzner_baremetal_recovery_document[
+                      hetzner_baremetal_vault.luks_uuid_field
+                    ]
+                  - >-
+                    _luks_unlock_header_live_uuid.stdout | trim
+                    ==
+                    _hetzner_baremetal_recovery_document[
+                      hetzner_baremetal_vault.luks_uuid_field
+                    ]
+                fail_msg: >-
+                  The approved Vault header and a fresh backup of the current live
+                  LUKS2 header do not both match the exact stored byte size,
+                  SHA-256, ownership, mode, and installed encrypted-root UUID.
+                quiet: true
+          always:
+            - name: Remove the approved and current live header copies
+              ansible.builtin.file:
+                path: "{{ _luks_unlock_header_verify_temp.path }}"
+                state: absent
+              when:
+                - _luks_unlock_header_verify_temp is defined
+                - _luks_unlock_header_verify_temp.path is defined
+              no_log: true
+
+        - name: Enable role metadata gates after exact live-header equality
+          ansible.builtin.set_fact:
+            luks_unlock_allow_luks_metadata_change: true
+            luks_unlock_header_backup_confirmed: true
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+        - name: Resolve LUKS and Tang inputs from HashiCorp Vault
+          ansible.builtin.set_fact:
+            luks_unlock_existing_passphrases:
+              root: >-
+                {{ _hetzner_baremetal_recovery_passphrase }}
+            luks_unlock_clevis_tang_thumbprint: >-
+              {{
+                _luks_unlock_tang_secret.secret[
+                  hetzner_baremetal_vault.tang_thumbprint_field
+                ]
+              }}
+          when: luks_unlock_method == 'clevis_tang'
+          no_log: true
+
+      always:
+        - name: Close the controller Vault transport after Tang validation
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
 
   tasks:
     - name: Configure the declared LUKS unlock method
-      ansible.builtin.include_role:
-        name: lit.ubuntu.luks_unlock
+      block:
+        - name: Apply the declared LUKS unlock method
+          ansible.builtin.include_role:
+            name: lit.ubuntu.luks_unlock
+      always:
+        - name: Clear in-memory LUKS-header and unlock secret material
+          ansible.builtin.set_fact:
+            _hetzner_baremetal_recovery_document: null
+            _hetzner_baremetal_recovery_passphrase: null
+            _hetzner_hashicorp_vault_auth: null
+            _luks_unlock_header_chunks: null
+            _luks_unlock_header_approved_stat: null
+            _luks_unlock_header_live_stat: null
+            _luks_unlock_tang_secret: null
+            luks_unlock_existing_passphrases: null
+          no_log: true

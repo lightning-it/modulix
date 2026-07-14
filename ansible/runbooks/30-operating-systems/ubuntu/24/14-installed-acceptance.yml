@@ -7,7 +7,7 @@
   any_errors_fatal: true
 
   tasks:
-    - name: Require an explicit limit
+    - name: Require an explicit limit  # noqa run-once[task]
       ansible.builtin.assert:
         that:
           - ansible_limit is defined
@@ -115,7 +115,7 @@
             sort -nr | head -1 | cut -d' ' -f2-
         )"
         test -n "${newest}"
-        lsinitramfs "${newest}" | grep -q cryptroot-unlock
+        lsinitramfs "${newest}" | grep -F cryptroot-unlock >/dev/null
       args:
         executable: /bin/bash
       changed_when: false
@@ -127,7 +127,8 @@
         export LC_ALL=C
 
         expected_serials() {
-          printf '%s\n' "${LIT_EXPECTED_SYSTEM_SERIALS}" |
+          /usr/bin/python3 -c \
+            'import json, os; print(*json.loads(os.environ["LIT_EXPECTED_SYSTEM_SERIALS_JSON"]), sep="\n")' |
             sed '/^$/d' | sort -u
         }
 
@@ -256,11 +257,11 @@
       args:
         executable: /bin/bash
       environment:
-        LIT_EXPECTED_SYSTEM_SERIALS: >-
+        LIT_EXPECTED_SYSTEM_SERIALS_JSON: >-
           {{
             hetzner_installimage_expected_disks
             | selectattr('purpose', 'equalto', 'system')
-            | map(attribute='serial') | list | sort | join('\n')
+            | map(attribute='serial') | list | sort | to_json
           }}
         LIT_EXPECTED_SYSTEM_DISK_COUNT: >-
           {{

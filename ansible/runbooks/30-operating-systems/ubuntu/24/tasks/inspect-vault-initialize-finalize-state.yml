@@ -1,0 +1,295 @@
+---
+- name: Load authoritative controller init escrow in protected memory for finalization planning
+  ansible.builtin.include_vars:
+    file: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+    name: _vault_lifecycle_finalize_init_document
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Load legacy scoped AppRole escrow in protected memory for finalization planning
+  ansible.builtin.include_vars:
+    file: "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+    name: _vault_lifecycle_finalize_legacy_approle_document
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Load any valid AppRole repair stage in protected memory for finalization planning
+  ansible.builtin.include_vars:
+    file: >-
+      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}.schema-v1-repair
+    name: _vault_lifecycle_finalize_repair_approle_document
+  delegate_to: localhost
+  become: false
+  when: _vault_lifecycle_controller_paths.results[4].stat.exists | default(false)
+  no_log: true
+
+- name: Require exact legacy escrow schemas before finalization planning
+  ansible.builtin.assert:
+    that:
+      - _vault_lifecycle_finalize_init_document.keys() | list == ['vault_init']
+      - _vault_lifecycle_finalize_init_document.vault_init is mapping
+      - >-
+        _vault_lifecycle_finalize_init_document.vault_init.root_token
+        is match('^[^\r\n]{16,4096}$')
+      - _vault_lifecycle_finalize_legacy_approle_document is mapping
+      - >-
+        _vault_lifecycle_finalize_legacy_approle_document.keys() | list | sort
+        == ['auth_method', 'role_id', 'schema_version', 'secret_id', 'subject']
+      - >-
+        (
+          _vault_lifecycle_finalize_legacy_approle_document.schema_version is string
+          and _vault_lifecycle_finalize_legacy_approle_document.schema_version == '1'
+        )
+        or (
+          _vault_lifecycle_finalize_legacy_approle_document.schema_version is integer
+          and _vault_lifecycle_finalize_legacy_approle_document.schema_version == 1
+        )
+      - >-
+        _vault_lifecycle_finalize_legacy_approle_document.subject
+        == hetzner_baremetal_vault.controller_auth.subject
+      - _vault_lifecycle_finalize_legacy_approle_document.auth_method == 'approle'
+      - >-
+        _vault_lifecycle_finalize_legacy_approle_document.role_id
+        is match('^[^\r\n]{16,4096}$')
+      - >-
+        _vault_lifecycle_finalize_legacy_approle_document.secret_id
+        is match('^[^\r\n]{16,4096}$')
+    fail_msg: >-
+      Finalization accepts only the exact known schema-version string defect or
+      its canonical integer repair; every credential-bearing field and binding
+      must remain exact.
+    quiet: true
+  no_log: true
+
+- name: Require an exact recoverable AppRole repair stage when present
+  ansible.builtin.assert:
+    that:
+      - _vault_lifecycle_finalize_repair_approle_document is mapping
+      - >-
+        _vault_lifecycle_finalize_repair_approle_document.keys() | list | sort
+        == ['auth_method', 'role_id', 'schema_version', 'secret_id', 'subject']
+      - _vault_lifecycle_finalize_repair_approle_document.schema_version is integer
+      - _vault_lifecycle_finalize_repair_approle_document.schema_version == 1
+      - >-
+        _vault_lifecycle_finalize_repair_approle_document.subject
+        == _vault_lifecycle_finalize_legacy_approle_document.subject
+      - >-
+        _vault_lifecycle_finalize_repair_approle_document.auth_method
+        == _vault_lifecycle_finalize_legacy_approle_document.auth_method
+      - >-
+        _vault_lifecycle_finalize_repair_approle_document.role_id
+        == _vault_lifecycle_finalize_legacy_approle_document.role_id
+      - >-
+        _vault_lifecycle_finalize_repair_approle_document.secret_id
+        == _vault_lifecycle_finalize_legacy_approle_document.secret_id
+    fail_msg: >-
+      Existing AppRole repair staging ciphertext is not the exact canonical
+      replacement for the checksum-bound legacy document.
+    quiet: true
+  when: _vault_lifecycle_controller_paths.results[4].stat.exists | default(false)
+  no_log: true
+
+- name: Require a repair stage only for the exact legacy schema state
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_lifecycle_finalize_legacy_approle_document.schema_version is string
+        or not (_vault_lifecycle_controller_paths.results[4].stat.exists | default(false))
+    fail_msg: >-
+      A repair-stage ciphertext must be absent once the canonical AppRole
+      schema has already been published.
+    quiet: true
+  no_log: true
+
+- name: Authenticate with the legacy escrow for read-only finalization planning
+  ansible.builtin.uri:
+    url: >-
+      {{
+        hetzner_baremetal_vault.api_addr
+        ~ '/v1/auth/'
+        ~ hetzner_baremetal_vault.controller_auth.auth_mount_point
+        ~ '/login'
+      }}
+    method: POST
+    body_format: json
+    body:
+      role_id: "{{ _vault_lifecycle_finalize_legacy_approle_document.role_id }}"
+      secret_id: "{{ _vault_lifecycle_finalize_legacy_approle_document.secret_id }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_finalize_login
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require an exact bounded token during finalization planning
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_lifecycle_finalize_login.json.auth.client_token
+        is match('^[^\r\n]{16,4096}$')
+      - >-
+        _vault_lifecycle_finalize_login.json.auth.token_policies | sort
+        == [hetzner_baremetal_vault.controller_auth.policy_name]
+      - >-
+        _vault_lifecycle_finalize_login.json.auth.policies | sort
+        == [hetzner_baremetal_vault.controller_auth.policy_name]
+      - _vault_lifecycle_finalize_login.json.auth.lease_duration | int > 0
+      - >-
+        _vault_lifecycle_finalize_login.json.auth.lease_duration | int
+        <= hetzner_baremetal_vault.controller_auth.token_max_ttl_seconds | int
+    fail_msg: "Legacy scoped AppRole did not return the exact bounded token contract."
+    quiet: true
+  no_log: true
+
+- name: Read exact scoped policy for finalization planning
+  ansible.builtin.uri:
+    url: >-
+      {{
+        hetzner_baremetal_vault.api_addr
+        ~ '/v1/sys/policies/acl/'
+        ~ hetzner_baremetal_vault.controller_auth.policy_name
+      }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_lifecycle_finalize_login.json.auth.client_token }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_finalize_policy
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Read exact scoped AppRole for finalization planning
+  ansible.builtin.uri:
+    url: >-
+      {{
+        hetzner_baremetal_vault.api_addr
+        ~ '/v1/auth/'
+        ~ hetzner_baremetal_vault.controller_auth.auth_mount_point
+        ~ '/role/'
+        ~ hetzner_baremetal_vault.controller_auth.role_name
+      }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_lifecycle_finalize_login.json.auth.client_token }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_finalize_role
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Probe exact scoped capabilities for finalization planning
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/capabilities-self"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ _vault_lifecycle_finalize_login.json.auth.client_token }}"
+    body_format: json
+    body:
+      paths: >-
+        {{ hetzner_baremetal_vault.controller_auth.capability_probes | map(attribute='path') | list }}
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_finalize_capabilities
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require exact scoped capability probes for finalization planning
+  ansible.builtin.assert:
+    that:
+      - item.path in _vault_lifecycle_finalize_capabilities.json
+      - >-
+        _vault_lifecycle_finalize_capabilities.json[item.path] | sort
+        == item.capabilities | sort
+    fail_msg: "Legacy scoped AppRole capabilities drifted from the approved contract."
+    quiet: true
+  loop: "{{ hetzner_baremetal_vault.controller_auth.capability_probes }}"
+  no_log: true
+
+- name: Look up the initial root token for finalization planning
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/auth/token/lookup-self"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_lifecycle_finalize_init_document.vault_init.root_token }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_finalize_root_lookup
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require exact policy, role, and root identity for finalization planning
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_lifecycle_finalize_policy.json.data.policy | trim
+        == hetzner_baremetal_vault.controller_auth.policy | trim
+      - >-
+        _vault_lifecycle_finalize_role.json.data.token_policies | sort
+        == [hetzner_baremetal_vault.controller_auth.policy_name]
+      - >-
+        _vault_lifecycle_finalize_role.json.data.token_type
+        == hetzner_baremetal_vault.controller_auth.token_type
+      - _vault_lifecycle_finalize_role.json.data.token_no_default_policy | bool
+      - >-
+        _vault_lifecycle_finalize_role.json.data.token_ttl | int
+        == hetzner_baremetal_vault.controller_auth.token_ttl_seconds | int
+      - >-
+        _vault_lifecycle_finalize_role.json.data.token_max_ttl | int
+        == hetzner_baremetal_vault.controller_auth.token_max_ttl_seconds | int
+      - >-
+        _vault_lifecycle_finalize_role.json.data.token_num_uses | int
+        == hetzner_baremetal_vault.controller_auth.token_num_uses | int
+      - >-
+        _vault_lifecycle_finalize_role.json.data.secret_id_ttl | int
+        == hetzner_baremetal_vault.controller_auth.secret_id_ttl | int
+      - >-
+        _vault_lifecycle_finalize_role.json.data.secret_id_num_uses | int
+        == hetzner_baremetal_vault.controller_auth.secret_id_num_uses | int
+      - "'root' in (_vault_lifecycle_finalize_root_lookup.json.data.policies | default([]))"
+    fail_msg: "Vault partial state drifted from exact scoped and root-token identities."
+    quiet: true
+  no_log: true
+
+- name: Record only non-secret finalization evidence
+  ansible.builtin.set_fact:
+    _vault_lifecycle_finalize_evidence:
+      legacy_schema_repair_required: >-
+        {{ _vault_lifecycle_finalize_legacy_approle_document.schema_version is string }}
+      canonical_schema_ready: >-
+        {{ _vault_lifecycle_finalize_legacy_approle_document.schema_version is integer }}
+      current_schema_type: >-
+        {{
+          'string'
+          if _vault_lifecycle_finalize_legacy_approle_document.schema_version is string
+          else 'integer'
+        }}
+      current_schema_value: 1
+      root_token_active: true
+      scoped_approle_exact: true
+      repair_stage_present: >-
+        {{ _vault_lifecycle_controller_paths.results[4].stat.exists | default(false) | bool }}
+      repair_stage_valid_or_absent: true
+  changed_when: false
+  no_log: true

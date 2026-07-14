@@ -46,36 +46,45 @@
         quiet: true
 
   tasks:
-    - name: Resolve the Ansible Vault bootstrap recovery secret
-      ansible.builtin.include_tasks: >-
-        ../../../00-common/tasks/resolve-recovery-secret.yml
-      no_log: true
+    - name: Run bootstrap unlock with bounded secret transport lifecycle
+      block:
+        - name: Resolve the Ansible Vault bootstrap recovery secret
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-recovery-secret.yml
+          no_log: true
 
-    - name: Submit the recovery passphrase through pinned SSH stdin
-      ansible.builtin.command:
-        argv:
-          - ssh
-          - -T
-          - -o
-          - BatchMode=yes
-          - -o
-          - >-
-            UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
-          - -o
-          - StrictHostKeyChecking=yes
-          - -p
-          - "{{ luks_unlock_dropbear_port | int }}"
-          - "root@{{ inventory_hostname }}"
-        stdin: "{{ _hetzner_baremetal_recovery_passphrase }}"
-        # cryptroot-unlock's non-interactive path copies stdin byte-for-byte
-        # into its passphrase FIFO. Do not append a newline to the secret.
-        stdin_add_newline: false
-      register: _hetzner_bootstrap_unlock_result
-      changed_when: true
-      no_log: true
+        - name: Submit the recovery passphrase through pinned SSH stdin
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - >-
+                UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+              - -o
+              - StrictHostKeyChecking=yes
+              - -p
+              - "{{ luks_unlock_dropbear_port | int }}"
+              - "root@{{ inventory_hostname }}"
+            stdin: "{{ _hetzner_baremetal_recovery_passphrase }}"
+            # cryptroot-unlock's non-interactive path copies stdin byte-for-byte
+            # into its passphrase FIFO. Do not append a newline to the secret.
+            stdin_add_newline: false
+          register: _hetzner_bootstrap_unlock_result
+          changed_when: true
+          no_log: true
 
-    - name: Report successful no-output encrypted-root unlock
-      ansible.builtin.debug:
-        msg: >-
-          cryptroot-unlock completed successfully for {{ inventory_hostname }};
-          no recovery passphrase or unlock output was displayed or persisted.
+        - name: Report successful no-output encrypted-root unlock
+          ansible.builtin.debug:
+            msg: >-
+              cryptroot-unlock completed successfully for
+              {{ inventory_hostname }}; no recovery passphrase or unlock
+              output was displayed or persisted.
+
+      always:
+        - name: Close any controller Vault transport opened by secret resolution
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

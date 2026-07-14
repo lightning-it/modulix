@@ -1,0 +1,116 @@
+---
+- name: Validate the protected LUKS-header chunk contract
+  ansible.builtin.assert:
+    that:
+      - _luks_header_chunk is mapping
+      - _luks_header_chunk.path is string
+      - >-
+        _luks_header_chunk.path
+        is match('^[A-Za-z0-9][A-Za-z0-9/_.-]*$')
+      - _luks_header_chunk.data is mapping
+      - _luks_header_chunk_allow_create is boolean
+    fail_msg: "Invalid protected Vault LUKS-header chunk contract."
+    quiet: true
+  no_log: true
+
+- name: Create or accept one identical immutable LUKS-header chunk
+  when: _luks_header_chunk_allow_create
+  no_log: true
+  block:
+    - name: Create the absent LUKS-header chunk with CAS zero
+      community.hashi_vault.vault_kv2_write:
+        url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+        namespace: >-
+          {{
+            _hetzner_hashicorp_vault_auth.namespace
+            if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+            else omit
+          }}
+        validate_certs: >-
+          {{ _hetzner_hashicorp_vault_auth.validate_certs }}
+        ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+        timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+        retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+        auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+        mount_point: >-
+          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+        role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+        secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+        engine_mount_point: "{{ _luks_header_vault_mount }}"
+        path: "{{ _luks_header_chunk.path }}"
+        cas: 0
+        data: "{{ _luks_header_chunk.data }}"
+      delegate_to: localhost
+      become: false
+  rescue:
+    - name: Read the possible immutable LUKS-header chunk winner
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+        namespace: >-
+          {{
+            _hetzner_hashicorp_vault_auth.namespace
+            if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+            else omit
+          }}
+        validate_certs: >-
+          {{ _hetzner_hashicorp_vault_auth.validate_certs }}
+        ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+        timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+        retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+        auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+        mount_point: >-
+          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+        role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+        secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+        engine_mount_point: "{{ _luks_header_vault_mount }}"
+        path: "{{ _luks_header_chunk.path }}"
+      delegate_to: localhost
+      become: false
+      register: _luks_header_chunk_race_read
+
+    - name: Accept only an identical immutable LUKS-header chunk winner
+      ansible.builtin.assert:
+        that:
+          - _luks_header_chunk_race_read.secret == _luks_header_chunk.data
+        fail_msg: >-
+          The immutable Vault LUKS-header chunk CAS write failed and the
+          current document is not the exact expected chunk.
+        quiet: true
+
+- name: Read back the immutable LUKS-header chunk
+  community.hashi_vault.vault_kv2_get:
+    url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+    namespace: >-
+      {{
+        _hetzner_hashicorp_vault_auth.namespace
+        if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+        else omit
+      }}
+    validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+    ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+    timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+    retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+    auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+    mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+    role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+    secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+    engine_mount_point: "{{ _luks_header_vault_mount }}"
+    path: "{{ _luks_header_chunk.path }}"
+  delegate_to: localhost
+  become: false
+  register: _luks_header_chunk_verified
+  no_log: true
+
+- name: Require exact immutable LUKS-header chunk readback
+  ansible.builtin.assert:
+    that:
+      - _luks_header_chunk_verified.secret == _luks_header_chunk.data
+    fail_msg: "The immutable Vault LUKS-header chunk readback differs."
+    quiet: true
+  no_log: true
+
+- name: Clear in-memory immutable LUKS-header chunk readbacks
+  ansible.builtin.set_fact:
+    _luks_header_chunk_race_read: null
+    _luks_header_chunk_verified: null
+  no_log: true
