@@ -1,0 +1,82 @@
+---
+# This runbook only orchestrates pinned Rescue trust and the separately gated
+# extended-SMART role entrypoint. It never changes Robot, boot, or firewall
+# state and it processes one explicitly selected host at a time.
+- name: Pin trust for one authorized extended SMART target
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one exact bare-metal inventory target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname in groups['hetzner_baremetal']
+          - hetzner_installimage_hostname == inventory_hostname
+          - ansible_host == hetzner_installimage_expected_identity.public_ipv4
+          - >-
+            hetzner_rescue_smart_target_serials is not defined
+            or
+            (
+              hetzner_rescue_smart_target_serials is sequence
+              and hetzner_rescue_smart_target_serials is not string
+              and hetzner_rescue_smart_target_serials | length > 0
+            )
+        fail_msg: >-
+          Use --limit with one exact bare-metal inventory FQDN whose public
+          identity is complete. If a SMART target list is supplied, it must not
+          be empty; omit it to select all declared disks.
+        quiet: true
+      tags: [always]
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      tasks_from: controller_trust
+      hetzner_rescue_validate_known_hosts_path: >-
+        {{ hetzner_baremetal_rescue_known_hosts_path }}
+      hetzner_rescue_validate_public_ipv4: "{{ ansible_host }}"
+      hetzner_rescue_validate_ssh_ed25519_sha256: >-
+        {{ hetzner_rescue_ssh_ed25519_sha256 }}
+
+- name: Run one separately authorized extended SMART workflow
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      tasks_from: extended_smart
+      hetzner_rescue_validate_expected_disks: >-
+        {{ hetzner_installimage_expected_disks }}
+      hetzner_rescue_validate_rescue_marker_path: >-
+        {{ hetzner_installimage_binary }}
+      hetzner_rescue_validate_extended_smart_allow: >-
+        {{ hetzner_rescue_smart_extended_allow | default(false) }}
+      hetzner_rescue_validate_extended_smart_confirmation: >-
+        {{ hetzner_rescue_smart_extended_confirmation | default('') }}
+      hetzner_rescue_validate_extended_smart_target_serials: >-
+        {{ hetzner_rescue_smart_target_serials | default([]) }}

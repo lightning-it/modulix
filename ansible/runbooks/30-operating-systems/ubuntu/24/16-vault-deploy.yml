@@ -1,0 +1,141 @@
+---
+- name: Deploy the separately approved LIT Vault runtime
+  hosts: hetzner_baremetal
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    vault_lifecycle_operation: deploy
+    vault_deploy_image: "{{ hetzner_baremetal_vault.image.reference }}"
+    vault_deploy_require_immutable_image: >-
+      {{ hetzner_baremetal_vault.image.require_immutable_digest }}
+    vault_deploy_storage_backend: "{{ hetzner_baremetal_vault.storage.backend }}"
+    vault_deploy_raft_node_id: "{{ hetzner_baremetal_vault.storage.node_id }}"
+    vault_deploy_host_data_dir: "{{ hetzner_baremetal_vault.storage.host_data_dir }}"
+    vault_deploy_container_data_dir: "{{ hetzner_baremetal_vault.storage.container_data_dir }}"
+    vault_deploy_pod_name: "{{ hetzner_baremetal_vault.runtime.pod_name }}"
+    vault_deploy_pod_manifest_path: "{{ hetzner_baremetal_vault.runtime.pod_manifest_path }}"
+    vault_deploy_config_dir: "{{ hetzner_baremetal_vault.runtime.config_dir }}"
+    vault_deploy_cert_dir: "{{ hetzner_baremetal_vault.tls.target_cert_dir }}"
+    vault_deploy_host_ip: "{{ hetzner_baremetal_vault.network.host_bind_address }}"
+    vault_deploy_port: "{{ hetzner_baremetal_vault.network.api_port }}"
+    vault_deploy_cluster_port: "{{ hetzner_baremetal_vault.network.cluster_port }}"
+    vault_deploy_listener_address: "{{ hetzner_baremetal_vault.network.listener_address }}"
+    vault_deploy_cluster_listener_address: >-
+      {{ hetzner_baremetal_vault.network.cluster_listener_address }}
+    vault_deploy_api_addr: "{{ hetzner_baremetal_vault.network.advertised_api_addr }}"
+    vault_deploy_cluster_addr: "{{ hetzner_baremetal_vault.network.advertised_cluster_addr }}"
+    vault_deploy_container_api_url: "{{ hetzner_baremetal_vault.network.container_api_addr }}"
+    vault_deploy_vault_address: "{{ hetzner_baremetal_vault.network.controller_api_addr }}"
+    vault_deploy_api_url: "{{ hetzner_baremetal_vault.network.controller_api_addr }}"
+    vault_deploy_health_url: "{{ vault_deploy_api_url }}/v1/sys/health"
+    vault_deploy_vault_hostname: "{{ hetzner_baremetal_vault.endpoint_fqdn }}"
+    vault_deploy_vault_validate_certs: true
+    vault_deploy_api_delegate_to: localhost
+    vault_deploy_api_ca_cert_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    vault_deploy_target_ca_cert_path: "{{ hetzner_baremetal_vault.tls.target_ca_cert_path }}"
+    vault_deploy_container_ca_cert_path: "{{ hetzner_baremetal_vault.tls.container_ca_cert_path }}"
+    vault_deploy_run_as_user: "{{ hetzner_baremetal_vault.runtime.run_as_user }}"
+    vault_deploy_run_as_group: "{{ hetzner_baremetal_vault.runtime.run_as_group }}"
+    vault_deploy_run_as_non_root: "{{ hetzner_baremetal_vault.runtime.run_as_non_root }}"
+    vault_deploy_skip_setcap: "{{ hetzner_baremetal_vault.runtime.skip_setcap }}"
+    vault_deploy_add_ipc_lock_cap: "{{ hetzner_baremetal_vault.runtime.add_ipc_lock_cap }}"
+    vault_deploy_disable_mlock: "{{ hetzner_baremetal_vault.runtime.disable_mlock }}"
+    vault_deploy_selinux_relabel: false
+    vault_deploy_reload_nginx_after_restart: false
+    vault_deploy_token: ""
+
+  pre_tasks:
+    - name: Require one exact Vault deployment target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_vault.host
+        fail_msg: "Use --limit with the exact inventory-declared Vault host."
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Deploy Vault through an ephemeral controller transport
+      block:
+        - name: Establish the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
+        - name: Rebuild the fresh immutable Vault deployment plan
+          ansible.builtin.include_tasks: tasks/build-vault-lifecycle-plan.yml
+          tags: [always]
+
+        - name: Require the fresh exact Vault deployment authorization
+          ansible.builtin.assert:
+            that:
+              - >-
+                vault_deploy_approved_plan_sha256 | default('')
+                == _vault_lifecycle_plan_sha256
+              - >-
+                vault_deploy_confirmation | default('')
+                == 'DEPLOY_VAULT:' ~ inventory_hostname ~ ':'
+                ~ _vault_lifecycle_plan_sha256
+            fail_msg: >-
+              Vault deployment requires the current exact plan SHA-256 and
+              DEPLOY_VAULT:<host>:<sha256> confirmation.
+            quiet: true
+          tags: [always]
+
+        - name: Deploy the approved Vault runtime
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_deploy
+
+        - name: Validate the deployed but uninitialized Vault runtime
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_validate
+          vars:
+            vault_validate_expected_lifecycle: uninitialized
+            vault_validate_api_url: >-
+              {{ hetzner_baremetal_vault.network.container_api_addr }}
+            vault_validate_health_url: "{{ vault_validate_api_url }}/v1/sys/health"
+            vault_validate_validate_certs: true
+            vault_validate_ca_cert_path: >-
+              {{ hetzner_baremetal_vault.tls.target_ca_cert_path }}
+
+        - name: Inspect deployed Vault host listeners
+          ansible.builtin.command:
+            argv:
+              - ss
+              - -H
+              - -ltnp
+          register: _vault_deploy_listener_verify
+          changed_when: false
+
+        - name: Require loopback-only Vault API and cluster listeners
+          ansible.builtin.assert:
+            that:
+              - >-
+                '127.0.0.1:'
+                ~ (hetzner_baremetal_vault.network.api_port | string)
+                in _vault_deploy_listener_verify.stdout
+              - >-
+                '127.0.0.1:'
+                ~ (hetzner_baremetal_vault.network.cluster_port | string)
+                in _vault_deploy_listener_verify.stdout
+              - >-
+                '0.0.0.0:'
+                ~ (hetzner_baremetal_vault.network.api_port | string)
+                not in _vault_deploy_listener_verify.stdout
+              - >-
+                '[::]:' ~ (hetzner_baremetal_vault.network.api_port | string)
+                not in _vault_deploy_listener_verify.stdout
+            fail_msg: >-
+              Vault was not exposed exclusively through loopback host bindings.
+            quiet: true
+
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

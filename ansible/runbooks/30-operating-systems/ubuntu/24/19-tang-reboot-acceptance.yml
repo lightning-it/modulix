@@ -1,0 +1,333 @@
+---
+# Reboot one separately confirmed Tang client and prove that it returned over
+# managed OpenSSH without an operator Dropbear unlock. A timeout is a failed
+# automatic-unlock acceptance, even if the operator later recovers the host.
+- name: Reboot one separately approved Tang client
+  hosts: ubuntu24
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one exact separately confirmed Tang client
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname != hetzner_baremetal_tang_host
+          - inventory_hostname in groups['hetzner_baremetal']
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+          - luks_unlock_method == 'clevis_tang'
+          - ansible_port | int == openssh_server_primary_port | int
+          - ansible_port | int == 1905
+          - not ansible_check_mode
+          - >-
+            tang_reboot_acceptance_confirmation | default('')
+            == 'REBOOT_ACCEPTANCE:' ~ inventory_hostname
+        fail_msg: >-
+          Reboot acceptance requires one exact non-Tang host, the verified
+          HashiCorp Vault backend, managed SSH TCP 1905, and the freshly typed
+          REBOOT_ACCEPTANCE:<inventory-host> confirmation.
+        quiet: true
+      tags: [always]
+
+    - name: Require one exact declared Tang keyslot
+      ansible.builtin.assert:
+        that:
+          - luks_unlock_devices is sequence
+          - luks_unlock_devices is not string
+          - luks_unlock_devices | length == 1
+          - luks_unlock_devices[0].id == 'root'
+          - luks_unlock_devices[0].keyslot | int >= 0
+          - luks_unlock_clevis_tang_url is match('^http://[^/]+$')
+        fail_msg: "Tang reboot acceptance requires one exact root keyslot and HTTP Tang URL."
+        quiet: true
+      tags: [always]
+
+    - name: Resolve trusted reboot evidence through an ephemeral Vault transport
+      tags: [always]
+      block:
+        - name: Resolve the exact client recovery and header document
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-recovery-secret.yml
+          no_log: true
+
+        - name: Read the pinned Tang trust document
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: >-
+              {{ _hetzner_hashicorp_vault_auth.validate_certs }}
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: >-
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: >-
+              {{ hetzner_baremetal_vault.engine_mount_point }}
+            path: "{{ hetzner_baremetal_tang_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _tang_reboot_trust_document
+          no_log: true
+
+        - name: Require verified header and pinned Tang trust before reboot
+          ansible.builtin.assert:
+            that:
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_sha256_field
+                ] | default('') is match('^[0-9a-f]{64}$')
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] | default(0) | int > 0
+              - >-
+                _hetzner_baremetal_recovery_document[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ] | default('', true) | length > 0
+              - >-
+                _tang_reboot_trust_document.secret[
+                  hetzner_baremetal_vault.tang_thumbprint_field
+                ] | default('') is match('^[A-Za-z0-9_-]{43}$')
+            fail_msg: >-
+              Reboot acceptance requires the verified client header record and
+              exact pinned Tang signing thumbprint.
+            quiet: true
+          no_log: true
+
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+
+  tasks:
+    - name: Discover the installed encrypted-root source
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
+      args:
+        executable: /bin/bash
+      register: _tang_reboot_devices
+      changed_when: false
+
+    - name: Require one installed encrypted-root source
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_devices.stdout_lines | length == 1
+          - _tang_reboot_devices.stdout_lines[0] is match('^/dev/')
+        fail_msg: "Expected exactly one resolvable encrypted-root source."
+        quiet: true
+
+    - name: Read the current Clevis binding
+      ansible.builtin.command:
+        argv:
+          - clevis
+          - luks
+          - list
+          - -d
+          - "{{ _tang_reboot_devices.stdout_lines[0] }}"
+          - -s
+          - "{{ luks_unlock_devices[0].keyslot | string }}"
+      register: _tang_reboot_binding_before
+      changed_when: false
+      no_log: true
+
+    - name: Split the current Clevis Tang binding description
+      ansible.builtin.set_fact:
+        _tang_reboot_binding_before_parts: >-
+          {{ (_tang_reboot_binding_before.stdout | trim).split(None, 2) }}
+      no_log: true
+
+    - name: Validate the current Clevis Tang binding description
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_binding_before_parts | length == 3
+          - >-
+            _tang_reboot_binding_before_parts[0]
+            == (luks_unlock_devices[0].keyslot | string) ~ ':'
+          - _tang_reboot_binding_before_parts[1] == 'tang'
+          - _tang_reboot_binding_before_parts[2].startswith("'")
+          - _tang_reboot_binding_before_parts[2].endswith("'")
+        fail_msg: >-
+          Clevis returned an unexpected Tang binding description before reboot.
+        quiet: true
+      no_log: true
+
+    - name: Decode the current Clevis Tang binding
+      ansible.builtin.set_fact:
+        _tang_reboot_binding_before_config: >-
+          {{
+            _tang_reboot_binding_before_parts[2][1:-1]
+            | from_json
+          }}
+        _tang_reboot_pinned_thumbprint: >-
+          {{
+            _tang_reboot_trust_document.secret[
+              hetzner_baremetal_vault.tang_thumbprint_field
+            ]
+          }}
+      no_log: true
+
+    - name: Read the live Tang advertisement from the installed client
+      ansible.builtin.uri:
+        url: "{{ luks_unlock_clevis_tang_url }}/adv"
+        method: GET
+        status_code: 200
+        return_content: true
+        timeout: 10
+      register: _tang_reboot_advertisement
+      changed_when: false
+      no_log: true
+
+    - name: Calculate live Tang signing-key thumbprints
+      ansible.builtin.shell: |
+        set -o pipefail
+        jose fmt -j- -g payload -y -o- \
+          | jose jwk use -i- -r -u verify -o- \
+          | jose jwk thp -i- -a S256
+      args:
+        executable: /bin/bash
+        stdin: "{{ _tang_reboot_advertisement.content }}"
+        stdin_add_newline: false
+      register: _tang_reboot_live_thumbprints
+      changed_when: false
+      no_log: true
+
+    - name: Require the exact live Tang trust and binding before reboot
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_binding_before_config is mapping
+          - >-
+            _tang_reboot_binding_before_config.keys() | list | sort
+            == ['thp', 'url']
+          - >-
+            _tang_reboot_binding_before_config.url
+            == luks_unlock_clevis_tang_url
+          - >-
+            _tang_reboot_binding_before_config.thp
+            == _tang_reboot_pinned_thumbprint
+          - _tang_reboot_live_thumbprints.stdout_lines | length > 0
+          - >-
+            _tang_reboot_live_thumbprints.stdout_lines
+            | reject('match', '^[A-Za-z0-9_-]{43}$')
+            | list | length == 0
+          - >-
+            _tang_reboot_pinned_thumbprint
+            in _tang_reboot_live_thumbprints.stdout_lines
+        fail_msg: >-
+          The Clevis binding, Vault pin, and live Tang signing-key
+          thumbprints do not agree exactly before reboot.
+        quiet: true
+      no_log: true
+
+    - name: Read the pre-reboot kernel boot identity
+      ansible.builtin.command:
+        argv: [cat, /proc/sys/kernel/random/boot_id]
+      register: _tang_reboot_boot_id_before
+      changed_when: false
+
+    - name: Reboot and wait only for managed OpenSSH automatic return
+      ansible.builtin.reboot:
+        connect_timeout: 10
+        reboot_timeout: 900
+        pre_reboot_delay: 0
+        post_reboot_delay: 10
+        test_command: /usr/bin/true
+
+    - name: Read the post-reboot kernel boot identity
+      ansible.builtin.command:
+        argv: [cat, /proc/sys/kernel/random/boot_id]
+      register: _tang_reboot_boot_id_after
+      changed_when: false
+
+    - name: Re-read the Clevis binding after automatic return
+      ansible.builtin.command:
+        argv:
+          - clevis
+          - luks
+          - list
+          - -d
+          - "{{ _tang_reboot_devices.stdout_lines[0] }}"
+          - -s
+          - "{{ luks_unlock_devices[0].keyslot | string }}"
+      register: _tang_reboot_binding_after
+      changed_when: false
+      no_log: true
+
+    - name: Split the retained Clevis Tang binding description
+      ansible.builtin.set_fact:
+        _tang_reboot_binding_after_parts: >-
+          {{ (_tang_reboot_binding_after.stdout | trim).split(None, 2) }}
+      no_log: true
+
+    - name: Validate the retained Clevis Tang binding description
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_binding_after_parts | length == 3
+          - >-
+            _tang_reboot_binding_after_parts[0]
+            == (luks_unlock_devices[0].keyslot | string) ~ ':'
+          - _tang_reboot_binding_after_parts[1] == 'tang'
+          - _tang_reboot_binding_after_parts[2].startswith("'")
+          - _tang_reboot_binding_after_parts[2].endswith("'")
+        fail_msg: >-
+          Clevis returned an unexpected Tang binding description after reboot.
+        quiet: true
+      no_log: true
+
+    - name: Decode the retained Clevis Tang binding
+      ansible.builtin.set_fact:
+        _tang_reboot_binding_after_config: >-
+          {{
+            _tang_reboot_binding_after_parts[2][1:-1]
+            | from_json
+          }}
+      no_log: true
+
+    - name: Require a new boot with the exact Tang binding retained
+      ansible.builtin.assert:
+        that:
+          - >-
+            _tang_reboot_boot_id_after.stdout | trim
+            != _tang_reboot_boot_id_before.stdout | trim
+          - _tang_reboot_binding_after_config is mapping
+          - >-
+            _tang_reboot_binding_after_config
+            == _tang_reboot_binding_before_config
+          - >-
+            _tang_reboot_binding_after_config.url
+            == luks_unlock_clevis_tang_url
+          - >-
+            _tang_reboot_binding_after_config.thp
+            == _tang_reboot_pinned_thumbprint
+        fail_msg: >-
+          The host did not complete a new automatic Tang-unlocked boot with
+          its exact binding retained.
+        quiet: true
+      no_log: true
+
+    - name: Require Dropbear recovery listener to be closed after boot
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ luks_unlock_dropbear_port | int }}"
+        state: stopped
+        timeout: 5
+      delegate_to: localhost
+      become: false
+
+    - name: Report successful automatic Tang reboot acceptance
+      ansible.builtin.debug:
+        msg: >-
+          Automatic Tang reboot acceptance passed for {{ inventory_hostname }};
+          managed OpenSSH returned and Dropbear is closed.

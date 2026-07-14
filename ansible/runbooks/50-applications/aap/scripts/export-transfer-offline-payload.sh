@@ -37,6 +37,12 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
+if [[ ! -s "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" ]]; then
+  printf 'Verified SSH known hosts file is missing or empty: %s\n' \
+    "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" >&2
+  exit 1
+fi
+
 machine_a_ee_archive_path="${MACHINE_A_MODULIX_RUN_EE_ARCHIVE_PATH:-${MACHINE_A_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}}"
 machine_a_source_archive_path="${MACHINE_A_APPL_ROOT}/artifacts/modulix-automation.tar.gz"
 machine_a_ssh_key_basename=""
@@ -51,7 +57,7 @@ bootstrap_known_hosts="${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}"
 
 ssh_opts=(
   -o UserKnownHostsFile="${bootstrap_known_hosts}"
-  -o StrictHostKeyChecking=accept-new
+  -o StrictHostKeyChecking=yes
 )
 
 if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
@@ -213,7 +219,9 @@ ls -lh "${aap_artifact_files[@]}"
 printf 'Creating remote landing zone on %s.\n' "${AAP_FQDN}"
 ssh "${ssh_opts[@]}" "${remote}" \
   'set -euo pipefail
-   sudo install -d -m 0750 -o "$(id -un)" -g "$(id -gn)" \
+   aap_setup_user=svc_ansible
+   aap_setup_group="$(id -gn "${aap_setup_user}")"
+   sudo install -d -m 0750 -o "${aap_setup_user}" -g "${aap_setup_group}" \
      /appl/aap-local \
      /appl/aap-local/etc \
      /appl/aap-local/secrets \
@@ -224,9 +232,11 @@ ssh "${ssh_opts[@]}" "${remote}" \
    sudo install -d -m 1777 /appl/tmp /appl/ansible-tmp
    sudo install -d -m 0755 \
      /appl/home \
-     /appl/podman \
+     /appl/podman
+   sudo install -d -m 0700 -o "${aap_setup_user}" -g "${aap_setup_group}" \
      /appl/podman/root-storage \
-     /appl/podman/root-run'
+     /appl/podman/root-run
+   find /appl/aap-local/inbox -mindepth 1 -maxdepth 1 -type f -delete'
 
 transfer_files=(
   "${env_file}"
@@ -244,6 +254,10 @@ printf 'Transferring offline payload to %s.\n' "${AAP_FQDN}"
 scp "${ssh_opts[@]}" \
   "${transfer_files[@]}" \
   "${remote}:${AAP_APPL_ROOT}/inbox/"
+
+scp "${ssh_opts[@]}" \
+  "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" \
+  "${remote}:${AAP_APPL_ROOT}/inbox/bootstrap_known_hosts"
 
 if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
   scp "${ssh_opts[@]}" \
@@ -266,15 +280,19 @@ ee_transfer_enabled="${3:-true}"
 
    install -m 0600 /appl/aap-local/inbox/aap-local.env /appl/aap-local/etc/aap-local.env
    . /appl/aap-local/etc/aap-local.env
+   aap_known_hosts_file="${AAP_KNOWN_HOSTS_FILE:-${AAP_SECRETS_DIR}/bootstrap_known_hosts}"
    if [ -n "${machine_a_ssh_key_basename}" ]; then
      install -m 0600 "/appl/aap-local/inbox/${machine_a_ssh_key_basename}" "${AAP_SSH_KEY}"
    fi
+   install -m 0600 /appl/aap-local/inbox/bootstrap_known_hosts "${aap_known_hosts_file}"
    if [ -s /appl/aap-local/inbox/.vault-token ]; then
      install -m 0600 /appl/aap-local/inbox/.vault-token /appl/aap-local/secrets/.vault-token
    fi
    install -m 0644 /appl/aap-local/inbox/aap-local-lib.sh /appl/aap-local/scripts/aap-local-lib.sh
    install -m 0755 /appl/aap-local/inbox/run-aap-playbooks.sh /appl/aap-local/scripts/run-aap-playbooks.sh
    install -m 0755 /appl/aap-local/inbox/stage-runtime-on-aap-host.sh /appl/aap-local/scripts/stage-runtime-on-aap-host.sh
+   find /appl/aap-local/artifacts -maxdepth 1 -type f \
+     \( -name "modulix-automation.tar.gz" -o -name "*.tar" \) -delete
    if [ "${ee_transfer_enabled}" = "true" ]; then
      mv -f "/appl/aap-local/inbox/${modulix_run_ee_archive}" /appl/aap-local/artifacts/
    fi

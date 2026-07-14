@@ -1,0 +1,608 @@
+---
+# Establish one controller-local forwarding socket for a Vault API that is
+# deliberately bound only to loopback on its managed host. Every caller must
+# include close-hashicorp-vault-ssh-tunnel.yml from an always section that
+# encloses all work which depends on this transport.
+- name: Reset the controller Vault SSH-tunnel lifecycle state
+  ansible.builtin.set_fact:
+    _hetzner_vault_ssh_tunnel_ready: false
+    _hetzner_vault_tunnel_control_path_validated: false
+    _hetzner_vault_tunnel_lifecycle_started: false
+  delegate_to: localhost
+  delegate_facts: false
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Validate the controller Vault SSH-tunnel contract
+  ansible.builtin.assert:
+    that:
+      - hetzner_baremetal_vault is mapping
+      - hetzner_baremetal_vault.host is string
+      - hetzner_baremetal_vault.host in groups['hetzner_baremetal']
+      - hetzner_baremetal_vault.network is mapping
+      - >-
+        hetzner_baremetal_vault.network.firewall_exposure
+        == 'loopback_only_over_managed_ssh'
+      - hetzner_baremetal_vault.network.ssh_tunnel is mapping
+      - >-
+        hetzner_baremetal_vault.api_addr
+        == hetzner_baremetal_vault.network.controller_api_addr
+      - >-
+        hetzner_baremetal_vault.network.controller_api_addr
+        == 'https://'
+        ~ hetzner_baremetal_vault.network.ssh_tunnel.local_address
+        ~ ':'
+        ~ (hetzner_baremetal_vault.network.ssh_tunnel.local_port | string)
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.local_address
+        == '127.0.0.1'
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.local_port | int >= 1
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.local_port | int <= 65535
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.remote_address
+        == '127.0.0.1'
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.remote_port | int
+        == hetzner_baremetal_vault.network.api_port | int
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.remote_port | int >= 1
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.remote_port | int <= 65535
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.ssh_host
+        == hostvars[hetzner_baremetal_vault.host].ansible_host
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | int
+        == hostvars[hetzner_baremetal_vault.host].ansible_port | int
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | int >= 1
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | int <= 65535
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.ssh_user
+        == hostvars[hetzner_baremetal_vault.host].ansible_user
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.private_key_path
+        == hostvars[hetzner_baremetal_vault.host].ansible_private_key_file
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.private_key_path is string
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.private_key_path
+        is match('^/[^\r\n]+$')
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.known_hosts_path is string
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.known_hosts_path
+        is match('^/[^\r\n]+$')
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.control_path is string
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.control_path
+        is match('^/[^\r\n]+$')
+      - >-
+        lookup('ansible.builtin.env', 'PWD') is match('^/[^\r\n]+$')
+      - >-
+        lookup('ansible.builtin.env', 'VAULT_ADDR') | length == 0
+      - >-
+        lookup('ansible.builtin.env', 'VAULT_TOKEN') | length == 0
+      - >-
+        lookup('ansible.builtin.env', 'VAULT_SKIP_VERIFY') | length == 0
+    fail_msg: >-
+      Vault controller access must use the exact inventory-declared loopback
+      SSH tunnel over the installed host's managed SSH identity, with safe
+      absolute controller paths and no exported Vault credentials or bypass.
+    quiet: true
+  vars:
+    ansible_become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Resolve canonical controller Vault SSH paths
+  ansible.builtin.set_fact:
+    _hetzner_vault_tunnel_workspace_path: >-
+      {{ lookup('ansible.builtin.env', 'PWD') | normpath }}
+    _hetzner_vault_tunnel_workspace_canonical: >-
+      {{ lookup('ansible.builtin.env', 'PWD') | realpath }}
+    _hetzner_vault_tunnel_key_path: >-
+      {{ hetzner_baremetal_vault.network.ssh_tunnel.private_key_path | normpath }}
+    _hetzner_vault_tunnel_key_canonical: >-
+      {{ hetzner_baremetal_vault.network.ssh_tunnel.private_key_path | realpath }}
+    _hetzner_vault_tunnel_known_hosts_path: >-
+      {{ hetzner_baremetal_vault.network.ssh_tunnel.known_hosts_path | normpath }}
+    _hetzner_vault_tunnel_known_hosts_canonical: >-
+      {{ hetzner_baremetal_vault.network.ssh_tunnel.known_hosts_path | realpath }}
+    _hetzner_vault_tunnel_control_path: >-
+      {{ hetzner_baremetal_vault.network.ssh_tunnel.control_path | normpath }}
+    _hetzner_vault_tunnel_control_canonical: >-
+      {{ hetzner_baremetal_vault.network.ssh_tunnel.control_path | realpath }}
+    _hetzner_vault_tunnel_controller_uid: >-
+      {{ lookup('ansible.builtin.pipe', 'id -u') | int }}
+  delegate_to: localhost
+  delegate_facts: false
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Require unambiguous canonical controller Vault SSH paths
+  ansible.builtin.assert:
+    that:
+      - _hetzner_vault_tunnel_workspace_path | length > 1
+      - >-
+        _hetzner_vault_tunnel_workspace_path
+        == _hetzner_vault_tunnel_workspace_canonical
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.private_key_path
+        == _hetzner_vault_tunnel_key_path
+      - >-
+        _hetzner_vault_tunnel_key_path
+        == _hetzner_vault_tunnel_key_canonical
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.known_hosts_path
+        == _hetzner_vault_tunnel_known_hosts_path
+      - >-
+        _hetzner_vault_tunnel_known_hosts_path
+        == _hetzner_vault_tunnel_known_hosts_canonical
+      - >-
+        hetzner_baremetal_vault.network.ssh_tunnel.control_path
+        == _hetzner_vault_tunnel_control_path
+      - >-
+        _hetzner_vault_tunnel_control_path
+        == _hetzner_vault_tunnel_control_canonical
+      - >-
+        _hetzner_vault_tunnel_control_path | dirname
+        == _hetzner_vault_tunnel_workspace_path ~ '/.tmp'
+      - _hetzner_vault_tunnel_control_path | length <= 100
+      - >-
+        _hetzner_vault_tunnel_control_path | basename
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+      - _hetzner_vault_tunnel_key_path != _hetzner_vault_tunnel_known_hosts_path
+      - _hetzner_vault_tunnel_key_path != _hetzner_vault_tunnel_control_path
+      - >-
+        _hetzner_vault_tunnel_known_hosts_path
+        != _hetzner_vault_tunnel_control_path
+    fail_msg: >-
+      Vault SSH inputs and the workspace-local control socket must be exact
+      canonical paths with no symlinked ancestor or ambiguous path component.
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Resolve controller Vault SSH ancestor directories
+  ansible.builtin.set_fact:
+    _hetzner_vault_tunnel_ancestor_paths: >-
+      {%- set paths = namespace(items=['/']) -%}
+      {%- for candidate in [
+        _hetzner_vault_tunnel_key_path | dirname,
+        _hetzner_vault_tunnel_known_hosts_path | dirname,
+        _hetzner_vault_tunnel_workspace_path
+      ] -%}
+      {%- set parts = candidate.split('/') -%}
+      {%- for index in range(1, parts | length) -%}
+      {%- set ancestor = '/' ~ (parts[1:index + 1] | join('/')) -%}
+      {%- if ancestor not in paths.items -%}
+      {%- set paths.items = paths.items + [ancestor] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{- paths.items -}}
+  delegate_to: localhost
+  delegate_facts: false
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Inspect controller Vault SSH ancestor directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  loop: "{{ _hetzner_vault_tunnel_ancestor_paths }}"
+  register: _hetzner_vault_tunnel_ancestors
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Require protected controller Vault SSH ancestor directories
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isdir | default(false)
+      - not (item.stat.islnk | default(false))
+      - >-
+        item.stat.uid | default(-1) | int
+        in [0, _hetzner_vault_tunnel_controller_uid | int]
+      - >-
+        (
+          item.stat.mode | default('')
+          is match('^0[0-7][0145][0145]$')
+        )
+        or (
+          item.stat.uid | default(-1) | int == 0
+          and item.stat.gid | default(-1) | int == 0
+          and (
+            item.stat.mode | default('')
+            is match('^0[0-7][0-7][0145]$')
+          )
+        )
+    fail_msg: >-
+      Every existing ancestor of the Vault SSH identity, trust file, and
+      workspace must be a canonical root/controller-owned directory. Group
+      write is accepted only for root:root directories without world write.
+    quiet: true
+  loop: "{{ _hetzner_vault_tunnel_ancestors.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Inspect controller Vault SSH identity and trust files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - "{{ _hetzner_vault_tunnel_key_path }}"
+    - "{{ _hetzner_vault_tunnel_known_hosts_path }}"
+  register: _hetzner_vault_tunnel_inputs
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Require safe controller Vault SSH identity and trust files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isreg | default(false)
+      - item.stat.readable | default(false)
+      - not (item.stat.islnk | default(false))
+      - item.stat.nlink | default(0) | int == 1
+      - >-
+        item.stat.uid | default(-1) | int
+        in [0, _hetzner_vault_tunnel_controller_uid | int]
+      - item.stat.size | default(0) | int > 0
+      - item.stat.size | default(0) | int <= 1048576
+    fail_msg: >-
+      The controller Vault SSH private key and pinned known-hosts file must be
+      readable, non-linked regular files owned by root or the controller user.
+    quiet: true
+  loop: "{{ _hetzner_vault_tunnel_inputs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Require protected modes on controller Vault SSH inputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        _hetzner_vault_tunnel_inputs.results[0].stat.mode
+        | default('') in ['0400', '0600']
+      - >-
+        _hetzner_vault_tunnel_inputs.results[1].stat.mode
+        | default('') in ['0400', '0440', '0444', '0600', '0640', '0644']
+    fail_msg: >-
+      The Vault SSH private key must use owner-only mode 0400/0600 and the
+      pinned known-hosts file must not be writable by group or other users.
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Inspect the controller tunnel socket directory
+  ansible.builtin.stat:
+    path: "{{ _hetzner_vault_tunnel_control_path | dirname }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  register: _hetzner_vault_tunnel_control_dir_before
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Refuse an unsafe existing controller tunnel socket directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (_hetzner_vault_tunnel_control_dir_before.stat.exists | default(false))
+        or (
+          _hetzner_vault_tunnel_control_dir_before.stat.isdir | default(false)
+          and not (
+            _hetzner_vault_tunnel_control_dir_before.stat.islnk | default(false)
+          )
+          and _hetzner_vault_tunnel_control_dir_before.stat.uid | int
+              == _hetzner_vault_tunnel_controller_uid | int
+          and _hetzner_vault_tunnel_control_dir_before.stat.mode == '0700'
+        )
+    fail_msg: >-
+      The workspace .tmp path must be absent or an owner-controlled canonical
+      directory with mode 0700 before the Vault SSH socket is created.
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Ensure the controller tunnel socket directory exists
+  ansible.builtin.file:
+    path: "{{ _hetzner_vault_tunnel_control_path | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Verify the controller tunnel socket directory
+  ansible.builtin.stat:
+    path: "{{ _hetzner_vault_tunnel_control_path | dirname }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  register: _hetzner_vault_tunnel_control_dir_after
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Require the protected controller tunnel socket directory
+  ansible.builtin.assert:
+    that:
+      - _hetzner_vault_tunnel_control_dir_after.stat.exists | default(false)
+      - _hetzner_vault_tunnel_control_dir_after.stat.isdir | default(false)
+      - not (_hetzner_vault_tunnel_control_dir_after.stat.islnk | default(false))
+      - >-
+        _hetzner_vault_tunnel_control_dir_after.stat.uid | default(-1) | int
+        == _hetzner_vault_tunnel_controller_uid | int
+      - _hetzner_vault_tunnel_control_dir_after.stat.mode == '0700'
+      - >-
+        (_hetzner_vault_tunnel_control_path | dirname | realpath)
+        == _hetzner_vault_tunnel_control_path | dirname
+    fail_msg: >-
+      The controller Vault SSH socket directory is not a canonical,
+      owner-controlled mode-0700 directory.
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Inspect any existing controller Vault SSH control socket
+  ansible.builtin.stat:
+    path: "{{ _hetzner_vault_tunnel_control_path }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  register: _hetzner_vault_tunnel_control_stat
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Refuse an unsafe controller Vault SSH control path
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (_hetzner_vault_tunnel_control_stat.stat.exists | default(false))
+        or (
+          _hetzner_vault_tunnel_control_stat.stat.issock | default(false)
+          and not (_hetzner_vault_tunnel_control_stat.stat.islnk | default(false))
+          and _hetzner_vault_tunnel_control_stat.stat.uid | int
+              == _hetzner_vault_tunnel_controller_uid | int
+        )
+    fail_msg: >-
+      The inventory-declared Vault SSH control path exists but is not an
+      owner-controlled Unix socket.
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Record the validated controller Vault SSH control path
+  ansible.builtin.set_fact:
+    _hetzner_vault_tunnel_control_path_validated: true
+  delegate_to: localhost
+  delegate_facts: false
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Check an existing controller Vault SSH master
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -S
+      - "{{ _hetzner_vault_tunnel_control_path }}"
+      - -O
+      - check
+      - -p
+      - "{{ hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | string }}"
+      - >-
+        {{
+          hetzner_baremetal_vault.network.ssh_tunnel.ssh_user
+          ~ '@'
+          ~ hetzner_baremetal_vault.network.ssh_tunnel.ssh_host
+        }}
+  register: _hetzner_vault_tunnel_existing_check
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  when: _hetzner_vault_tunnel_control_stat.stat.exists | default(false)
+
+- name: Retire an existing controller Vault SSH master
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -S
+      - "{{ _hetzner_vault_tunnel_control_path }}"
+      - -O
+      - exit
+      - -p
+      - "{{ hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | string }}"
+      - >-
+        {{
+          hetzner_baremetal_vault.network.ssh_tunnel.ssh_user
+          ~ '@'
+          ~ hetzner_baremetal_vault.network.ssh_tunnel.ssh_host
+        }}
+  register: _hetzner_vault_tunnel_existing_exit
+  delegate_to: localhost
+  become: false
+  changed_when: _hetzner_vault_tunnel_existing_exit.rc == 0
+  check_mode: false
+  run_once: true
+  when:
+    - _hetzner_vault_tunnel_control_stat.stat.exists | default(false)
+    - _hetzner_vault_tunnel_existing_check.rc | default(1) == 0
+
+- name: Remove a retired or stale controller Vault SSH control socket
+  ansible.builtin.file:
+    path: "{{ _hetzner_vault_tunnel_control_path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - _hetzner_vault_tunnel_control_stat.stat.exists | default(false)
+
+- name: Require an unused controller Vault tunnel port before startup
+  ansible.builtin.wait_for:
+    host: "{{ hetzner_baremetal_vault.network.ssh_tunnel.local_address }}"
+    port: "{{ hetzner_baremetal_vault.network.ssh_tunnel.local_port | int }}"
+    state: stopped
+    timeout: 5
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  run_once: true
+
+- name: Start and verify the ephemeral controller Vault SSH tunnel
+  block:
+    - name: Start the ephemeral controller Vault SSH tunnel
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -f
+          - -N
+          - -M
+          - -S
+          - "{{ _hetzner_vault_tunnel_control_path }}"
+          - -L
+          - >-
+            {{
+              hetzner_baremetal_vault.network.ssh_tunnel.local_address
+              ~ ':'
+              ~ (hetzner_baremetal_vault.network.ssh_tunnel.local_port | string)
+              ~ ':'
+              ~ hetzner_baremetal_vault.network.ssh_tunnel.remote_address
+              ~ ':'
+              ~ (hetzner_baremetal_vault.network.ssh_tunnel.remote_port | string)
+            }}
+          - -p
+          - "{{ hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | string }}"
+          - -i
+          - "{{ _hetzner_vault_tunnel_key_path }}"
+          - -o
+          - BatchMode=yes
+          - -o
+          - IdentitiesOnly=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - "UserKnownHostsFile={{ _hetzner_vault_tunnel_known_hosts_path }}"
+          - -o
+          - ExitOnForwardFailure=yes
+          - -o
+          - ControlPersist=no
+          - -o
+          - ServerAliveInterval=30
+          - -o
+          - ServerAliveCountMax=3
+          - >-
+            {{
+              hetzner_baremetal_vault.network.ssh_tunnel.ssh_user
+              ~ '@'
+              ~ hetzner_baremetal_vault.network.ssh_tunnel.ssh_host
+            }}
+      delegate_to: localhost
+      become: false
+      register: _hetzner_vault_tunnel_start
+      changed_when: _hetzner_vault_tunnel_start.rc == 0
+      check_mode: false
+      run_once: true
+
+    - name: Record the started controller Vault SSH lifecycle
+      ansible.builtin.set_fact:
+        _hetzner_vault_tunnel_lifecycle_started: true
+      delegate_to: localhost
+      delegate_facts: false
+      become: false
+      changed_when: false
+      run_once: true
+
+    - name: Verify the controller Vault SSH master
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -S
+          - "{{ _hetzner_vault_tunnel_control_path }}"
+          - -O
+          - check
+          - -p
+          - "{{ hetzner_baremetal_vault.network.ssh_tunnel.ssh_port | string }}"
+          - >-
+            {{
+              hetzner_baremetal_vault.network.ssh_tunnel.ssh_user
+              ~ '@'
+              ~ hetzner_baremetal_vault.network.ssh_tunnel.ssh_host
+            }}
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    - name: Verify the controller Vault tunnel listener
+      ansible.builtin.wait_for:
+        host: "{{ hetzner_baremetal_vault.network.ssh_tunnel.local_address }}"
+        port: "{{ hetzner_baremetal_vault.network.ssh_tunnel.local_port | int }}"
+        state: started
+        timeout: 5
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      run_once: true
+
+    - name: Record the verified controller Vault SSH tunnel
+      ansible.builtin.set_fact:
+        _hetzner_vault_ssh_tunnel_ready: true
+      delegate_to: localhost
+      delegate_facts: false
+      become: false
+      changed_when: false
+      run_once: true
+
+  rescue:
+    - name: Close a controller Vault tunnel that failed startup verification
+      ansible.builtin.include_tasks: close-hashicorp-vault-ssh-tunnel.yml
+
+    - name: Report controller Vault SSH tunnel startup failure
+      ansible.builtin.fail:
+        msg: >-
+          The controller Vault SSH tunnel failed startup verification and was
+          closed; no Vault-dependent task was run.

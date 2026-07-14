@@ -1,0 +1,57 @@
+---
+# Stage Ubuntu's secret-free Dropbear/initramfs post-install hook in Hetzner
+# Rescue. The provider-neutral installimage runbook consumes the staged path
+# from inventory and removes the hook after planning or installation.
+- name: Prepare the Ubuntu encrypted-root installimage hook
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+
+  pre_tasks:
+    - name: Require one exact Rescue target and configured hook path
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname in groups['hetzner_baremetal']
+          - hetzner_installimage_post_install_script_path is string
+          - hetzner_installimage_post_install_script_path is match('^/')
+          - hetzner_installimage_post_install_script_ephemeral | default(false) | bool
+        fail_msg: >-
+          Use --limit with one exact Hetzner bare-metal inventory FQDN and
+          declare an absolute, explicitly ephemeral
+          hetzner_installimage_post_install_script_path.
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Stage the secret-free Ubuntu Dropbear hook
+      ansible.builtin.include_role:
+        name: lit.ubuntu.luks_unlock
+      vars:
+        luks_unlock_enabled: true
+        luks_unlock_execution_mode: rescue_stage
+        luks_unlock_method: dropbear
+
+    - name: Require the staged path to equal the provider contract
+      ansible.builtin.assert:
+        that:
+          - luks_unlock_installimage_post_install_script_path is defined
+          - >-
+            luks_unlock_installimage_post_install_script_path
+            == hetzner_installimage_post_install_script_path
+        fail_msg: >-
+          The Ubuntu role staged a different hook path than the Hetzner
+          installimage inventory contract.
+        quiet: true

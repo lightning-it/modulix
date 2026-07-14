@@ -7,8 +7,8 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.0}"
-run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1}}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1}"
+run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.2}}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
@@ -47,13 +47,14 @@ Usage:
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
   ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.0)
-  MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.15.1)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1)
+  MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.2)
   ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+  ANSIBLE_VAULT_PASSWORD_FILE=<owner-only file>    (Podman transport requires mode 0400 or 0600)
   RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, for certified collection installs)
 
   ANSIBLE_NAVIGATOR_MOUNT_*
@@ -310,6 +311,33 @@ add_mount() {
   fi
 
   container_args+=(-v "${mount_spec}")
+}
+
+validate_owner_only_secret_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" ]]; then
+    echo "${label} must reference a regular, non-symlink file." >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' -- "${path}")"
+  owner="$(stat -c '%u' -- "${path}")"
+  case "${mode}" in
+    400|600) ;;
+    *)
+      echo "${label} must have mode 0400 or 0600 (found ${mode})." >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${owner}" != "$(id -u)" ]]; then
+    echo "${label} must be owned by the effective user." >&2
+    return 1
+  fi
 }
 
 mount_requested_source() {
@@ -585,7 +613,7 @@ if mount_requested_source "${ssh_agent_mount_requested}" find_ssh_agent_socket "
   ssh_agent_mounted=true
 fi
 
-collections_path="/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+collections_path="/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
 
 container_args+=(
   -e "HOME=/runner"
@@ -599,19 +627,31 @@ container_args+=(
   -e "ANSIBLE_COLLECTIONS_PATH=${collections_path}"
 )
 
+add_env_if_set VAULT_ADDR
+add_env_if_set VAULT_SKIP_VERIFY
 add_env_if_set VAULT_TOKEN
 add_env_if_set RH_AUTOMATION_HUB_TOKEN
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
-  if [[ "${ANSIBLE_VAULT_PASSWORD_FILE}" == /runner/* ]]; then
-    vault_pass_file_in_container="${ANSIBLE_VAULT_PASSWORD_FILE}"
-  else
-    secrets_dir="$(mktemp -d "${TMPDIR:-/tmp}/modulix-ansible-secrets.XXXXXX")"
-    install -m 0444 "${ANSIBLE_VAULT_PASSWORD_FILE}" "${secrets_dir}/ansible-vault-pass.txt"
-    chmod 0555 "${secrets_dir}"
-    add_mount "${secrets_dir}" "/runner/secrets" "ro"
-    vault_pass_file_in_container="/runner/secrets/ansible-vault-pass.txt"
+  if [[ "${engine}" != "podman" ]]; then
+    echo "Secure ANSIBLE_VAULT_PASSWORD_FILE transport is supported only with Podman." >&2
+    exit 1
   fi
+
+  validate_owner_only_secret_file \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "ANSIBLE_VAULT_PASSWORD_FILE"
+  secret_runtime_dir="${TMPDIR:-${XDG_RUNTIME_DIR:-/tmp}}"
+  secrets_dir="$(mktemp -d "${secret_runtime_dir%/}/modulix-ansible-secrets.XXXXXX")"
+  chmod 0700 "${secrets_dir}"
+  install -m 0400 \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "${secrets_dir}/ansible-vault-pass.txt"
+  validate_owner_only_secret_file \
+    "${secrets_dir}/ansible-vault-pass.txt" \
+    "staged ANSIBLE_VAULT_PASSWORD_FILE"
+  add_mount "${secrets_dir}" "/runner/secrets" "ro"
+  vault_pass_file_in_container="/runner/secrets/ansible-vault-pass.txt"
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
 
@@ -693,6 +733,11 @@ case "${subcommand}" in
     fi
     ;;
   exec)
+    if [[ -n "${secrets_dir}" ]]; then
+      # Exec retains the invoking numeric UID, so keep that UID mapped to the
+      # staged directory owner instead of relying on Podman's root mapping.
+      container_args+=(--userns keep-id)
+    fi
     container_args+=(--user "$(id -u):$(id -g)")
     if [[ "${1:-}" == "--" ]]; then
       shift

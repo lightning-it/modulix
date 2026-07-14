@@ -13,4 +13,5 @@ here. Those belong in `30-operating-systems/` and `50-applications/`.
 
 Guides:
 
+- [Hetzner bare-metal lifecycle runbooks](baremetal/hetzner/README.md)
 - [vSphere VM and template runbooks](virtualization/vsphere/README.md)

@@ -11,7 +11,7 @@
     "dependencies",
     "renovate"
   ],
-  "baseBranches": [
+  "baseBranchPatterns": [
     "develop"
   ],
   "timezone": "UTC",
@@ -63,6 +63,39 @@
         "pyvmomi",
         "requests"
       ]
+    },
+    {
+      "description": "Keep community.general compatible with linux_system_roles and lit collections",
+      "matchDepNames": [
+        "community.general"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "allowedVersions": "/^11\\./"
+    },
+    {
+      "description": "Keep canonical ansible.posix compatible with linux_system_roles",
+      "matchDepNames": [
+        "ansible.posix"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "matchFileNames": [
+        "ansible/collections/requirements.yml"
+      ],
+      "allowedVersions": "/^2\\.1\\./"
+    },
+    {
+      "description": "Pin community.vmware for the ansible-core 2.18 collection baseline",
+      "matchDepNames": [
+        "community.vmware"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "allowedVersions": "/^5\\.10\\.0$/"
     }
   ],
   "customManagers": [
@@ -107,6 +140,34 @@
       "depNameTemplate": "quay.io/l-it/ee-wunder-ansible-ubi9",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the immutable lit.rhel GitHub release asset",
+      "managerFilePatterns": [
+        "/^ansible\\/collections\\/requirements\\.yml$/"
+      ],
+      "matchStrings": [
+        "  - name: https:\\/\\/github\\.com\\/lightning-it\\/ansible-collection-rhel\\/releases\\/download\\/v(?<currentValue>[0-9.]+)\\/lit-rhel-[0-9.]+\\.tar\\.gz\\n    type: url"
+      ],
+      "depNameTemplate": "lightning-it/ansible-collection-rhel",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "autoReplaceStringTemplate": "  - name: https://github.com/lightning-it/ansible-collection-rhel/releases/download/v{{{newValue}}}/lit-rhel-{{{newValue}}}.tar.gz\n    type: url"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the immutable lit.ocp GitHub release asset",
+      "managerFilePatterns": [
+        "/^ansible\\/collections\\/requirements\\.yml$/"
+      ],
+      "matchStrings": [
+        "  - name: https:\\/\\/github\\.com\\/lightning-it\\/ansible-collection-ocp\\/releases\\/download\\/v(?<currentValue>[0-9.]+)\\/lit-ocp-[0-9.]+\\.tar\\.gz\\n    type: url"
+      ],
+      "depNameTemplate": "lightning-it/ansible-collection-ocp",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "autoReplaceStringTemplate": "  - name: https://github.com/lightning-it/ansible-collection-ocp/releases/download/v{{{newValue}}}/lit-ocp-{{{newValue}}}.tar.gz\n    type: url"
     },
     {
       "customType": "regex",
