@@ -1,7 +1,7 @@
 ---
 vault_address: "{{ '{{' }} lookup('ansible.builtin.env', 'VAULT_ADDR') | default('{{ vault_addr | default('', true) }}', true) {{ '}}' }}"
 vault_engine_mount_point: "{{ '{{' }} lookup('ansible.builtin.env', 'VAULT_ENGINE_MOUNT_POINT') | default('{{ vault_engine_mount_point | default('', true) }}', true) {{ '}}' }}"
-vault_validate_certs: false
+vault_validate_certs: "{{ '{{' }} lookup('ansible.builtin.env', 'VAULT_VALIDATE_CERTS') | default('true', true) | bool {{ '}}' }}"
 
 aap_vault_host_key: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_VAULT_HOST_KEY') | default('{{ aap_vault_host_key | default(aap_effective_shortname, true) }}', true) {{ '}}' }}"
 hc_vault_aap_admin_passwords_kv_path: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_VAULT_ADMIN_PASSWORDS_KV_PATH') | default(aap_vault_host_key ~ '/aap/deploy/admin_passwords', true) {{ '}}' }}"
@@ -74,7 +74,7 @@ aap_defaults_seed_vault_kv_path: "{{ '{{' }} hc_vault_defaults_kv_path {{ '}}' }
 aap_defaults_seed_vault_validate_certs: "{{ '{{' }} hc_vault_validate_certs | bool {{ '}}' }}"
 
 aap_username: "{{ '{{' }} lookup('ansible.builtin.env', 'AAP_GATEWAY_USERNAME') | default('admin', true) | trim {{ '}}' }}"
-aap_validate_certs: false
+aap_validate_certs: true
 
 aap_gateway_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('gateway_admin_password', '') | string | trim {{ '}}' }}"
 aap_controller_admin_password_input: "{{ '{{' }} hc_vault_aap_admin_passwords_secret.get('controller_admin_password', '') | string | trim {{ '}}' }}"

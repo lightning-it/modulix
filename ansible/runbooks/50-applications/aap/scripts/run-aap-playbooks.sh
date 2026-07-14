@@ -47,7 +47,17 @@ modulix_aap_set_defaults
 modulix_write_podman_storage_conf
 
 cd "${AUTOMATION_ANSIBLE_DIR}"
-modulix_resolve_aap_artifacts
+resolve_aap_artifacts=false
+for playbook in "${playbooks[@]}"; do
+  case "$(basename -- "${playbook}")" in
+    05-artifacts.yml | 07-preflight.yml | 10-deploy.yml)
+      resolve_aap_artifacts=true
+      ;;
+  esac
+done
+if [[ "${resolve_aap_artifacts}" == "true" ]]; then
+  modulix_resolve_aap_artifacts
+fi
 modulix_write_aap_inventory
 
 for playbook in "${playbooks[@]}"; do

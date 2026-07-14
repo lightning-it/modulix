@@ -1,0 +1,23 @@
+---
+# Project collections required by the AAP local-execution rollout.
+# lit.supplementary is built separately from its canonical source checkout so
+# the source-under-test is used without installing a second collection copy.
+collections:
+  - name: ansible.posix
+    version: "2.2.1"
+  - name: community.crypto
+    version: "3.2.2"
+  - name: community.docker
+    version: "5.2.1"
+  - name: community.general
+    version: "11.4.9"
+  - name: community.hashi_vault
+    version: "7.1.0"
+  - name: community.vmware
+    version: "5.10.0"
+  - name: vmware.vmware
+    version: "2.9.0"
+  - name: lit.foundational
+    version: "1.31.0"
+  - name: lit.rhel
+    version: "1.17.1"

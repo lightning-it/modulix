@@ -1,0 +1,226 @@
+---
+- name: Build the canonical AppRole replacement only in protected memory
+  ansible.builtin.set_fact:
+    _vault_initialize_finalize_repaired_approle_document:
+      schema_version: 1
+      subject: "{{ _vault_lifecycle_finalize_legacy_approle_document.subject }}"
+      auth_method: "{{ _vault_lifecycle_finalize_legacy_approle_document.auth_method }}"
+      role_id: "{{ _vault_lifecycle_finalize_legacy_approle_document.role_id }}"
+      secret_id: "{{ _vault_lifecycle_finalize_legacy_approle_document.secret_id }}"
+    _vault_initialize_finalize_repair_path: >-
+      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}.schema-v1-repair
+  changed_when: false
+  no_log: true
+
+- name: Persist or validate the immutable encrypted AppRole repair stage
+  lit.foundational.ansible_vault_document:
+    path: "{{ _vault_initialize_finalize_repair_path }}"
+    vault_id: "{{ hetzner_baremetal_ansible_vault.vault_id }}"
+    document: "{{ _vault_initialize_finalize_repaired_approle_document }}"
+  register: _vault_initialize_finalize_repair_write
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Inspect source and repair-stage AppRole ciphertexts before live validation
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+    get_attributes: false
+    get_mime: false
+  loop:
+    - "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+    - "{{ _vault_initialize_finalize_repair_path }}"
+  register: _vault_initialize_finalize_prevalidate_stats
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Load the encrypted AppRole repair stage in protected memory
+  ansible.builtin.include_vars:
+    file: "{{ _vault_initialize_finalize_repair_path }}"
+    name: _vault_initialize_finalize_repair_readback
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Require exact source CAS and canonical repair-stage readback
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_initialize_finalize_prevalidate_stats.results[0].stat.checksum
+        == _vault_lifecycle_plan.observed.controller_approle_ciphertext_sha256
+      - _vault_initialize_finalize_prevalidate_stats.results[0].stat.isreg | default(false)
+      - not (_vault_initialize_finalize_prevalidate_stats.results[0].stat.islnk | default(false))
+      - _vault_initialize_finalize_prevalidate_stats.results[0].stat.nlink | int == 1
+      - _vault_initialize_finalize_prevalidate_stats.results[0].stat.mode in ['0400', '0600']
+      - _vault_initialize_finalize_prevalidate_stats.results[1].stat.isreg | default(false)
+      - not (_vault_initialize_finalize_prevalidate_stats.results[1].stat.islnk | default(false))
+      - _vault_initialize_finalize_prevalidate_stats.results[1].stat.nlink | int == 1
+      - _vault_initialize_finalize_prevalidate_stats.results[1].stat.mode in ['0400', '0600']
+      - >-
+        _vault_initialize_finalize_prevalidate_stats.results[1].stat.checksum
+        == _vault_initialize_finalize_repair_write.ciphertext_sha256
+      - _vault_initialize_finalize_repair_readback is mapping
+      - >-
+        _vault_initialize_finalize_repair_readback.keys() | list | sort
+        == ['auth_method', 'role_id', 'schema_version', 'secret_id', 'subject']
+      - _vault_initialize_finalize_repair_readback.schema_version is integer
+      - _vault_initialize_finalize_repair_readback.schema_version == 1
+      - >-
+        _vault_initialize_finalize_repair_readback.subject
+        == _vault_lifecycle_finalize_legacy_approle_document.subject
+      - >-
+        _vault_initialize_finalize_repair_readback.auth_method
+        == _vault_lifecycle_finalize_legacy_approle_document.auth_method
+      - >-
+        _vault_initialize_finalize_repair_readback.role_id
+        == _vault_lifecycle_finalize_legacy_approle_document.role_id
+      - >-
+        _vault_initialize_finalize_repair_readback.secret_id
+        == _vault_lifecycle_finalize_legacy_approle_document.secret_id
+    fail_msg: >-
+      Refusing AppRole schema publication because the source CAS or encrypted
+      canonical repair-stage readback changed.
+    quiet: true
+  no_log: true
+
+- name: Validate the repaired ciphertext against live scoped Vault state
+  ansible.builtin.include_role:
+    name: lit.supplementary.vault_scoped_approle
+  vars:
+    vault_scoped_approle_admin_token: ""
+    vault_scoped_approle_revoke_admin_token: false
+    vault_scoped_approle_controller_document_path: >-
+      {{ _vault_initialize_finalize_repair_path }}
+  no_log: true
+
+- name: Require successful live validation before AppRole ciphertext publication
+  ansible.builtin.assert:
+    that:
+      - vault_scoped_approle_configured | default(false) | bool
+    fail_msg: "The repaired AppRole ciphertext did not pass exact live validation."
+    quiet: true
+  no_log: true
+
+- name: Re-inspect source and repair-stage ciphertexts immediately before publication
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+    get_attributes: false
+    get_mime: false
+  loop:
+    - "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+    - "{{ _vault_initialize_finalize_repair_path }}"
+  register: _vault_initialize_finalize_publish_stats
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require unchanged source and repair-stage CAS immediately before publication
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_initialize_finalize_publish_stats.results[0].stat.checksum
+        == _vault_lifecycle_plan.observed.controller_approle_ciphertext_sha256
+      - >-
+        _vault_initialize_finalize_publish_stats.results[0].stat.checksum
+        == _vault_initialize_finalize_prevalidate_stats.results[0].stat.checksum
+      - >-
+        _vault_initialize_finalize_publish_stats.results[1].stat.checksum
+        == _vault_initialize_finalize_repair_write.ciphertext_sha256
+      - >-
+        _vault_initialize_finalize_publish_stats.results[1].stat.checksum
+        == _vault_initialize_finalize_prevalidate_stats.results[1].stat.checksum
+      - _vault_initialize_finalize_publish_stats.results[0].stat.nlink | int == 1
+      - _vault_initialize_finalize_publish_stats.results[1].stat.nlink | int == 1
+    fail_msg: "AppRole ciphertext CAS changed after live repair validation."
+    quiet: true
+  no_log: true
+
+- name: Atomically publish the validated encrypted AppRole schema repair
+  ansible.builtin.command:
+    argv:
+      - mv
+      - --no-target-directory
+      - --
+      - "{{ _vault_initialize_finalize_repair_path }}"
+      - "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+  delegate_to: localhost
+  become: false
+  changed_when: true
+  check_mode: false
+  no_log: true
+
+- name: Flush the controller escrow directory after atomic publication
+  ansible.builtin.command:
+    argv:
+      - sync
+      - -f
+      - "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path | dirname }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Inspect the published AppRole ciphertext and consumed repair stage
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+    get_attributes: false
+    get_mime: false
+  loop:
+    - "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+    - "{{ _vault_initialize_finalize_repair_path }}"
+  register: _vault_initialize_finalize_published_stats
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Load the published AppRole ciphertext in protected memory
+  ansible.builtin.include_vars:
+    file: "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+    name: _vault_initialize_finalize_published_readback
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Require exact canonical AppRole publication and consumed repair stage
+  ansible.builtin.assert:
+    that:
+      - _vault_initialize_finalize_published_stats.results[0].stat.isreg | default(false)
+      - not (_vault_initialize_finalize_published_stats.results[0].stat.islnk | default(false))
+      - _vault_initialize_finalize_published_stats.results[0].stat.nlink | int == 1
+      - _vault_initialize_finalize_published_stats.results[0].stat.mode in ['0400', '0600']
+      - >-
+        _vault_initialize_finalize_published_stats.results[0].stat.checksum
+        == _vault_initialize_finalize_repair_write.ciphertext_sha256
+      - not (_vault_initialize_finalize_published_stats.results[1].stat.exists | default(false))
+      - _vault_initialize_finalize_published_readback.schema_version is integer
+      - _vault_initialize_finalize_published_readback.schema_version == 1
+      - >-
+        _vault_initialize_finalize_published_readback
+        == _vault_initialize_finalize_repair_readback
+    fail_msg: "The atomic AppRole schema repair did not publish exactly."
+    quiet: true
+  no_log: true
+
+- name: Clear superseded AppRole repair material from Ansible facts
+  ansible.builtin.set_fact:
+    _vault_initialize_finalize_repaired_approle_document: null
+    _vault_initialize_finalize_repair_readback: null
+    _vault_initialize_finalize_published_readback: null
+    _vault_lifecycle_finalize_legacy_approle_document: null
+    _vault_lifecycle_finalize_repair_approle_document: null
+  changed_when: false
+  no_log: true

@@ -1,0 +1,157 @@
+---
+- name: Initialize and scope the separately approved LIT Vault
+  hosts: hetzner_baremetal
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    vault_lifecycle_operation: initialize
+
+    vault_bootstrap_api_url: "{{ hetzner_baremetal_vault.network.controller_api_addr }}"
+    vault_bootstrap_health_url: "{{ vault_bootstrap_api_url }}/v1/sys/health"
+    vault_bootstrap_validate_certs: true
+    vault_bootstrap_api_delegate_to: localhost
+    vault_bootstrap_ca_cert_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    vault_bootstrap_ca_cert_path_effective: "{{ vault_bootstrap_ca_cert_path }}"
+    vault_bootstrap_container_name: "{{ hetzner_baremetal_vault.runtime.pod_name }}-vault"
+    vault_bootstrap_cli_api_url: "{{ hetzner_baremetal_vault.network.container_api_addr }}"
+    vault_bootstrap_cli_ca_cert_path: "{{ hetzner_baremetal_vault.tls.container_ca_cert_path }}"
+    vault_bootstrap_init_requested: true
+    vault_bootstrap_auto_init: false
+    vault_bootstrap_key_shares: "{{ hetzner_baremetal_vault.seal.key_shares }}"
+    vault_bootstrap_key_threshold: "{{ hetzner_baremetal_vault.seal.key_threshold }}"
+    vault_bootstrap_require_controller_escrow: true
+    vault_bootstrap_controller_escrow_root_path: >-
+      {{ hetzner_baremetal_vault.seal.controller_init_escrow_root_path }}
+    vault_bootstrap_controller_init_file_path: >-
+      {{ hetzner_baremetal_vault.seal.controller_init_file_path }}
+    vault_bootstrap_init_file_path: >-
+      {{ hetzner_baremetal_vault.seal.target_ciphertext_path }}
+    vault_bootstrap_persist_dir: >-
+      {{ hetzner_baremetal_vault.seal.target_ciphertext_path | dirname }}
+    vault_bootstrap_ansible_vault_password_file: >-
+      {{ lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') }}
+    vault_bootstrap_ansible_vault_password: ""
+
+    vault_scoped_approle_api_url: "{{ hetzner_baremetal_vault.network.controller_api_addr }}"
+    vault_scoped_approle_health_url: "{{ vault_scoped_approle_api_url }}/v1/sys/health"
+    vault_scoped_approle_api_delegate_to: localhost
+    vault_scoped_approle_validate_certs: true
+    vault_scoped_approle_ca_cert_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    vault_scoped_approle_timeout: "{{ hetzner_baremetal_vault.timeout }}"
+    vault_scoped_approle_admin_token: "{{ vault_bootstrap_token }}"
+    vault_scoped_approle_revoke_admin_token: >-
+      {{ hetzner_baremetal_vault.initialization.revoke_initial_root_token }}
+    vault_scoped_approle_kv_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+    vault_scoped_approle_auth_mount_point: >-
+      {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+    vault_scoped_approle_role_name: "{{ hetzner_baremetal_vault.controller_auth.role_name }}"
+    vault_scoped_approle_policy_name: "{{ hetzner_baremetal_vault.controller_auth.policy_name }}"
+    vault_scoped_approle_policy: "{{ hetzner_baremetal_vault.controller_auth.policy }}"
+    vault_scoped_approle_token_type: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_type }}
+    vault_scoped_approle_token_ttl: "{{ hetzner_baremetal_vault.controller_auth.token_ttl }}"
+    vault_scoped_approle_token_ttl_seconds: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_ttl_seconds }}
+    vault_scoped_approle_token_max_ttl: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_max_ttl }}
+    vault_scoped_approle_token_max_ttl_seconds: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_max_ttl_seconds }}
+    vault_scoped_approle_token_num_uses: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_num_uses }}
+    vault_scoped_approle_secret_id_ttl: >-
+      {{ hetzner_baremetal_vault.controller_auth.secret_id_ttl }}
+    vault_scoped_approle_secret_id_num_uses: >-
+      {{ hetzner_baremetal_vault.controller_auth.secret_id_num_uses }}
+    vault_scoped_approle_controller_escrow_root_path: >-
+      {{ hetzner_baremetal_vault.seal.controller_init_escrow_root_path }}
+    vault_scoped_approle_controller_document_path: >-
+      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}
+    vault_scoped_approle_document_schema_version: >-
+      {{ hetzner_baremetal_vault.controller_auth.schema_version }}
+    vault_scoped_approle_document_subject: >-
+      {{ hetzner_baremetal_vault.controller_auth.subject }}
+    vault_scoped_approle_capability_probes: >-
+      {{ hetzner_baremetal_vault.controller_auth.capability_probes }}
+
+  pre_tasks:
+    - name: Require one exact Vault initialization target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_vault.host
+          - >-
+            hetzner_baremetal_vault.initialization.require_separate_confirmation
+            is sameas true
+        fail_msg: "Use --limit with the exact inventory-declared Vault host."
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Initialize Vault through an ephemeral controller transport
+      block:
+        - name: Establish the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
+        - name: Rebuild the fresh immutable Vault initialization plan
+          ansible.builtin.include_tasks: tasks/build-vault-lifecycle-plan.yml
+          tags: [always]
+
+        - name: Require the fresh exact Vault initialization authorization
+          ansible.builtin.assert:
+            that:
+              - >-
+                vault_initialize_approved_plan_sha256 | default('')
+                == _vault_lifecycle_plan_sha256
+              - >-
+                vault_initialize_confirmation | default('')
+                == 'INITIALIZE_VAULT:' ~ inventory_hostname ~ ':'
+                ~ _vault_lifecycle_plan_sha256
+            fail_msg: >-
+              Vault initialization requires the current exact plan SHA-256 and
+              INITIALIZE_VAULT:<host>:<sha256> confirmation.
+            quiet: true
+          tags: [always]
+
+        - name: Initialize, escrow, and unseal Vault under the Shamir contract
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_bootstrap
+          no_log: true
+
+        - name: Configure and escrow the scoped controller Vault AppRole
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_scoped_approle
+          no_log: true
+
+        - name: Require successful scoped authentication before completion
+          ansible.builtin.assert:
+            that:
+              - vault_scoped_approle_configured | default(false) | bool
+            fail_msg: >-
+              Vault initialized but scoped AppRole validation did not complete.
+            quiet: true
+          no_log: true
+
+        - name: Validate the initialized and unsealed Vault runtime
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_validate
+          vars:
+            vault_validate_expected_lifecycle: ready
+            vault_validate_api_url: >-
+              {{ hetzner_baremetal_vault.network.container_api_addr }}
+            vault_validate_health_url: "{{ vault_validate_api_url }}/v1/sys/health"
+            vault_validate_validate_certs: true
+            vault_validate_ca_cert_path: >-
+              {{ hetzner_baremetal_vault.tls.target_ca_cert_path }}
+
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

@@ -1,0 +1,299 @@
+---
+# -----------------------------------------------------------------------------
+# Hetzner Rescue installimage
+#
+# Purpose:
+# - Require an explicit --limit
+# - Produce a secret-free installation plan and plan hash by default
+# - Execute installimage only when every destructive role gate is satisfied
+# - Accept the selected operating-system image and optional post-install hook
+#   from inventory
+#
+# This runbook never reboots a host. Run it against one host at a time when
+# hetzner_installimage_action=install.
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require a safe target limit)
+  hosts: hetzner_baremetal
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+    _hetzner_installimage_encryption_requested: >-
+      {{
+        (
+          hetzner_installimage_layout
+          | default({})
+        ).get('partitions', [])
+        | selectattr('crypt', 'defined')
+        | selectattr('crypt', 'equalto', true)
+        | list
+        | length > 0
+      }}
+
+  tasks:
+    - name: Require one exact host limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - hetzner_baremetal_install_order is sequence
+          - hetzner_baremetal_install_order is not string
+          - deploy_ssh_public_keys is sequence
+          - deploy_ssh_public_keys is not string
+          - deploy_ssh_public_keys | length > 0
+          - >-
+            deploy_ssh_public_keys
+            | map('trim')
+            | map('regex_replace', '\\s+', ' ')
+            | unique | length
+            == deploy_ssh_public_keys | length
+          - >-
+            hetzner_baremetal_rescue_robot_user_keys_max_bytes | int > 0
+          - >-
+            hetzner_baremetal_rescue_robot_user_keys_max_bytes | int
+            <= 1048576
+          - >-
+            hetzner_baremetal_install_order | unique | length
+            == hetzner_baremetal_install_order | length
+          - >-
+            hetzner_baremetal_install_order | sort
+            == groups['hetzner_baremetal'] | sort
+          - hetzner_baremetal_install_prerequisite_hosts is sequence
+          - hetzner_baremetal_install_prerequisite_hosts is not string
+          - hetzner_baremetal_install_prerequisite_hosts | length > 0
+          - >-
+            hetzner_baremetal_install_prerequisite_hosts | unique | length
+            == hetzner_baremetal_install_prerequisite_hosts | length
+          - >-
+            hetzner_baremetal_install_prerequisite_hosts
+            | difference(hetzner_baremetal_install_order)
+            | length == 0
+          - >-
+            hetzner_baremetal_install_order[: hetzner_baremetal_install_prerequisite_hosts | length]
+            == hetzner_baremetal_install_prerequisite_hosts
+          - inventory_hostname in hetzner_baremetal_install_order
+          - hetzner_installimage_image | default('') is string
+          - hetzner_installimage_image | default('') is match('^/')
+          - >-
+            hetzner_installimage_expected_image_sha256
+            | default('')
+            is match('^[0-9a-fA-F]{64}$')
+          - >-
+            hetzner_installimage_post_install_script_path
+            | default('')
+            is string
+          - >-
+            hetzner_installimage_post_install_script_path
+            | default('')
+            | length == 0
+            or
+            hetzner_installimage_post_install_script_path
+            | default('')
+            is match('^/')
+          - >-
+            hetzner_installimage_post_install_script_ephemeral
+            | default(false) is boolean
+          - >-
+            hetzner_installimage_action | default('plan') != 'install'
+            or not ansible_check_mode
+        fail_msg: >-
+          This runbook requires --limit with one exact inventory FQDN for
+          both planning and installation. The unique install order must match
+          the bare-metal inventory exactly and begin with every declared
+          prerequisite host. The image and checksum must be explicit, and
+          destructive execution is refused in check mode.
+      tags: [always]
+
+    - name: Validate optional installed operating-system release contracts
+      vars:
+        _hetzner_expected_os_release: >-
+          {{
+            hostvars[item].hetzner_installimage_expected_os_release
+            | default({})
+          }}
+      ansible.builtin.assert:
+        that:
+          - _hetzner_expected_os_release is mapping
+          - >-
+            _hetzner_expected_os_release | length == 0
+            or
+            _hetzner_expected_os_release.keys() | list | sort
+            == ['id', 'version_id']
+          - >-
+            _hetzner_expected_os_release | length == 0
+            or
+            _hetzner_expected_os_release.id
+            is match('^[a-z0-9][a-z0-9._-]*$')
+          - >-
+            _hetzner_expected_os_release | length == 0
+            or
+            (
+              _hetzner_expected_os_release.version_id is string
+              and _hetzner_expected_os_release.version_id | length > 0
+              and _hetzner_expected_os_release.version_id
+                  is not search('[\\r\\n]')
+            )
+        fail_msg: >-
+          Each optional hetzner_installimage_expected_os_release value must
+          contain exactly a safe id and non-empty version_id.
+        quiet: true
+      loop: "{{ hetzner_baremetal_install_order }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: [always]
+
+    - name: Record the target's inventory-declared order position
+      ansible.builtin.set_fact:
+        _hetzner_install_order_position: >-
+          {{ hetzner_baremetal_install_order.index(inventory_hostname) }}
+      changed_when: false
+      tags: [always]
+
+    - name: Prove every predecessor completed its declared installed setup
+      ansible.builtin.include_tasks:
+        file: tasks/installimage-prove-installed-predecessor.yml
+      loop: >-
+        {{ hetzner_baremetal_install_order[: _hetzner_install_order_position | int] }}
+      loop_control:
+        loop_var: hetzner_installimage_order_host
+        label: "{{ hetzner_installimage_order_host }}"
+      tags: [always]
+
+    - name: Prove the target and every successor remain in Hetzner Rescue
+      ansible.builtin.include_tasks:
+        file: tasks/installimage-prove-rescue-successor.yml
+      loop: >-
+        {{ hetzner_baremetal_install_order[_hetzner_install_order_position | int :] }}
+      loop_control:
+        loop_var: hetzner_installimage_order_host
+        label: "{{ hetzner_installimage_order_host }}"
+      tags: [always]
+
+    - name: Require an explicit Rescue root connection
+      ansible.builtin.assert:
+        that:
+          - ansible_user | default('', true) == 'root'
+          - not (ansible_become | default(false) | bool)
+        fail_msg: >-
+          This runbook must connect directly as Rescue root. Supply explicit,
+          high-precedence Rescue connection variables; installed-host inventory
+          defaults intentionally use svc_ansible and must not be reused.
+      tags: [always]
+
+- name: Plan or execute the approved operating-system installation
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+    _hetzner_installimage_encryption_requested: >-
+      {{
+        (
+          hetzner_installimage_layout
+          | default({})
+        ).get('partitions', [])
+        | selectattr('crypt', 'defined')
+        | selectattr('crypt', 'equalto', true)
+        | list
+        | length > 0
+      }}
+
+  tasks:
+    - name: Build or execute the guarded installimage plan
+      block:
+        - name: Resolve the persisted recovery secret for installation
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-recovery-secret.yml
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
+        - name: Supply the resolved installation recovery passphrase
+          ansible.builtin.set_fact:
+            hetzner_installimage_crypt_password: >-
+              {{ _hetzner_baremetal_recovery_passphrase }}
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
+        - name: Require a valid persisted installation recovery passphrase
+          ansible.builtin.assert:
+            that:
+              - >-
+                hetzner_installimage_crypt_password
+                | default('', true) | length >= 40
+            fail_msg: >-
+              No valid recovery passphrase was found. Run the recovery-secrets
+              runbook for this host before authorizing installation.
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
+        - name: Build or execute the guarded installimage plan
+          ansible.builtin.include_role:
+            name: lit.foundational.hetzner_installimage
+
+        - name: Prove the retained secret against the installed encrypted root
+          ansible.builtin.include_role:
+            name: lit.foundational.hetzner_rescue_validate
+            tasks_from: luks_passphrase
+          vars:
+            hetzner_rescue_validate_expected_disks: >-
+              {{ hetzner_installimage_expected_disks }}
+            hetzner_rescue_validate_luks_software_raid_enabled: >-
+              {{ hetzner_installimage_layout.software_raid.enabled }}
+            hetzner_rescue_validate_luks_passphrase: >-
+              {{ _hetzner_baremetal_recovery_passphrase }}
+          when:
+            - hetzner_installimage_action | default('plan') == 'install'
+            - _hetzner_installimage_encryption_requested | bool
+          no_log: true
+
+        - name: Require a generated installation plan hash
+          ansible.builtin.assert:
+            that:
+              - hetzner_installimage_plan_sha256 is defined
+              - >-
+                hetzner_installimage_plan_sha256
+                is match('^[0-9a-f]{64}$')
+            fail_msg: >-
+              The installimage role did not return a valid plan hash.
+
+        - name: Show the secret-free installation approval hash
+          ansible.builtin.debug:
+            msg: >-
+              HETZNER_INSTALLIMAGE_PLAN_SHA256={{
+                hetzner_installimage_plan_sha256
+              }}
+      always:
+        - name: Close any controller Vault transport opened for installation
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
+        - name: Remove the explicitly ephemeral post-install hook
+          ansible.builtin.file:
+            path: "{{ hetzner_installimage_post_install_script_path }}"
+            state: absent
+          when:
+            - hetzner_installimage_post_install_script_ephemeral | default(false) | bool
+            - hetzner_installimage_post_install_script_path | default('') | length > 0

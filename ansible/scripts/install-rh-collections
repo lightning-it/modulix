@@ -48,10 +48,12 @@ trim_spaces() {
   printf '%s' "${value}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
-run_install_with_auth_url_flow() {
+run_install_with_auth_url_flow() (
   local token="$1"
   local tmp_cfg
   tmp_cfg="$(mktemp "/tmp/automation-hub-ansible-galaxy.XXXXXX.cfg")"
+  trap 'rm -f -- "${tmp_cfg}"' EXIT
+  trap 'exit 1' HUP INT TERM
 
   if [[ -n "${ah_server}" ]]; then
     cat >"${tmp_cfg}" <<EOF
@@ -81,13 +83,11 @@ EOF
   fi
 
   if ! ANSIBLE_CONFIG="${tmp_cfg}" "${install_cmd_base[@]}" -r "${requirements_file}"; then
-    rm -f "${tmp_cfg}"
     return 1
   fi
 
-  rm -f "${tmp_cfg}"
   return 0
-}
+)
 
 if [[ "${rh_collections_use}" == "false" ]]; then
   echo "RH collection preflight disabled (RH_COLLECTIONS_USE=false)."

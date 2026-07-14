@@ -1,0 +1,181 @@
+---
+# Read-only post-initialization proof: the persisted AppRole authenticates with
+# the exact policy and the initial root token retained only in encrypted init
+# escrow has already been revoked.
+- name: Validate scoped Vault auth after initialization
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    vault_scoped_approle_api_url: "{{ hetzner_baremetal_vault.network.controller_api_addr }}"
+    vault_scoped_approle_health_url: "{{ vault_scoped_approle_api_url }}/v1/sys/health"
+    vault_scoped_approle_api_delegate_to: localhost
+    vault_scoped_approle_validate_certs: true
+    vault_scoped_approle_ca_cert_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    vault_scoped_approle_timeout: "{{ hetzner_baremetal_vault.timeout }}"
+    vault_scoped_approle_admin_token: ""
+    vault_scoped_approle_revoke_admin_token: true
+    vault_scoped_approle_kv_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+    vault_scoped_approle_auth_mount_point: >-
+      {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+    vault_scoped_approle_role_name: "{{ hetzner_baremetal_vault.controller_auth.role_name }}"
+    vault_scoped_approle_policy_name: "{{ hetzner_baremetal_vault.controller_auth.policy_name }}"
+    vault_scoped_approle_policy: "{{ hetzner_baremetal_vault.controller_auth.policy }}"
+    vault_scoped_approle_token_type: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_type }}
+    vault_scoped_approle_token_ttl: "{{ hetzner_baremetal_vault.controller_auth.token_ttl }}"
+    vault_scoped_approle_token_ttl_seconds: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_ttl_seconds }}
+    vault_scoped_approle_token_max_ttl: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_max_ttl }}
+    vault_scoped_approle_token_max_ttl_seconds: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_max_ttl_seconds }}
+    vault_scoped_approle_token_num_uses: >-
+      {{ hetzner_baremetal_vault.controller_auth.token_num_uses }}
+    vault_scoped_approle_secret_id_ttl: >-
+      {{ hetzner_baremetal_vault.controller_auth.secret_id_ttl }}
+    vault_scoped_approle_secret_id_num_uses: >-
+      {{ hetzner_baremetal_vault.controller_auth.secret_id_num_uses }}
+    vault_scoped_approle_controller_escrow_root_path: >-
+      {{ hetzner_baremetal_vault.seal.controller_init_escrow_root_path }}
+    vault_scoped_approle_controller_document_path: >-
+      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}
+    vault_scoped_approle_document_schema_version: >-
+      {{ hetzner_baremetal_vault.controller_auth.schema_version }}
+    vault_scoped_approle_document_subject: >-
+      {{ hetzner_baremetal_vault.controller_auth.subject }}
+    vault_scoped_approle_capability_probes: >-
+      {{ hetzner_baremetal_vault.controller_auth.capability_probes }}
+
+  pre_tasks:
+    - name: Require one exact Vault validation target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_vault.host
+          - not ansible_check_mode
+        fail_msg: "Use --limit with the exact inventory-declared Vault host."
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Validate scoped auth through an ephemeral controller transport
+      block:
+        - name: Establish the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
+        - name: Inspect controller init escrow before revocation proof
+          ansible.builtin.stat:
+            path: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+            follow: false
+            get_checksum: true
+            checksum_algorithm: sha256
+            get_attributes: false
+            get_mime: false
+          register: _vault_auth_validate_init_stat
+          delegate_to: localhost
+          become: false
+          changed_when: false
+          no_log: true
+
+        - name: Read only the controller init ciphertext signature
+          ansible.builtin.command:
+            argv:
+              - head
+              - -c
+              - "15"
+              - "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+          register: _vault_auth_validate_init_signature
+          delegate_to: localhost
+          become: false
+          changed_when: false
+          check_mode: false
+          when: _vault_auth_validate_init_stat.stat.exists | default(false)
+          no_log: true
+
+        - name: Require safe controller init ciphertext
+          ansible.builtin.assert:
+            that:
+              - _vault_auth_validate_init_stat.stat.exists | default(false)
+              - _vault_auth_validate_init_stat.stat.isreg | default(false)
+              - not (_vault_auth_validate_init_stat.stat.islnk | default(false))
+              - _vault_auth_validate_init_stat.stat.nlink | int == 1
+              - _vault_auth_validate_init_stat.stat.mode in ['0400', '0600']
+              - _vault_auth_validate_init_stat.stat.size | int > 0
+              - _vault_auth_validate_init_stat.stat.size | int <= 1048576
+              - _vault_auth_validate_init_signature.stdout == '$ANSIBLE_VAULT;'
+            fail_msg: >-
+              Controller init escrow is not safe Ansible Vault ciphertext.
+            quiet: true
+          no_log: true
+
+        - name: Load controller init escrow in protected memory
+          ansible.builtin.include_vars:
+            file: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+            name: _vault_auth_validate_init_document
+          delegate_to: localhost
+          become: false
+          no_log: true
+
+        - name: Require exact encrypted initial root-token schema
+          ansible.builtin.assert:
+            that:
+              - _vault_auth_validate_init_document.keys() | list == ['vault_init']
+              - _vault_auth_validate_init_document.vault_init is mapping
+              - >-
+                _vault_auth_validate_init_document.vault_init.root_token
+                is match('^[^\r\n]{16,4096}$')
+            fail_msg: >-
+              Controller init escrow lacks the exact encrypted initial-token
+              schema.
+            quiet: true
+          no_log: true
+
+        - name: Require the encrypted initial root token to be revoked
+          ansible.builtin.uri:
+            url: >-
+              {{ hetzner_baremetal_vault.api_addr }}/v1/auth/token/lookup-self
+            method: GET
+            headers:
+              X-Vault-Token: >-
+                {{ _vault_auth_validate_init_document.vault_init.root_token }}
+            validate_certs: true
+            ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+            status_code: 403
+            timeout: "{{ hetzner_baremetal_vault.timeout }}"
+          delegate_to: localhost
+          become: false
+          changed_when: false
+          no_log: true
+
+        - name: Revalidate stored scoped AppRole without root
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_scoped_approle
+          no_log: true
+
+        - name: Require successful scoped authentication validation
+          ansible.builtin.assert:
+            that:
+              - vault_scoped_approle_configured | default(false) | bool
+            fail_msg: "Stored scoped AppRole validation did not complete."
+            quiet: true
+          no_log: true
+
+        - name: Report successful root revocation and scoped auth validation
+          ansible.builtin.debug:
+            msg: >-
+              Initial Vault root token is revoked and the immutable scoped
+              batch AppRole passed exact policy, role, and capability readback.
+
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

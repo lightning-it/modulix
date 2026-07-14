@@ -1,0 +1,259 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - Tang deployment
+#
+# Purpose:
+# - Deploy the inventory-enabled, socket-activated Tang service
+# - Validate its local advertisement
+# - Return only public signing thumbprints for out-of-band client pinning
+#
+# Firewall and DNS policy remain external prerequisites.
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require the exact Tang host)
+  hosts: wunderboxes
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require one exact Tang host limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_tang_host
+          - inventory_hostname == hetzner_baremetal_vault.host
+        fail_msg: >-
+          Use --limit with the exact inventory FQDN that is declared as both
+          the Tang and Vault host.
+      tags: [always]
+
+    - name: Require the HashiCorp Vault secret backend
+      ansible.builtin.assert:
+        that:
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+        fail_msg: >-
+          Tang deployment requires the hashicorp_vault backend after verified
+          bootstrap-secret migration.
+        quiet: true
+      tags: [always]
+
+- name: Deploy and validate Tang
+  hosts: wunderboxes
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('24.04', '>=')
+          - ansible_facts['distribution_version'] is version('25.04', '<')
+        fail_msg: "This runbook supports Ubuntu 24.04 only."
+      tags: [always]
+
+  tasks:
+    - name: Deploy Tang through an ephemeral controller Vault transport
+      block:
+        - name: Verify the migrated recovery document before Tang mutation
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/resolve-recovery-secret.yml
+          no_log: true
+
+        - name: Deploy the declared Tang service
+          ansible.builtin.include_role:
+            name: lit.ubuntu.tang_deploy
+
+        - name: Require one public Tang signing thumbprint
+          ansible.builtin.assert:
+            that:
+              - tang_deploy_public_thumbprints | default([]) | length == 1
+            fail_msg: "Tang did not return exactly one public signing thumbprint."
+          when: tang_deploy_enabled | default(false) | bool
+
+        - name: Read the current Tang host Vault document
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _tang_deploy_vault_current
+          when: tang_deploy_enabled | default(false) | bool
+          no_log: true
+
+        - name: Resolve any existing pinned Tang thumbprint
+          ansible.builtin.set_fact:
+            _tang_deploy_vault_thumbprint_current: >-
+              {{
+                _tang_deploy_vault_current.secret.get(
+                  hetzner_baremetal_vault.tang_thumbprint_field,
+                  ''
+                )
+              }}
+          when: tang_deploy_enabled | default(false) | bool
+          no_log: true
+
+        - name: Refuse to overwrite Tang trust drift
+          ansible.builtin.assert:
+            that:
+              - >-
+                _tang_deploy_vault_thumbprint_current | length == 0
+                or
+                _tang_deploy_vault_thumbprint_current
+                == tang_deploy_public_thumbprints[0]
+            fail_msg: >-
+              HashiCorp Vault already contains a different Tang thumbprint. It
+              will not be overwritten.
+            quiet: true
+          when: tang_deploy_enabled | default(false) | bool
+          no_log: true
+
+        - name: Build the exact Tang trust document
+          ansible.builtin.set_fact:
+            _tang_deploy_vault_expected: >-
+              {{
+                _tang_deploy_vault_current.secret
+                | combine(
+                    {
+                      hetzner_baremetal_vault.tang_thumbprint_field:
+                        tang_deploy_public_thumbprints[0]
+                    }
+                  )
+              }}
+          when:
+            - tang_deploy_enabled | default(false) | bool
+            - _tang_deploy_vault_thumbprint_current | length == 0
+          no_log: true
+
+        - name: Persist the absent pinned Tang thumbprint with exact Vault CAS
+          when:
+            - tang_deploy_enabled | default(false) | bool
+            - _tang_deploy_vault_thumbprint_current | length == 0
+          no_log: true
+          block:
+            - name: Write the absent Tang thumbprint at the read version
+              community.hashi_vault.vault_kv2_write:
+                url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+                namespace: >-
+                  {{
+                    _hetzner_hashicorp_vault_auth.namespace
+                    if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                    else omit
+                  }}
+                validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+                ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+                timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+                retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+                auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+                mount_point: >-
+                  {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+                role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+                secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+                engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+                path: "{{ hetzner_baremetal_vault_secret_path }}"
+                cas: "{{ _tang_deploy_vault_current.metadata.version | int }}"
+                data: "{{ _tang_deploy_vault_expected }}"
+              delegate_to: localhost
+              become: false
+          rescue:
+            - name: Re-read Tang trust after a possible CAS race
+              community.hashi_vault.vault_kv2_get:
+                url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+                namespace: >-
+                  {{
+                    _hetzner_hashicorp_vault_auth.namespace
+                    if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                    else omit
+                  }}
+                validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+                ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+                timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+                retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+                auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+                mount_point: >-
+                  {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+                role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+                secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+                engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+                path: "{{ hetzner_baremetal_vault_secret_path }}"
+              delegate_to: localhost
+              become: false
+              register: _tang_deploy_vault_race_read
+
+            - name: Accept a Tang CAS race only for an identical document
+              ansible.builtin.assert:
+                that:
+                  - _tang_deploy_vault_race_read.secret == _tang_deploy_vault_expected
+                fail_msg: >-
+                  The Tang trust CAS write lost a race and the winner is not the
+                  exact expected recovery and trust document.
+                quiet: true
+
+        - name: Read back the pinned Tang trust document
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ hetzner_baremetal_vault.engine_mount_point }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _tang_deploy_vault_verified
+          when: tang_deploy_enabled | default(false) | bool
+          no_log: true
+
+        - name: Require exact Tang thumbprint readback
+          ansible.builtin.assert:
+            that:
+              - >-
+                _tang_deploy_vault_verified.secret[
+                  hetzner_baremetal_vault.tang_thumbprint_field
+                ] == tang_deploy_public_thumbprints[0]
+            fail_msg: "HashiCorp Vault Tang-thumbprint readback did not match."
+            quiet: true
+          when: tang_deploy_enabled | default(false) | bool
+          no_log: true
+
+        - name: Report persisted Tang trust material
+          ansible.builtin.debug:
+            msg: >-
+              Tang signing thumbprint is pinned in the inventory-declared
+              Vault document.
+          when: tang_deploy_enabled | default(false) | bool
+
+      always:
+        - name: Close the controller Vault transport after Tang deployment
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

@@ -1,0 +1,168 @@
+---
+- name: Classify LUKS-header manifest fields for Raft verification
+  ansible.builtin.set_fact:
+    _vault_raft_snapshot_manifest_fields_present: >-
+      {{
+        _vault_raft_snapshot_manifest_field_names
+        | intersect(_vault_raft_snapshot_root_document.secret.keys() | list)
+        | length
+      }}
+  no_log: true
+
+- name: Refuse partial or legacy LUKS-header manifests for Raft verification
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_raft_snapshot_manifest_fields_present | int
+        in [0, _vault_raft_snapshot_manifest_field_names | length]
+      - >-
+        'luks_header_b64'
+        not in _vault_raft_snapshot_root_document.secret
+    fail_msg: >-
+      A selected Vault root document contains partial or legacy LUKS-header
+      metadata and cannot be used for an exact Raft restore proof.
+    quiet: true
+  no_log: true
+
+- name: Extend Raft verification from a complete LUKS-header manifest
+  when: >-
+    _vault_raft_snapshot_manifest_fields_present | int
+    == _vault_raft_snapshot_manifest_field_names | length
+  no_log: true
+  block:
+    - name: Validate the complete LUKS-header manifest for Raft verification
+      ansible.builtin.assert:
+        that:
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_format_field
+            ] == hetzner_baremetal_vault.luks_header_storage_format
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_path_prefix_field
+            ]
+            == _vault_raft_snapshot_root_document.item.path
+            ~ '/'
+            ~ hetzner_baremetal_vault.luks_header_chunk_path_suffix
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | type_debug == 'int'
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | int > 0
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | int
+            * hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int
+            <= hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes | int
+            + hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int
+            - 1
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field
+            ] | type_debug == 'int'
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field
+            ] == hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+            ] | type_debug == 'list'
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+            ] | length
+            == _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | int
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+            ] | select('match', '^[0-9a-f]{64}$') | list | length
+            == _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | int
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_sha256_field
+            ] is match('^[0-9a-f]{64}$')
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_raw_sha256_field
+            ] is match('^[0-9a-f]{64}$')
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_raw_size_field
+            ] | type_debug == 'int'
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_raw_size_field
+            ] | int > 0
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_raw_size_field
+            ] | int
+            <= hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes | int
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | int
+            ==
+            (
+              (
+                _vault_raft_snapshot_root_document.secret[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] | int
+              )
+              + (hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int)
+              - 1
+            )
+            // (hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int)
+          - >-
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_uuid_field
+            ]
+            is match(
+              '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-'
+              ~ '[0-9a-f]{12}$'
+            )
+        fail_msg: >-
+          A complete LUKS-header manifest is malformed or exceeds the
+          inventory-declared header contract.
+        quiet: true
+
+    - name: Add every manifest-referenced chunk to Raft verification
+      ansible.builtin.set_fact:
+        _vault_raft_snapshot_verification_kv_paths_resolved: >-
+          {{
+            _vault_raft_snapshot_verification_kv_paths_resolved
+            + [
+                {
+                  'mount_point': _vault_raft_snapshot_root_document.item.mount_point,
+                  'path': (
+                    _vault_raft_snapshot_root_document.secret[
+                      hetzner_baremetal_vault
+                      .luks_header_chunk_path_prefix_field
+                    ]
+                    ~ '/chunk-'
+                    ~ ('%04d' | format(_vault_raft_snapshot_chunk_index))
+                  )
+                }
+              ]
+          }}
+      loop: >-
+        {{
+          range(
+            0,
+            _vault_raft_snapshot_root_document.secret[
+              hetzner_baremetal_vault.luks_header_chunk_count_field
+            ] | int
+          ) | list
+        }}
+      loop_control:
+        loop_var: _vault_raft_snapshot_chunk_index
+        label: "manifest-referenced-luks-header-chunk"

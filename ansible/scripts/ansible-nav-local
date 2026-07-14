@@ -32,11 +32,17 @@ automation_hub_url_published="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED:-ht
 automation_hub_url_validated="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED:-https://console.redhat.com/api/automation-hub/content/validated/}"
 automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 cleanup_files=()
+cleanup_dirs=()
 
 cleanup() {
   local file
+  local dir
   for file in "${cleanup_files[@]}"; do
     rm -f -- "${file}" 2>/dev/null || true
+  done
+  for dir in "${cleanup_dirs[@]}"; do
+    chmod -R u+w -- "${dir}" 2>/dev/null || true
+    rm -rf -- "${dir}" 2>/dev/null || true
   done
 }
 trap cleanup EXIT
@@ -62,6 +68,7 @@ Environment:
   ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
   ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
   ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
+  ANSIBLE_VAULT_PASSWORD_FILE=<owner-only file>    (EE transport requires Podman and mode 0400 or 0600)
   RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, required for certified collections)
   ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL=<url>         (optional legacy single Automation Hub server URL)
   ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED=<url> (optional published server URL)
@@ -109,24 +116,73 @@ add_ee_volume_if_present() {
   cmd+=(--eev "${source}:${target}:ro")
 }
 
+validate_owner_only_secret_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" ]]; then
+    echo "${label} must reference a regular, non-symlink file." >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' -- "${path}")"
+  owner="$(stat -c '%u' -- "${path}")"
+  case "${mode}" in
+    400|600) ;;
+    *)
+      echo "${label} must have mode 0400 or 0600 (found ${mode})." >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${owner}" != "$(id -u)" ]]; then
+    echo "${label} must be owned by the effective user." >&2
+    return 1
+  fi
+}
+
 stage_secret_file_for_ee() {
   local var_name="$1"
   local source="${!var_name:-}"
   local staged_dir=""
   local staged_file=""
 
-  if [[ "${nav_ee_enabled}" != "true" || -z "${source}" || ! -f "${source}" ]]; then
+  if [[ -z "${source}" ]]; then
     return 0
   fi
 
-  staged_dir="${ANSIBLE_HOME}/ee-secrets"
-  mkdir -p "${staged_dir}"
-  chmod 0755 "${staged_dir}"
-  staged_file="$(mktemp "${staged_dir}/${var_name}.XXXXXX")"
-  cp -- "${source}" "${staged_file}"
-  chmod 0444 "${staged_file}"
-  cleanup_files+=("${staged_file}")
+  validate_owner_only_secret_file "${source}" "${var_name}"
+  if [[ "${nav_ee_enabled}" != "true" ]]; then
+    return 0
+  fi
+  if [[ "${nav_container_engine}" != "podman" ]]; then
+    echo "Secure ${var_name} transport into an execution environment is supported only with Podman." >&2
+    exit 1
+  fi
+  if [[ "${nav_ee_container_options}" =~ (^|[[:space:]])--(user|userns|uidmap|gidmap)(=|[[:space:]]|$) ]]; then
+    echo "${var_name} transport cannot be combined with user-namespace or user-ID container overrides." >&2
+    exit 1
+  fi
+
+  staged_dir="$(mktemp -d "${ANSIBLE_HOME}/ee-secrets.XXXXXX")"
+  cleanup_dirs+=("${staged_dir}")
+  chmod 0700 "${staged_dir}"
+  staged_file="${staged_dir}/ansible-vault-pass.txt"
+  install -m 0400 "${source}" "${staged_file}"
+  validate_owner_only_secret_file "${staged_file}" "staged ${var_name}"
   export "${var_name}=${staged_file}"
+  cmd+=(--eev "${staged_dir}:${staged_dir}:ro")
+  if [[ "$(id -u)" == "0" ]]; then
+    # The outer rootless toolbox maps its root user to the invoking host user.
+    # A second keep-id namespace cannot be created reliably in that restricted
+    # mapping, so keep the nested controller at the already-matching root UID.
+    cmd+=("--co=--user=0:0")
+  else
+    cmd+=("--co=--userns=keep-id")
+    cmd+=("--co=--user=$(id -u):$(id -g)")
+  fi
 }
 
 validate_choice "ANSIBLE_TOOLBOX_NAV_MODE" "${nav_mode}" "stdout interactive"
@@ -301,7 +357,7 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
 export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
-collections_path_without_overlays="${REPO_ROOT}/collections:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+collections_path_without_overlays="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
 if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
 else
@@ -314,6 +370,12 @@ fi
 
 subcommand="$1"
 shift
+
+if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
+  validate_owner_only_secret_file \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "ANSIBLE_VAULT_PASSWORD_FILE"
+fi
 
 case "${subcommand}" in
   run)
@@ -360,7 +422,6 @@ case "${subcommand}" in
     stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
     add_ee_volume_if_present "/runner/.ssh" "/runner/.ssh" dir
-    add_ee_volume_if_present "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
     fi
@@ -374,7 +435,11 @@ case "${subcommand}" in
       cmd+=(--ee false)
     fi
     cmd+=(run "$@")
-    exec "${cmd[@]}"
+    if (( ${#cleanup_dirs[@]} > 0 )); then
+      "${cmd[@]}"
+    else
+      exec "${cmd[@]}"
+    fi
     ;;
   exec)
     if [[ "${1:-}" == "--" ]]; then

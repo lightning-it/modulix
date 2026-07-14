@@ -5,10 +5,16 @@
 # aap_action=... instead of sourcing this file.
 
 modulix_aap_set_defaults() {
+  local modulix_run_ee_last_segment
+
   : "${AAP_SHORTNAME:=${AAP_FQDN%%.*}}"
   : "${AAP_USER:=svc_ansible}"
+  : "${AAP_SETUP_USER:=${AAP_USER}}"
   : "${AAP_INSTALL_USER:=svc_aap}"
+  : "${AAP_ANSIBLE_HOST:=${AAP_FQDN}}"
   : "${AAP_ANSIBLE_BECOME_FLAGS:=}"
+  : "${AAP_SECRET_BACKEND:=hashicorp_vault}"
+  : "${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES:=true}"
   : "${AAP_SSH_KEY_AUTH_ENABLED:=true}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
@@ -38,6 +44,8 @@ modulix_aap_set_defaults() {
   : "${AAP_APPL_ROOT:=/appl/aap-local}"
   : "${AAP_ENV_FILE:=${AAP_APPL_ROOT}/etc/aap-local.env}"
   : "${AAP_SECRETS_DIR:=${AAP_APPL_ROOT}/secrets}"
+  : "${AAP_KNOWN_HOSTS_FILE:=${AAP_SECRETS_DIR}/bootstrap_known_hosts}"
+  : "${AAP_KNOWN_HOSTS_CONTAINER:=/runner/secrets/bootstrap_known_hosts}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
     : "${AAP_SSH_KEY:=${AAP_SECRETS_DIR}/svc_ansible_aap}"
   else
@@ -66,34 +74,109 @@ modulix_aap_set_defaults() {
   MODULIX_RUN_EE_ARCHIVE="${MODULIX_RUN_EE_IMAGE##*/}.tar"
   MODULIX_RUN_EE_ARCHIVE="${MODULIX_RUN_EE_ARCHIVE//:/-}"
   MODULIX_RUN_EE_ARCHIVE_PATH="${AAP_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}"
+  : "${MODULIX_RUN_EE_DIGEST:=}"
+  # Machine A publishes and saves the tag. Target-side pulls and runs use the
+  # immutable repository@digest reference when a registry digest was recorded.
+  # Inspect only the final path segment so a registry port is never mistaken
+  # for an image tag.
+  MODULIX_RUN_EE_REPOSITORY="${MODULIX_RUN_EE_IMAGE}"
+  modulix_run_ee_last_segment="${MODULIX_RUN_EE_REPOSITORY##*/}"
+  if [[ "${modulix_run_ee_last_segment}" == *:* ]]; then
+    MODULIX_RUN_EE_REPOSITORY="${MODULIX_RUN_EE_REPOSITORY%:*}"
+  fi
+  MODULIX_RUN_EE_RUNTIME_IMAGE="${MODULIX_RUN_EE_IMAGE}"
+  if [[ -n "${MODULIX_RUN_EE_DIGEST}" ]]; then
+    if [[ "${MODULIX_RUN_EE_IMAGE}" == *@* ]]; then
+      printf 'MODULIX_RUN_EE_IMAGE must not contain @ when MODULIX_RUN_EE_DIGEST is set.\n' >&2
+      return 1
+    fi
+    if [[ ! "${MODULIX_RUN_EE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      printf 'MODULIX_RUN_EE_DIGEST must be a SHA-256 digest, got: %s\n' \
+        "${MODULIX_RUN_EE_DIGEST}" >&2
+      return 1
+    fi
+    MODULIX_RUN_EE_RUNTIME_IMAGE="${MODULIX_RUN_EE_REPOSITORY}@${MODULIX_RUN_EE_DIGEST}"
+  fi
   : "${ANSIBLE_TOOLBOX_RUNTIME_MODE:=disconnected}"
-  : "${ANSIBLE_VAULT_PASSWORD_FILE:=${AAP_SECRETS_DIR}/.vault-pass.txt}"
+  if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
+    : "${ANSIBLE_VAULT_PASSWORD_FILE:=${AAP_SECRETS_DIR}/.vault-pass.txt}"
+  else
+    ANSIBLE_VAULT_PASSWORD_FILE=""
+  fi
   : "${ANSIBLE_COLLECTIONS_PATH:=/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
   : "${AAP_PODMAN_STORAGE_CONF:=${AAP_APPL_ROOT}/etc/containers-storage.conf}"
   : "${AAP_PODMAN_ROOT_GRAPHROOT:=/appl/podman/root-storage}"
   : "${AAP_PODMAN_ROOT_RUNROOT:=/appl/podman/root-run}"
   : "${AAP_PODMAN_TMPDIR:=/appl/tmp}"
   : "${AAP_EE_TRANSFER_ENABLED:=true}"
+  : "${AAP_HOST_CA_TRUST_DIR:=/etc/pki/ca-trust}"
+  : "${AAP_REQUESTS_CA_BUNDLE:=${AAP_HOST_CA_TRUST_DIR}/extracted/pem/tls-ca-bundle.pem}"
 
-  if [[ -z "${VAULT_TOKEN:-}" && -r "${AAP_SECRETS_DIR}/.vault-token" ]]; then
+  case "${AAP_SECRET_BACKEND}" in
+    hashicorp_vault | ansible_vault) ;;
+    *)
+      printf 'AAP_SECRET_BACKEND must be hashicorp_vault or ansible_vault, got: %s\n' \
+        "${AAP_SECRET_BACKEND}" >&2
+      return 1
+      ;;
+  esac
+  case "${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES}" in
+    true | false) ;;
+    *)
+      printf 'AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES must be true or false, got: %s\n' \
+        "${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES}" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ -z "${VAULT_VALIDATE_CERTS+x}" ]]; then
+    case "${VAULT_SKIP_VERIFY:-false}" in
+      true) VAULT_VALIDATE_CERTS=false ;;
+      false | "") VAULT_VALIDATE_CERTS=true ;;
+      *)
+        printf 'VAULT_SKIP_VERIFY must be true or false, got: %s\n' \
+          "${VAULT_SKIP_VERIFY}" >&2
+        return 1
+        ;;
+    esac
+  fi
+  case "${VAULT_VALIDATE_CERTS}" in
+    true) VAULT_SKIP_VERIFY=false ;;
+    false) VAULT_SKIP_VERIFY=true ;;
+    *)
+      printf 'VAULT_VALIDATE_CERTS must be true or false, got: %s\n' \
+        "${VAULT_VALIDATE_CERTS}" >&2
+      return 1
+      ;;
+  esac
+
+  # On the AAP host, the staged token file is authoritative. This lets an
+  # operator refresh a scoped token between long, feedback-driven rollout
+  # sections without a stale inherited VAULT_TOKEN winning precedence.
+  if [[ -s "${AAP_SECRETS_DIR}/.vault-token" ]]; then
     VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
   fi
 
-  export AAP_SHORTNAME AAP_USER AAP_INSTALL_USER AAP_ANSIBLE_BECOME_FLAGS
+  export AAP_SHORTNAME AAP_USER AAP_SETUP_USER AAP_INSTALL_USER AAP_ANSIBLE_HOST
+  export AAP_ANSIBLE_BECOME_FLAGS AAP_SECRET_BACKEND
+  export AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES
   export AAP_SSH_KEY_AUTH_ENABLED
   export AAP_BOOTSTRAP_USER AAP_BASELINE_SSH_KEY AAP_BOOTSTRAP_SSH_KEY
   export AAP_VAULT_HOST_KEY AAP_VAULT_ADMIN_PASSWORDS_KV_PATH AAP_VAULT_DEFAULTS_KV_PATH
   export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_ENV_FILE
   export AAP_SECRETS_DIR AAP_SSH_KEY AAP_SSH_KEY_CONTAINER
+  export AAP_KNOWN_HOSTS_FILE AAP_KNOWN_HOSTS_CONTAINER
   export MACHINE_A_APPL_ROOT MACHINE_A_EXPORT_ROOT MACHINE_A_ENV_FILE
   export MACHINE_A_SECRETS_DIR MACHINE_A_SSH_KEY MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
   export AUTOMATION_DIR AUTOMATION_ANSIBLE_DIR AAP_ARTIFACT_DIR
   export INVENTORY_REL INVENTORY_FILE
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
+  export MODULIX_RUN_EE_DIGEST MODULIX_RUN_EE_REPOSITORY MODULIX_RUN_EE_RUNTIME_IMAGE
   export ANSIBLE_TOOLBOX_RUNTIME_MODE ANSIBLE_VAULT_PASSWORD_FILE ANSIBLE_COLLECTIONS_PATH
   export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT AAP_PODMAN_TMPDIR
   export AAP_EE_TRANSFER_ENABLED
-  export VAULT_TOKEN
+  export AAP_HOST_CA_TRUST_DIR AAP_REQUESTS_CA_BUNDLE
+  export VAULT_TOKEN VAULT_VALIDATE_CERTS VAULT_SKIP_VERIFY
 }
 
 modulix_write_podman_storage_conf() {
@@ -148,6 +231,8 @@ modulix_resolve_aap_artifacts() {
 
 modulix_ansible_ee() {
   local -a ssh_agent_args=()
+  local -a ansible_vault_args=()
+  local aap_local_ansible_config="${AUTOMATION_ANSIBLE_DIR}/aap-local.cfg"
   if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
     ssh_agent_args=(
       -e SSH_AUTH_SOCK=/runner/ssh-agent
@@ -155,18 +240,47 @@ modulix_ansible_ee() {
     )
   fi
 
+  if [[ ! -d "${AAP_HOST_CA_TRUST_DIR}" || ! -r "${AAP_REQUESTS_CA_BUNDLE}" ]]; then
+    printf 'RHEL host CA trust is not readable: %s (bundle: %s)\n' \
+      "${AAP_HOST_CA_TRUST_DIR}" "${AAP_REQUESTS_CA_BUNDLE}" >&2
+    return 1
+  fi
+  if [[ ! -s "${AAP_KNOWN_HOSTS_FILE}" ]]; then
+    printf 'Verified SSH known hosts file is missing or empty: %s\n' \
+      "${AAP_KNOWN_HOSTS_FILE}" >&2
+    return 1
+  fi
+  if [[ ! -r "${aap_local_ansible_config}" ]]; then
+    printf 'Dedicated AAP Ansible config is missing or unreadable: %s\n' \
+      "${aap_local_ansible_config}" >&2
+    return 1
+  fi
+
+  if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
+    if [[ ! -s "${ANSIBLE_VAULT_PASSWORD_FILE}" ]]; then
+      printf 'Ansible Vault password file is missing or empty: %s\n' \
+        "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
+      return 1
+    fi
+    ansible_vault_args=(
+      -e ANSIBLE_VAULT_PASSWORD_FILE=/runner/secrets/.vault-pass.txt
+    )
+  fi
+
   podman run --rm \
     --network=host \
     --security-opt label=disable \
     --user 0 \
-    -e ANSIBLE_CONFIG=/runner/project/ansible.cfg \
+    -e ANSIBLE_CONFIG=/runner/project/aap-local.cfg \
+    -e ANSIBLE_HOST_KEY_CHECKING=true \
     -e ANSIBLE_LOCAL_TEMP=/appl/tmp/.ansible/tmp \
     -e ANSIBLE_REMOTE_TEMP \
     -e ANSIBLE_TOOLBOX_RUNTIME_MODE \
     -e ANSIBLE_COLLECTIONS_PATH \
-    -e ANSIBLE_VAULT_PASSWORD_FILE=/runner/secrets/.vault-pass.txt \
+    "${ansible_vault_args[@]}" \
     -e VAULT_ADDR \
     -e VAULT_SKIP_VERIFY \
+    -e VAULT_VALIDATE_CERTS \
     -e VAULT_TOKEN \
     -e VAULT_ENGINE_MOUNT_POINT \
     -e AAP_VAULT_HOST_KEY \
@@ -175,12 +289,14 @@ modulix_ansible_ee() {
     -e AAP_ARTIFACT_DIR \
     -e AAP_BUNDLE_REMOTE_SRC \
     -e AAP_MANIFEST_REMOTE_SRC \
+    -e REQUESTS_CA_BUNDLE="${AAP_REQUESTS_CA_BUNDLE}" \
     -v "${AUTOMATION_ANSIBLE_DIR}:/runner/project" \
     -v "${AAP_SECRETS_DIR}:/runner/secrets:ro" \
+    -v "${AAP_HOST_CA_TRUST_DIR}:${AAP_HOST_CA_TRUST_DIR}:ro" \
     -v /appl/tmp:/appl/tmp \
     "${ssh_agent_args[@]}" \
     -w /runner/project \
-    "${MODULIX_RUN_EE_IMAGE}" \
+    "${MODULIX_RUN_EE_RUNTIME_IMAGE}" \
     "$@"
 }
 
@@ -212,8 +328,8 @@ ansible_connection: ssh
 ansible_become: true
 ansible_become_method: sudo
 ansible_ssh_common_args: >-
-  -o UserKnownHostsFile=/appl/tmp/modulix-known_hosts
-  -o StrictHostKeyChecking=accept-new
+  -o UserKnownHostsFile=${AAP_KNOWN_HOSTS_CONTAINER}
+  -o StrictHostKeyChecking=yes
 ansible_remote_tmp: /appl/ansible-tmp
 YAML
 
@@ -231,16 +347,40 @@ YAML
 
   cat >"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap.yml" <<YAML
 ---
+aap_secret_backend: "${AAP_SECRET_BACKEND}"
+aap_preflight_expected_ansible_user: "${AAP_SETUP_USER}"
+
 aap_deploy_setup_download_version: "2.7"
 
 aap_deploy_install_dir: /appl/aap
 aap_deploy_setup_dir: "{{ aap_deploy_install_dir }}/setup"
 aap_deploy_tls_dir: "{{ aap_deploy_install_dir }}/tls"
 aap_deploy_installed_marker_path: "{{ aap_deploy_install_dir }}/.aap_containerized_installed"
+aap_deploy_gateway_main_url: "https://${AAP_FQDN}:8446"
+aap_deploy_gateway_verify_url: "{{ aap_deploy_gateway_main_url }}"
+aap_deploy_hub_upload_readiness_url: "https://${AAP_FQDN}:8444/api/galaxy/pulp/api/v3/status/"
+aap_deploy_hub_container_registry_url: "https://${AAP_FQDN}:8444"
+aap_deploy_hub_seed_execution_environment_images: ${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES}
+aap_deploy_eda_api_url: "https://${AAP_FQDN}:8445"
 
 aap_deploy_install_user: ${AAP_INSTALL_USER}
 aap_deploy_install_user_home: /appl/home/${AAP_INSTALL_USER}
 aap_deploy_install_user_shell: /bin/bash
+aap_deploy_reset_partial_install_enabled: true
+
+aap_deploy_growth_gateway_host: "${AAP_INVENTORY_HOST}"
+aap_deploy_growth_controller_host: "${AAP_INVENTORY_HOST}"
+aap_deploy_growth_hub_host: "${AAP_INVENTORY_HOST}"
+aap_deploy_growth_eda_host: "${AAP_INVENTORY_HOST}"
+aap_deploy_growth_automationmetrics_host: "${AAP_INVENTORY_HOST}"
+aap_deploy_growth_postgresql_host: "${AAP_INVENTORY_HOST}"
+aap_deploy_host_alias_address: "{{ ansible_default_ipv4.address }}"
+aap_deploy_gateway_pg_host: "${AAP_ANSIBLE_HOST}"
+aap_deploy_controller_pg_host: "${AAP_ANSIBLE_HOST}"
+aap_deploy_hub_pg_host: "${AAP_ANSIBLE_HOST}"
+aap_deploy_eda_pg_host: "${AAP_ANSIBLE_HOST}"
+aap_deploy_automationmetrics_pg_host: "${AAP_ANSIBLE_HOST}"
+aap_deploy_automationmetrics_controller_read_pg_host: "${AAP_ANSIBLE_HOST}"
 
 aap_runbook_manage_rhsm: false
 aap_runbook_manage_repos: false
@@ -259,8 +399,8 @@ aap_deploy_install_environment:
 
 aap_cac_gateway_hostname: "https://${AAP_FQDN}"
 
-aap_ops_health_url: "https://127.0.0.1/"
-aap_ops_validate_certs: false
+aap_ops_health_url: "https://${AAP_FQDN}/"
+aap_ops_validate_certs: true
 aap_ops_manage_systemd: false
 
 aap_prepare_bundle_required: true
@@ -276,20 +416,25 @@ aap_prepare_artifact_dir: "{{ lookup('ansible.builtin.env', 'AAP_ARTIFACT_DIR') 
 
 aap_deploy_tls_enabled: true
 aap_deploy_tls_source: customer_files
+aap_tls_selfsigned_output_dir: /runner/project/files/tls
+aap_tls_selfsigned_common_name: "${AAP_FQDN}"
+aap_tls_selfsigned_dns_names:
+  - "${AAP_FQDN}"
+  - "${AAP_INVENTORY_HOST}"
 aap_deploy_tls_customer_files:
-  ca_cert_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap-selfsigned-ca.crt"
+  ca_cert_src: "{{ aap_tls_selfsigned_output_dir }}/aap-selfsigned-ca.crt"
   gateway:
-    cert_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.crt"
-    key_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.key"
+    cert_src: "{{ aap_tls_selfsigned_output_dir }}/aap.crt"
+    key_src: "{{ aap_tls_selfsigned_output_dir }}/aap.key"
   controller:
-    cert_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.crt"
-    key_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.key"
+    cert_src: "{{ aap_tls_selfsigned_output_dir }}/aap.crt"
+    key_src: "{{ aap_tls_selfsigned_output_dir }}/aap.key"
   hub:
-    cert_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.crt"
-    key_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.key"
+    cert_src: "{{ aap_tls_selfsigned_output_dir }}/aap.crt"
+    key_src: "{{ aap_tls_selfsigned_output_dir }}/aap.key"
   eda:
-    cert_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.crt"
-    key_src: "{{ lookup('ansible.builtin.env', 'PWD') }}/files/tls/aap.key"
+    cert_src: "{{ aap_tls_selfsigned_output_dir }}/aap.crt"
+    key_src: "{{ aap_tls_selfsigned_output_dir }}/aap.key"
 
 aap_cac_controller_license_required: true
 
@@ -302,9 +447,6 @@ aap_cac_controller_organizations:
 controller_settings:
   - name: TOWER_URL_BASE
     value: "https://${AAP_FQDN}"
-  - name: AWX_TASK_ENV
-    value:
-      GIT_SSL_NO_VERIFY: "true"
 YAML
 
   cat >"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/podman.yml" <<YAML
@@ -317,11 +459,24 @@ rhel_podman_rootless_storage_path: /appl/podman/storage
 rhel_podman_rootless_storage_conf_path: /appl/home/${AAP_INSTALL_USER}/.config/containers/storage.conf
 YAML
 
+  if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
+    rm -f \
+      "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap_hc_vault.yml"
+    if [[ ! -s "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap_ansible_vault.yml" ]]; then
+      printf 'Ansible Vault group vars are missing: %s\n' \
+        "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap_ansible_vault.yml" >&2
+      return 1
+    fi
+    return 0
+  fi
+  rm -f \
+    "${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap_ansible_vault.yml"
+
   cat >"${AUTOMATION_ANSIBLE_DIR}/inventories/${INVENTORY_NAME}/group_vars/aaps/aap_hc_vault.yml" <<YAML
 ---
 vault_address: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('${VAULT_ADDR}', true) }}"
 vault_engine_mount_point: "{{ lookup('ansible.builtin.env', 'VAULT_ENGINE_MOUNT_POINT') | default('${VAULT_ENGINE_MOUNT_POINT}', true) }}"
-vault_validate_certs: false
+vault_validate_certs: "{{ lookup('ansible.builtin.env', 'VAULT_VALIDATE_CERTS') | default('true', true) | bool }}"
 
 aap_vault_host_key: "{{ lookup('ansible.builtin.env', 'AAP_VAULT_HOST_KEY') | default('${AAP_VAULT_HOST_KEY}', true) }}"
 hc_vault_aap_admin_passwords_kv_path: "{{ lookup('ansible.builtin.env', 'AAP_VAULT_ADMIN_PASSWORDS_KV_PATH') | default(aap_vault_host_key ~ '/aap/deploy/admin_passwords', true) }}"
@@ -394,7 +549,7 @@ aap_defaults_seed_vault_kv_path: "{{ hc_vault_defaults_kv_path }}"
 aap_defaults_seed_vault_validate_certs: "{{ hc_vault_validate_certs | bool }}"
 
 aap_username: "{{ lookup('ansible.builtin.env', 'AAP_GATEWAY_USERNAME') | default('admin', true) | trim }}"
-aap_validate_certs: false
+aap_validate_certs: true
 
 aap_gateway_admin_password_input: "{{ hc_vault_aap_admin_passwords_secret.get('gateway_admin_password', '') | string | trim }}"
 aap_controller_admin_password_input: "{{ hc_vault_aap_admin_passwords_secret.get('controller_admin_password', '') | string | trim }}"
