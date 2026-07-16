@@ -73,6 +73,7 @@ jobs:
                   nodes {
                     author { login }
                     body
+                    comments(first: 1) { totalCount }
                     commit { oid }
                     state
                   }
@@ -124,7 +125,10 @@ jobs:
                     (.data.repository.pullRequest.reviews.nodes // [])[]
                     | select((.author.login // "") | startswith($prefix))
                     | select(.state == "COMMENTED")
-                    | select((.body // "") != "")
+                    | select(
+                        (((.body // "") | gsub("\\s"; "")) != "")
+                        or ((.comments.totalCount // 0) > 0)
+                      )
                     | select(
                         ((.body // "")
                         | ascii_downcase
