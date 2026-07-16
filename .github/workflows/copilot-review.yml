@@ -17,7 +17,7 @@ permissions:
   pull-requests: read
 
 env:
-  COPILOT_REVIEWER_PREFIX: copilot-pull-request-reviewer
+  COPILOT_REVIEWER_LOGIN: copilot-pull-request-reviewer
 
 concurrency:
   group: copilot-review-${{ github.event.pull_request.number }}
@@ -73,7 +73,10 @@ jobs:
                   nodes {
                     author { login }
                     body
-                    comments(first: 1) { totalCount }
+                    comments(first: 100) {
+                      totalCount
+                      nodes { body }
+                    }
                     commit { oid }
                     state
                   }
@@ -120,19 +123,34 @@ jobs:
               current_reviews="$(
                 jq \
                   --arg head "${head_sha}" \
-                  --arg prefix "${COPILOT_REVIEWER_PREFIX}" \
+                  --arg reviewer "${COPILOT_REVIEWER_LOGIN}" \
                   '[
                     (.data.repository.pullRequest.reviews.nodes // [])[]
-                    | select((.author.login // "") | startswith($prefix))
+                    | select(
+                        (.author.login // "") as $login
+                        | ($login == $reviewer or $login == ($reviewer + "[bot]"))
+                      )
                     | select(.state == "COMMENTED")
                     | select(
                         (((.body // "") | gsub("\\s"; "")) != "")
                         or ((.comments.totalCount // 0) > 0)
                       )
                     | select(
+                        (.comments.totalCount // 0)
+                        == ((.comments.nodes // []) | length)
+                      )
+                    | select(
                         ((.body // "")
                         | ascii_downcase
                         | contains("unable to review this pull request")) == false
+                      )
+                    | select(
+                        ([
+                          (.comments.nodes // [])[]
+                          | ((.body // "")
+                            | ascii_downcase
+                            | contains("unable to review this pull request"))
+                        ] | any) == false
                       )
                     | select(.commit.oid == $head)
                   ]
@@ -229,13 +247,13 @@ jobs:
 
               page_unresolved="$(
                 jq \
-                  --arg prefix "${COPILOT_REVIEWER_PREFIX}" \
+                  --arg reviewer "${COPILOT_REVIEWER_LOGIN}" \
                   '[
                     (.data.repository.pullRequest.reviewThreads.nodes // [])[]
                     | select(.isResolved == false)
                     | select(
-                        ((.comments.nodes[0].author.login // "")
-                        | startswith($prefix))
+                        (.comments.nodes[0].author.login // "") as $login
+                        | ($login == $reviewer or $login == ($reviewer + "[bot]"))
                       )
                   ]
                   | length' <<<"${response}"
