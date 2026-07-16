@@ -18,6 +18,7 @@ permissions:
 
 env:
   COPILOT_REVIEWER_LOGIN: copilot-pull-request-reviewer
+  UNABLE_REVIEW_MARKER: unable to review this pull request
 
 concurrency:
   group: copilot-review-${{ github.event.pull_request.number }}
@@ -41,6 +42,11 @@ jobs:
 
           owner="${REPOSITORY%%/*}"
           repository="${REPOSITORY#*/}"
+          normalized_unable_review_marker="$(
+            jq -nr \
+              --arg marker "${UNABLE_REVIEW_MARKER}" \
+              '$marker | ascii_downcase | gsub("\\s"; "")'
+          )"
 
           graphql() {
             local api_attempt output
@@ -71,12 +77,10 @@ jobs:
                 reviews(last: 100, before: $before) {
                   pageInfo { hasPreviousPage startCursor }
                   nodes {
+                    id
                     author { login }
                     body
-                    comments(first: 100) {
-                      totalCount
-                      nodes { body }
-                    }
+                    comments(first: 1) { totalCount }
                     commit { oid }
                     state
                   }
@@ -85,6 +89,95 @@ jobs:
             }
           }
           GRAPHQL
+
+          read -r -d '' review_comments_query <<'GRAPHQL' || true
+          query(
+            $review: ID!
+            $after: String
+          ) {
+            node(id: $review) {
+              ... on PullRequestReview {
+                body
+                commit { oid }
+                pullRequest { headRefOid }
+                comments(first: 100, after: $after) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { body }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          review_comments_clean() {
+            local review_id="$1" expected_head="$2" after="" response has_next
+            local marker_count content_count meaningful_content=false
+            local -a arguments
+            while true; do
+              arguments=(
+                -f query="${review_comments_query}"
+                -f review="${review_id}"
+              )
+              if [ -n "${after}" ]; then
+                arguments+=(-f after="${after}")
+              fi
+
+              if ! response="$(graphql "${arguments[@]}")"; then
+                return 2
+              fi
+              if ! jq -e \
+                --arg head "${expected_head}" \
+                '(.data.node.comments != null)
+                  and (.data.node.commit.oid == $head)
+                  and (.data.node.pullRequest.headRefOid == $head)' \
+                <<<"${response}" >/dev/null; then
+                echo "Review ${review_id} no longer matches current head ${expected_head}." >&2
+                return 2
+              fi
+
+              read -r marker_count content_count <<<"$(
+                jq -r \
+                  --arg marker "${normalized_unable_review_marker}" \
+                  'def review_content:
+                      (.data.node.body // ""),
+                      (.data.node.comments.nodes[]?.body // "");
+                  [
+                    ([
+                      review_content
+                      | select(
+                          ascii_downcase
+                          | gsub("\\s"; "")
+                          | contains($marker)
+                        )
+                    ] | length),
+                    ([
+                      review_content
+                      | select((gsub("\\s"; "")) != "")
+                    ] | length)
+                  ]
+                  | @tsv' <<<"${response}"
+              )"
+              if [ "${marker_count}" -gt 0 ]; then
+                return 1
+              fi
+              if [ "${content_count}" -gt 0 ]; then
+                meaningful_content=true
+              fi
+
+              has_next="$(jq -r '.data.node.comments.pageInfo.hasNextPage' <<<"${response}")"
+              if [ "${has_next}" != "true" ]; then
+                if [ "${meaningful_content}" = true ]; then
+                  return 0
+                fi
+                return 1
+              fi
+              after="$(jq -r '.data.node.comments.pageInfo.endCursor // empty' <<<"${response}")"
+              if [ -z "${after}" ]; then
+                echo "Review-comment pagination cursor is missing." >&2
+                return 2
+              fi
+            done
+          }
 
           review_complete=false
           head_sha=""
@@ -120,12 +213,12 @@ jobs:
               fi
               head_sha="${page_head_sha}"
 
-              current_reviews="$(
-                jq \
+              candidate_review_ids="$(
+                jq -r \
                   --arg head "${head_sha}" \
                   --arg reviewer "${COPILOT_REVIEWER_LOGIN}" \
-                  '[
-                    (.data.repository.pullRequest.reviews.nodes // [])[]
+                  --arg marker "${normalized_unable_review_marker}" \
+                  '(.data.repository.pullRequest.reviews.nodes // [])[]
                     | select(
                         (.author.login // "") as $login
                         | ($login == $reviewer or $login == ($reviewer + "[bot]"))
@@ -136,29 +229,34 @@ jobs:
                         or ((.comments.totalCount // 0) > 0)
                       )
                     | select(
-                        (.comments.totalCount // 0)
-                        == ((.comments.nodes // []) | length)
-                      )
-                    | select(
                         ((.body // "")
                         | ascii_downcase
-                        | contains("unable to review this pull request")) == false
-                      )
-                    | select(
-                        ([
-                          (.comments.nodes // [])[]
-                          | ((.body // "")
-                            | ascii_downcase
-                            | contains("unable to review this pull request"))
-                        ] | any) == false
+                        | gsub("\\s"; "")
+                        | contains($marker)) == false
                       )
                     | select(.commit.oid == $head)
-                  ]
-                  | length' <<<"${response}"
+                    | .id' <<<"${response}"
               )"
-              if [ "${current_reviews}" -gt 0 ]; then
-                review_complete=true
+              while IFS= read -r review_id; do
+                if [ -z "${review_id}" ]; then
+                  continue
+                fi
+                if review_comments_clean "${review_id}" "${head_sha}"; then
+                  review_complete=true
+                  break
+                else
+                  comments_status=$?
+                  if [ "${comments_status}" -eq 2 ]; then
+                    request_failed=true
+                    break
+                  fi
+                fi
+              done <<<"${candidate_review_ids}"
+              if [ "${review_complete}" = true ]; then
                 break 2
+              fi
+              if [ "${request_failed}" = true ]; then
+                break
               fi
 
               has_previous="$(jq -r '.data.repository.pullRequest.reviews.pageInfo.hasPreviousPage' <<<"${response}")"
