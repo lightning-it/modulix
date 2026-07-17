@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/ansible-lockdown/UBUNTU24-CIS-Audit.git",
+  "expected_commit": "87efcc6d409d1a998a7cb809c5ce5a6afedf84c7",
+  "verified_commit": "87efcc6d409d1a998a7cb809c5ce5a6afedf84c7",
+  "checkout_clean": true
+}

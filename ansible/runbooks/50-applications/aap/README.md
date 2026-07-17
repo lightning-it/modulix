@@ -13,7 +13,7 @@ inventory-owned values.
   secrets and, when enabled, two registry credential inputs under `no_log`.
 - `05-artifacts.yml`: stage the AAP setup bundle and manifest using
   `lit.supplementary.aap_prepare` and `lit.supplementary.artifacts`.
-- `06-aap-host-prepare.yml`: apply AAP-owned host changes on an
+- `06-base-os-prepare.yml`: prepare the AAP-specific OS substrate on an
   already-created RHEL host.
 - `07-preflight.yml`: verify SSH, DNS, the optional customer-prepared RHEL
   contract, immutable registry EE, artifact sources, and secret backend.
@@ -45,15 +45,18 @@ their guides are migrated.
 For a self-hosted rollout with no separate Linux control workstation, run
 `scripts/ansible-nav-local` directly on the RHEL AAP host. The EE then connects
 back to that host over its verified SSH path as `svc_ansible`; `connection: local`
-would manage the EE container rather than the RHEL host. Native use
-mounts the rollout account's owner-only `~/.ssh` directory read-only at
-`/runner/.ssh` and can therefore use an SSH agent or an inventory-selected key
-without copying credentials into the automation project.
+would manage the EE container rather than the RHEL host. Select one owner-only
+private key and a trusted `known_hosts` file explicitly with
+`ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE` and
+`ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE`. To use an agent instead, set
+`ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING=true` plus the same explicit
+`known_hosts` file. The helper never mounts the rollout account's complete
+`~/.ssh` directory.
 
 Set `ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true` for certified-EE consumption;
-this removes project collection paths from `ANSIBLE_COLLECTIONS_PATH` and,
-together with `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`, prevents collection
-installation or overlay during rollout.
+this replaces any inherited `ANSIBLE_COLLECTIONS_PATH` with system collection
+locations and forces automatic collection installation off, preventing project
+or runtime overlays during rollout.
 
 For an externally published private EE, set `aap_ee_transfer_enabled: false`,
 `aap_require_ee_digest: true`, and provide the approved repository plus digest.
@@ -67,7 +70,7 @@ content is never reused by AAP.
 Preferred split for production and customer-provided hosts:
 
 1. stage artifacts with `05-artifacts.yml`
-2. apply AAP-owned host changes with `06-aap-host-prepare.yml`
+2. prepare the AAP-specific OS substrate with `06-base-os-prepare.yml`
 3. run preflight with `07-preflight.yml`
 4. optionally generate temporary TLS files with `08-tls-selfsigned.yml`
 5. deploy and configure AAP with `10-deploy.yml`
@@ -94,7 +97,7 @@ aap_runbook_manage_install_user: false
 aap_runbook_manage_podman: false
 ```
 
-When `06-aap-host-prepare.yml` has already run, disable the optional host-prep
+When `06-base-os-prepare.yml` has already run, disable the optional OS-prep
 section in `10-deploy.yml` for a cleaner deploy-only run:
 
 ```yaml

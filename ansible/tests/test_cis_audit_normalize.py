@@ -30,6 +30,8 @@ class CisAuditNormalizeTests(unittest.TestCase):
             "level1-server",
             "--manifest",
             str(FIXTURES / "manifest.json"),
+            "--provenance",
+            str(FIXTURES / "provenance.json"),
             *extra,
         ]
         return subprocess.run(command, check=False, capture_output=True, text=True)
@@ -41,6 +43,10 @@ class CisAuditNormalizeTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["controls"][0]["status"], "pass")
         self.assertEqual(len(report["raw_evidence"]["sha256"]), 64)
+        self.assertEqual(
+            report["verified_audit_provenance"]["verified_commit"],
+            "87efcc6d409d1a998a7cb809c5ce5a6afedf84c7",
+        )
 
     def test_unexplained_failure_fails_gate(self) -> None:
         result = self.run_normalizer("fail.json")
@@ -86,6 +92,8 @@ class CisAuditNormalizeTests(unittest.TestCase):
             "level1-server",
             "--manifest",
             str(FIXTURES / "manifest-supplemental.json"),
+            "--provenance",
+            str(FIXTURES / "provenance.json"),
             "--supplemental-results",
             str(FIXTURES / "supplemental-pass.json"),
         ]
@@ -116,6 +124,8 @@ class CisAuditNormalizeTests(unittest.TestCase):
             "level1-workstation",
             "--manifest",
             str(FIXTURES / "manifest.json"),
+            "--provenance",
+            str(FIXTURES / "provenance.json"),
         ]
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -127,6 +137,21 @@ class CisAuditNormalizeTests(unittest.TestCase):
             report["benchmark_metadata_defects"][0]["emitted_value"], "Server"
         )
 
+    def test_mismatched_verified_provenance_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            provenance = json.loads((FIXTURES / "provenance.json").read_text())
+            provenance["verified_commit"] = "0" * 40
+            provenance_path = Path(directory) / "provenance.json"
+            provenance_path.write_text(json.dumps(provenance))
+            result = self.run_normalizer(
+                "pass.json", "--provenance", str(provenance_path)
+            )
+        self.assertEqual(result.returncode, 3)
+        self.assertIn(
+            "verified audit commit does not match the reviewed manifest",
+            result.stderr,
+        )
+
     def test_reviewed_manifest_counts_and_pins(self) -> None:
         manifest = json.loads(DEFAULT_MANIFEST.read_text())
         self.assertEqual(
@@ -136,6 +161,10 @@ class CisAuditNormalizeTests(unittest.TestCase):
         self.assertEqual(
             manifest["benchmark"]["audit"]["commit"],
             "87efcc6d409d1a998a7cb809c5ce5a6afedf84c7",
+        )
+        self.assertEqual(
+            manifest["benchmark"]["audit"]["repository"],
+            "https://github.com/ansible-lockdown/UBUNTU24-CIS-Audit.git",
         )
         self.assertEqual(
             manifest["expected_controls"]["counts"],
@@ -168,6 +197,8 @@ class CisAuditNormalizeTests(unittest.TestCase):
             "level1-server",
             "--manifest",
             str(DEFAULT_MANIFEST),
+            "--provenance",
+            str(FIXTURES / "provenance.json"),
             "--context",
             str(FIXTURES / "default-context.json"),
         ]

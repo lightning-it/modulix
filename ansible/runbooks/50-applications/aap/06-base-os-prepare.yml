@@ -1,0 +1,20 @@
+---
+# AAP base OS substrate preparation.
+# The reusable logic lives in lit.supplementary.aap_base_os and
+# lit.supplementary.aap_preflight.
+
+- name: Prepare AAP base OS substrate
+  hosts: aaps
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Prepare AAP base OS substrate
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_base_os
+        apply:
+          tags: [aap, aap_base_os]
+      tags:
+        - aap
+        - aap_base_os

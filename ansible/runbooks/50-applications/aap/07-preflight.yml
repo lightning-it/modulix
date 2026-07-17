@@ -20,7 +20,7 @@
         - aap_preflight
 
   post_tasks:
-    - name: Report AAP host preparation and preflight success
+    - name: Report AAP base OS preparation and preflight success
       ansible.builtin.debug:
-        msg: AAP_HOST_PREPARE_AND_PREFLIGHT_OK
+        msg: AAP_BASE_OS_AND_PREFLIGHT_OK
       changed_when: false

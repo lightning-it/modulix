@@ -1,6 +1,6 @@
 ---
 # Ansible Automation Platform (AAP) deployment.
-# AAP-owned host preparation is handled by 06-aap-host-prepare.yml.
+# OS substrate preparation is handled by 06-base-os-prepare.yml.
 
 - name: Deploy and configure AAP
   hosts: aaps

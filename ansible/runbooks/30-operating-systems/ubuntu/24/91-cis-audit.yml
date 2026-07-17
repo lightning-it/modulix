@@ -15,25 +15,53 @@
   serial: 1
 
   pre_tasks:
+    - name: Resolve the selected CIS inventory class
+      ansible.builtin.set_fact:
+        cis_audit_server_class_selected: >-
+          {{
+            (
+              ansible_play_hosts_all
+              | intersect(groups['ubuntu24_cis_servers'] | default([]))
+              | length
+            ) == (ansible_play_hosts_all | length)
+          }}
+        cis_audit_workstation_class_selected: >-
+          {{
+            (
+              ansible_play_hosts_all
+              | intersect(groups['ubuntu24_cis_workstations'] | default([]))
+              | length
+            ) == (ansible_play_hosts_all | length)
+          }}
+      tags: always
+
     - name: Require an explicit class limit for the CIS audit
       ansible.builtin.assert:
         that:
           - ansible_limit is defined
           - >-
             (
-              ansible_play_hosts_all
-              | intersect(groups['ubuntu24_cis_servers'] | default([]))
-              | length
-            ) == (ansible_play_hosts_all | length)
+              cis_audit_server_class_selected | bool
+            ) != (
+              cis_audit_workstation_class_selected | bool
+            )
+          - >-
+            (
+              cis_audit_server_class_selected | bool
+              and cis_ubuntu24_profile_tag in ['level1-server', 'level2-server']
+            )
             or
             (
-              ansible_play_hosts_all
-              | intersect(groups['ubuntu24_cis_workstations'] | default([]))
-              | length
-            ) == (ansible_play_hosts_all | length)
+              cis_audit_workstation_class_selected | bool
+              and cis_ubuntu24_profile_tag
+                  in ['level1-workstation', 'level2-workstation']
+            )
+          - (ansible_run_tags | sort) == (['setup_audit'] | sort)
+          - ansible_skip_tags | length == 0
         fail_msg: >-
           Limit the CIS audit to one inventory class (servers or workstations)
-          and use its matching native profile tag.
+          and use its matching native profile with exactly --tags setup_audit
+          and no skip tags.
       tags: always
 
     - name: Validate the pinned CIS runtime
@@ -44,6 +72,16 @@
     - name: Validate the inventory-owned supplemental audit policy
       ansible.builtin.assert:
         that:
+          - ubtu24cis_time_sync_tool is defined
+          - ubtu24cis_time_sync_tool in ['systemd-timesyncd', 'chrony']
+          - ubtu24cis_firewall_package is defined
+          - >-
+            ubtu24cis_firewall_package | string | lower
+            in ['none', 'ufw', 'nftables', 'iptables']
+          - ubtu24cis_syslog_service is defined
+          - ubtu24cis_syslog_service in ['journald', 'rsyslog']
+          - ubtu24cis_ipv6_required is defined
+          - ubtu24cis_ipv6_required is boolean
           - cis_ubuntu24_apt_approved_uris is sequence
           - cis_ubuntu24_apt_approved_uris is not string
           - cis_ubuntu24_apt_approved_uris | length > 0
@@ -65,6 +103,16 @@
         cis_audit_run_id: "{{ ansible_date_time.epoch }}"
         cis_audit_controller_dir: >-
           /runner/project/.tmp/cis-audit/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}
+        cis_audit_remote_dir: >-
+          /var/lib/lit/cis-audit/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}
+        cis_audit_checkout_root: >-
+          /var/lib/lit/cis-audit-content/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}
+        cis_audit_checkout_dir: >-
+          /var/lib/lit/cis-audit-content/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}/UBUNTU24-CIS-Audit
+        cis_audit_reviewed_provenance:
+          repository: >-
+            https://github.com/ansible-lockdown/UBUNTU24-CIS-Audit.git
+          commit: 87efcc6d409d1a998a7cb809c5ce5a6afedf84c7
       tags: always
 
     - name: Inspect the controller CIS audit evidence path
@@ -88,14 +136,36 @@
 
     - name: Create the remote CIS audit evidence directory
       ansible.builtin.file:
-        path: "{{ audit_log_dir }}"
+        path: "{{ cis_audit_remote_dir }}"
         state: directory
         owner: root
         group: root
-        # Upstream forces become=false for fetch. Execute-only traversal permits
-        # the exact known audit filename to be fetched; the second play returns
-        # the directory and evidence file to owner-only modes immediately.
-        mode: "0711"
+        mode: "0700"
+      tags: always
+
+    - name: Inspect the immutable CIS audit checkout root
+      ansible.builtin.stat:
+        path: "{{ cis_audit_checkout_root }}"
+        follow: false
+      register: cis_audit_checkout_root_state
+      tags: always
+
+    - name: Reject a stale or colliding CIS audit checkout root
+      ansible.builtin.assert:
+        that:
+          - not cis_audit_checkout_root_state.stat.exists
+        fail_msg: >-
+          Refusing to reuse the existing CIS audit checkout root
+          {{ cis_audit_checkout_root }}.
+      tags: always
+
+    - name: Create the immutable CIS audit checkout root
+      ansible.builtin.file:
+        path: "{{ cis_audit_checkout_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
       tags: always
 
     - name: Create the controller CIS audit evidence directory
@@ -105,6 +175,35 @@
         mode: "0700"
       become: false
       delegate_to: localhost
+      tags: always
+
+    - name: Install Git for the pinned CIS audit checkout
+      ansible.builtin.package:
+        name: git
+        state: present
+        lock_timeout: "{{ ubtu24cis_apt_lock_timeout }}"
+      tags: always
+
+    - name: Check out the exact reviewed CIS audit commit
+      ansible.builtin.git:
+        repo: "{{ cis_audit_reviewed_provenance.repository }}"
+        dest: "{{ cis_audit_checkout_dir }}"
+        version: "{{ cis_audit_reviewed_provenance.commit }}"
+        force: true
+      tags: always
+
+    - name: Protect the pinned CIS audit checkout root
+      ansible.builtin.file:
+        path: "{{ cis_audit_checkout_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: always
+
+    - name: Verify the pinned CIS audit checkout before root execution
+      ansible.builtin.import_tasks:
+        file: tasks/verify-cis-audit-checkout.yml
       tags: always
 
   tasks:
@@ -119,6 +218,10 @@
         fetch_audit_output: true
         audit_format: json
         audit_content: git
+        audit_file_git: "{{ cis_audit_reviewed_provenance.repository }}"
+        audit_git_version: "{{ cis_audit_reviewed_provenance.commit }}"
+        audit_conf_dest: "{{ cis_audit_checkout_root }}"
+        audit_log_dir: "{{ cis_audit_remote_dir }}"
         audit_output_collection_method: fetch
         audit_output_destination: "{{ cis_audit_controller_dir }}/"
 
@@ -132,9 +235,13 @@
   tags: always
 
   tasks:
+    - name: Verify the pinned CIS audit checkout after root execution
+      ansible.builtin.import_tasks:
+        file: tasks/verify-cis-audit-checkout.yml
+
     - name: Discover the current remote pre-audit evidence file
       ansible.builtin.find:
-        paths: "{{ audit_log_dir }}"
+        paths: "{{ cis_audit_remote_dir }}"
         patterns: "*_pre_scan_{{ ansible_date_time.epoch }}.json"
         file_type: file
         recurse: false
@@ -158,51 +265,38 @@
 
     - name: Return the remote CIS audit directory to owner-only access
       ansible.builtin.file:
-        path: "{{ audit_log_dir }}"
+        path: "{{ cis_audit_remote_dir }}"
         owner: root
         group: root
         mode: "0700"
         state: directory
 
-    - name: Discover the fetched controller CIS audit evidence
-      ansible.builtin.find:
-        paths: "{{ cis_audit_controller_dir }}"
-        patterns: "*_pre_scan_*.json"
-        file_type: file
-        recurse: false
-      register: cis_audit_controller_evidence
-      become: false
-      delegate_to: localhost
-
-    - name: Require exactly one fresh fetched CIS audit file
-      ansible.builtin.assert:
-        that:
-          - cis_audit_controller_evidence.matched == 1
-          - cis_audit_controller_evidence.files[0].size > 0
-        fail_msg: >-
-          Upstream audit collection did not fetch exactly one nonempty fresh
-          pre-audit JSON file for {{ inventory_hostname }}.
-      become: false
-      delegate_to: localhost
-
-    - name: Protect the controller raw CIS audit evidence
-      ansible.builtin.file:
-        path: "{{ cis_audit_controller_evidence.files[0].path }}"
-        mode: "0600"
-      become: false
-      delegate_to: localhost
-
-    - name: Read the controller raw CIS audit evidence
+    - name: Read the protected remote raw CIS audit evidence as root
       ansible.builtin.slurp:
-        src: "{{ cis_audit_controller_evidence.files[0].path }}"
-      register: cis_audit_raw_content
+        src: "{{ cis_audit_remote_evidence.files[0].path }}"
+      register: cis_audit_remote_raw_content
+
+    - name: Define the protected controller raw evidence path
+      ansible.builtin.set_fact:
+        cis_audit_controller_evidence_path: >-
+          {{
+            cis_audit_controller_dir
+            ~ '/'
+            ~ (cis_audit_remote_evidence.files[0].path | basename)
+          }}
+
+    - name: Copy the privileged raw CIS audit evidence to the controller
+      ansible.builtin.copy:
+        content: "{{ cis_audit_remote_raw_content.content | b64decode }}"
+        dest: "{{ cis_audit_controller_evidence_path }}"
+        mode: "0600"
       become: false
       delegate_to: localhost
 
     - name: Parse the controller raw CIS audit evidence
       ansible.builtin.set_fact:
         cis_audit_raw: >-
-          {{ cis_audit_raw_content.content | b64decode | from_json }}
+          {{ cis_audit_remote_raw_content.content | b64decode | from_json }}
       no_log: true
 
     - name: Validate the minimum raw Goss JSON contract
@@ -221,21 +315,42 @@
           JSON schema or its result count disagrees with the summary.
       no_log: true
 
-    - name: Record the protected raw CIS audit evidence checksum
+    - name: Record the protected remote raw CIS audit evidence checksum
       ansible.builtin.stat:
-        path: "{{ cis_audit_controller_evidence.files[0].path }}"
+        path: "{{ cis_audit_remote_evidence.files[0].path }}"
         checksum_algorithm: sha256
-      register: cis_audit_raw_state
+      register: cis_audit_remote_raw_state
+
+    - name: Record the protected controller raw CIS audit evidence checksum
+      ansible.builtin.stat:
+        path: "{{ cis_audit_controller_evidence_path }}"
+        checksum_algorithm: sha256
+      register: cis_audit_controller_raw_state
       become: false
       delegate_to: localhost
 
     - name: Require protected raw CIS audit evidence metadata
       ansible.builtin.assert:
         that:
-          - cis_audit_raw_state.stat.mode == '0600'
-          - cis_audit_raw_state.stat.checksum is match('^[0-9a-f]{64}$')
+          - cis_audit_remote_raw_state.stat.mode == '0600'
+          - cis_audit_controller_raw_state.stat.mode == '0600'
+          - >-
+            cis_audit_remote_raw_state.stat.checksum
+            == cis_audit_controller_raw_state.stat.checksum
+          - >-
+            cis_audit_controller_raw_state.stat.checksum
+            is match('^[0-9a-f]{64}$')
       become: false
       delegate_to: localhost
+
+    - name: Materialize the verified CIS audit provenance
+      ansible.builtin.copy:
+        content: "{{ cis_audit_verified_provenance | to_nice_json }}"
+        dest: "{{ cis_audit_controller_dir }}/provenance.json"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+      no_log: true
 
     - name: Materialize the reviewed CIS exception registry
       ansible.builtin.copy:
@@ -250,10 +365,27 @@
       ansible.builtin.copy:
         content: >-
           {{ {
-            'time_sync_tool': 'systemd-timesyncd',
-            'firewall_mode': 'disabled',
-            'syslog_service': 'journald',
-            'ipv6_mode': 'required'
+            'time_sync_tool': ubtu24cis_time_sync_tool,
+            'firewall_mode': (
+              'disabled'
+              if ubtu24cis_firewall_package | string | lower == 'none'
+              else (
+                'iptables-dual-stack'
+                if (
+                  ubtu24cis_firewall_package | string | lower == 'iptables'
+                  and ubtu24cis_ipv6_required | bool
+                )
+                else (
+                  'iptables-ipv4'
+                  if ubtu24cis_firewall_package | string | lower == 'iptables'
+                  else ubtu24cis_firewall_package | string | lower
+                )
+              )
+            ),
+            'syslog_service': ubtu24cis_syslog_service,
+            'ipv6_mode': (
+              'required' if ubtu24cis_ipv6_required | bool else 'disabled'
+            )
           } | to_nice_json }}
         dest: "{{ cis_audit_controller_dir }}/context.json"
         mode: "0600"
@@ -553,7 +685,7 @@
           - python3
           - /runner/project/scripts/cis-audit-normalize
           - --raw
-          - "{{ cis_audit_controller_evidence.files[0].path }}"
+          - "{{ cis_audit_controller_evidence_path }}"
           - --profile
           - "{{ cis_ubuntu24_profile_tag }}"
           - --manifest
@@ -562,6 +694,8 @@
           - "{{ cis_audit_controller_dir }}/exceptions.json"
           - --context
           - "{{ cis_audit_controller_dir }}/context.json"
+          - --provenance
+          - "{{ cis_audit_controller_dir }}/provenance.json"
           - --supplemental-results
           - "{{ cis_audit_controller_dir }}/supplemental.json"
           - --output

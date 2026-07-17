@@ -73,12 +73,7 @@
       - hetzner_baremetal_vault.controller_auth.capability_probes | length > 0
       - hetzner_baremetal_vault.backup.backend == 'raft_snapshot'
       - hetzner_baremetal_vault.backup.max_raw_bytes | int > 0
-      - hetzner_baremetal_vault.backup.max_raw_bytes | int <= 134217728
-      - hetzner_baremetal_vault.backup.restore_drill.timeout is integer
-      - >-
-        hetzner_baremetal_vault.backup.restore_drill.timeout | int
-        > hetzner_baremetal_vault.timeout | int
-      - hetzner_baremetal_vault.backup.restore_drill.timeout | int <= 3600
+      - hetzner_baremetal_vault.backup.max_raw_bytes | int <= 67108864
       - hetzner_baremetal_robot_firewall_phase == 'bootstrap'
       - hetzner_baremetal_robot_firewall.common_input_rules | length == 8
       - >-

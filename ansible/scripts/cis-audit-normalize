@@ -95,6 +95,37 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
             f"manifest benchmark.{field} must be a nonempty string",
         )
 
+    remediation_role = benchmark.get("remediation_role")
+    require(
+        isinstance(remediation_role, dict),
+        "manifest benchmark.remediation_role must be an object",
+    )
+    for field in ("version", "commit"):
+        require(
+            isinstance(remediation_role.get(field), str) and remediation_role[field],
+            f"manifest benchmark.remediation_role.{field} must be nonempty",
+        )
+    require(
+        re.fullmatch(r"[0-9a-f]{40}", remediation_role["commit"]) is not None,
+        "manifest benchmark.remediation_role.commit must be a full Git SHA",
+    )
+
+    audit = benchmark.get("audit")
+    require(isinstance(audit, dict), "manifest benchmark.audit must be an object")
+    for field in ("repository", "commit", "archive_sha256"):
+        require(
+            isinstance(audit.get(field), str) and audit[field],
+            f"manifest benchmark.audit.{field} must be nonempty",
+        )
+    require(
+        re.fullmatch(r"[0-9a-f]{40}", audit["commit"]) is not None,
+        "manifest benchmark.audit.commit must be a full Git SHA",
+    )
+    require(
+        re.fullmatch(r"[0-9a-f]{64}", audit["archive_sha256"]) is not None,
+        "manifest benchmark.audit.archive_sha256 must be a SHA-256 digest",
+    )
+
     controls = manifest.get("expected_controls")
     require(isinstance(controls, dict), "manifest expected_controls must be an object")
     parsed_lists: dict[str, list[str]] = {}
@@ -431,6 +462,43 @@ def parse_context(document: Any, manifest: dict[str, Any]) -> dict[str, str]:
     return parsed
 
 
+def parse_provenance(document: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+    require(isinstance(document, dict), "verified audit provenance must be an object")
+    expected_keys = {
+        "repository",
+        "expected_commit",
+        "verified_commit",
+        "checkout_clean",
+    }
+    require(
+        set(document) == expected_keys,
+        "verified audit provenance keys do not exactly match the contract",
+    )
+    audit = manifest["benchmark"]["audit"]
+    require(
+        document["repository"] == audit["repository"],
+        "verified audit repository does not match the reviewed manifest",
+    )
+    require(
+        document["expected_commit"] == audit["commit"],
+        "expected audit commit does not match the reviewed manifest",
+    )
+    require(
+        document["verified_commit"] == audit["commit"],
+        "verified audit commit does not match the reviewed manifest",
+    )
+    require(
+        document["checkout_clean"] is True,
+        "verified audit checkout must be clean",
+    )
+    return {
+        "repository": document["repository"],
+        "expected_commit": document["expected_commit"],
+        "verified_commit": document["verified_commit"],
+        "checkout_clean": True,
+    }
+
+
 def effective_expected_controls(
     manifest: dict[str, Any],
     profile: str,
@@ -649,6 +717,7 @@ def normalize(
     exceptions: dict[str, dict[str, Any]],
     supplemental: dict[str, dict[str, str]],
     effective_context: dict[str, str],
+    verified_provenance: dict[str, Any],
     raw_sha256: str,
 ) -> tuple[dict[str, Any], bool]:
     states, benchmark_metadata_defects = validate_raw(raw, manifest, profile)
@@ -852,6 +921,7 @@ def normalize(
         "status": "pass" if not unexplained else "fail",
         "profile": profile,
         "benchmark": manifest["benchmark"],
+        "verified_audit_provenance": verified_provenance,
         "raw_evidence": {
             "sha256": raw_sha256,
             "summary": {
@@ -950,6 +1020,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="effective inventory choices rendered as reviewed JSON",
     )
     parser.add_argument(
+        "--provenance",
+        type=Path,
+        required=True,
+        help="verified runtime audit checkout provenance JSON",
+    )
+    parser.add_argument(
         "--supplemental-results",
         type=Path,
         help="reviewed supplemental check results JSON",
@@ -970,6 +1046,9 @@ def main(argv: list[str] | None = None) -> int:
             load_json(args.context, "effective context") if args.context else None,
             manifest,
         )
+        verified_provenance = parse_provenance(
+            load_json(args.provenance, "verified audit provenance"), manifest
+        )
         supplemental = parse_supplemental(
             load_json(args.supplemental_results, "supplemental results")
             if args.supplemental_results
@@ -982,6 +1061,7 @@ def main(argv: list[str] | None = None) -> int:
             exceptions,
             supplemental,
             effective_context,
+            verified_provenance,
             sha256_file(args.raw),
         )
         rendered = json.dumps(report, indent=2, sort_keys=True)
