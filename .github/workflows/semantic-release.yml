@@ -17,7 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          persist-credentials: false
 
       - name: yamllint
         run: |
@@ -33,12 +35,9 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    env:
-      GITHUB_TOKEN: ${{ secrets.LITRELEASEBOT_TOKEN || github.token }}
-      GH_TOKEN: ${{ secrets.LITRELEASEBOT_TOKEN || github.token }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -47,11 +46,9 @@ jobs:
         run: |
           git config user.name "litreleasebot"
           git config user.email "litreleasebot@users.noreply.github.com"
-          git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: "24"
           cache: "npm"
@@ -60,7 +57,16 @@ jobs:
         run: npm ci
 
       - name: Run semantic-release
-        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.LITRELEASEBOT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.LITRELEASEBOT_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          public_remote="https://github.com/${GITHUB_REPOSITORY}.git"
+          trap 'git remote set-url origin "$public_remote"' EXIT
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          npx semantic-release
 
       - name: Generate release evidence
         run: |
@@ -79,7 +85,7 @@ jobs:
 
       - name: Attach release evidence
         env:
-          GH_TOKEN: ${{ env.GH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="$(git describe --tags --abbrev=0)"
@@ -90,13 +96,13 @@ jobs:
 
       - name: Upload release evidence artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-evidence
           path: |
             dist/release-evidence.json
             dist/release-evidence.md
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   release-dry-run:
     name: Release Dry Run
@@ -105,17 +111,15 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: "24"
           cache: "npm"
@@ -124,4 +128,7 @@ jobs:
         run: npm ci
 
       - name: Run semantic-release dry-run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: npx semantic-release --dry-run --no-ci
