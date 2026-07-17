@@ -1,6 +1,6 @@
 ---
 # Ansible Automation Platform (AAP) deployment.
-# OS substrate preparation is handled by 06-base-os-prepare.yml.
+# AAP-owned host preparation is handled by 06-aap-host-prepare.yml.
 
 - name: Deploy and configure AAP
   hosts: aaps
@@ -73,3 +73,14 @@
       tags:
         - aap
         - aap_cac
+
+    - name: Report AAP registry credential and execution environment configuration success
+      ansible.builtin.debug:
+        msg: AAP_REGISTRY_CREDENTIAL_AND_EE_CONFIGURED_OK
+      changed_when: false
+      when: aap_configure_registry_ee | default(false) | bool
+
+    - name: Report AAP deployment success
+      ansible.builtin.debug:
+        msg: AAP_DEPLOYMENT_OK
+      changed_when: false

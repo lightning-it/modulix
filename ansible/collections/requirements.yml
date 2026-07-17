@@ -23,6 +23,6 @@ collections:
   - name: https://github.com/lightning-it/ansible-collection-rhel/releases/download/v1.21.0/lit-rhel-1.21.0.tar.gz
     type: url
   - name: lit.ubuntu
-    version: "1.7.0"
+    version: "1.8.0"
   - name: https://github.com/lightning-it/ansible-collection-ocp/releases/download/v1.6.0/lit-ocp-1.6.0.tar.gz
     type: url

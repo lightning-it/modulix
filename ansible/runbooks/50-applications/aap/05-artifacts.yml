@@ -46,3 +46,8 @@
         - aap_prepare
         - artifacts
         - dns
+
+    - name: Report installer artifact staging success
+      ansible.builtin.debug:
+        msg: AAP_INSTALLER_ARTIFACTS_STAGED_OK
+      changed_when: false

@@ -1,0 +1,78 @@
+---
+# Validate that the local-execution Ansible Vault inventory can be decrypted
+# without ever logging the resolved secret values.
+
+- name: Validate AAP Ansible Vault secrets
+  hosts: aaps
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Validate Ansible Vault backend controls
+      ansible.builtin.assert:
+        that:
+          - aap_secret_backend | default('', true) == 'ansible_vault'
+          - (aap_password_seed_enabled | default(none)) is sameas false
+          - (aap_preflight_vault_enabled | default(none)) is sameas false
+        fail_msg: >-
+          The AAP inventory must select ansible_vault and disable HashiCorp
+          Vault preflight and password seeding.
+        quiet: true
+      changed_when: false
+
+    - name: Validate required encrypted AAP secret resolves
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.vars', item, default='') | string | trim | length >= 16
+        fail_msg: >-
+          A required AAP Ansible Vault value is missing, too short, or could
+          not be decrypted.
+        quiet: true
+      loop:
+        - aap_gateway_admin_password_input
+        - aap_controller_admin_password_input
+        - aap_hub_admin_password_input
+        - aap_eda_admin_password_input
+        - aap_postgresql_admin_password_input
+        - aap_breakglass_password_input
+        - rh_offline_token
+      no_log: true
+      changed_when: false
+
+    - name: Validate encrypted AAP registry credential inputs resolve
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.vars', item, default='') | string | trim | length > 0
+          - lookup('ansible.builtin.vars', item, default='') | string is not match('^CHANGE_ME')
+        fail_msg: >-
+          A required encrypted AAP Container Registry credential value is
+          missing or could not be decrypted.
+        quiet: true
+      loop:
+        - aap_registry_username_input
+        - aap_registry_password_input
+      no_log: true
+      changed_when: false
+      when: aap_configure_registry_ee | default(false) | bool
+
+    - name: Validate supplied Red Hat token matches encrypted value
+      vars:
+        supplied_rh_offline_token: >-
+          {{ lookup('ansible.builtin.env', 'RH_AUTOMATION_HUB_TOKEN') | string }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            (supplied_rh_offline_token | length == 0)
+            or
+            (rh_offline_token == supplied_rh_offline_token)
+        fail_msg: >-
+          The supplied Red Hat offline token does not match the encrypted
+          inventory value. Use the approved credential-rotation procedure.
+        quiet: true
+      no_log: true
+      changed_when: false
+
+    - name: Report successful AAP Ansible Vault validation
+      ansible.builtin.debug:
+        msg: AAP_ANSIBLE_VAULT_SECRETS_OK
+      changed_when: false

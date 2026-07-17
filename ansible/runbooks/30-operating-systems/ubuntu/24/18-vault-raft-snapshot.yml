@@ -329,7 +329,6 @@
               {{ hetzner_baremetal_vault.ca_cert_path }}
             vault_raft_snapshot_target_ca_cert_path: >-
               {{ hetzner_baremetal_vault.tls.target_ca_cert_path }}
-            vault_raft_snapshot_timeout: "{{ hetzner_baremetal_vault.timeout }}"
             vault_raft_snapshot_auth_mount_point: >-
               {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
             vault_raft_snapshot_role_id: >-
@@ -349,8 +348,6 @@
             vault_raft_snapshot_document_schema_version: 1
             vault_raft_snapshot_document_subject: >-
               {{ hetzner_baremetal_vault.endpoint_fqdn }}
-            vault_raft_snapshot_max_raw_bytes: >-
-              {{ hetzner_baremetal_vault.backup.max_raw_bytes }}
             vault_raft_snapshot_verification_kv_paths: >-
               {{ _vault_raft_snapshot_verification_kv_paths_resolved }}
             vault_raft_snapshot_image: >-
@@ -372,12 +369,6 @@
                 _vault_raft_snapshot_init_document.vault_init.unseal_keys_b64
                 if vault_raft_snapshot_operation == 'restore_drill'
                 else []
-              }}
-            vault_raft_snapshot_restore_key_threshold: >-
-              {{
-                hetzner_baremetal_vault.seal.key_threshold
-                if vault_raft_snapshot_operation == 'restore_drill'
-                else 0
               }}
           no_log: true
 

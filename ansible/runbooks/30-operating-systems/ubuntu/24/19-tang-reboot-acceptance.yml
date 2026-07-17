@@ -179,57 +179,175 @@
           }}
       no_log: true
 
-    - name: Read the live Tang advertisement from the installed client
+    - name: Probe the live Tang advertisement from the installed client
       ansible.builtin.uri:
         url: "{{ luks_unlock_clevis_tang_url }}/adv"
         method: GET
         status_code: 200
-        return_content: true
         timeout: 10
-      register: _tang_reboot_advertisement
       changed_when: false
       no_log: true
 
     - name: Calculate live Tang signing-key thumbprints
       ansible.builtin.shell: |
         set -o pipefail
-        jose fmt -j- -g payload -y -o- \
+        curl --fail --silent --show-error --max-time 10 \
+          "${TANG_ADVERTISEMENT_URL}" \
+          | jose fmt -j- -g payload -y -o- \
           | jose jwk use -i- -r -u verify -o- \
           | jose jwk thp -i- -a S256
       args:
         executable: /bin/bash
-        stdin: "{{ _tang_reboot_advertisement.content }}"
-        stdin_add_newline: false
+      environment:
+        TANG_ADVERTISEMENT_URL: "{{ luks_unlock_clevis_tang_url }}/adv"
       register: _tang_reboot_live_thumbprints
       changed_when: false
+      retries: 3
+      delay: 2
+      until: _tang_reboot_live_thumbprints.rc == 0
+      no_log: true
+
+    - name: Summarize the exact live Tang trust and binding checks
+      ansible.builtin.set_fact:
+        _tang_reboot_safe_trust_checks:
+          binding_is_mapping: >-
+            {{ _tang_reboot_binding_before_config is mapping }}
+          binding_has_exact_keys: >-
+            {{
+              _tang_reboot_binding_before_config is mapping
+              and (
+                _tang_reboot_binding_before_config.keys()
+                | list | sort
+              ) == ['url']
+            }}
+          binding_has_exact_url: >-
+            {{
+              (
+                _tang_reboot_binding_before_config.url
+                | default('')
+              ) == luks_unlock_clevis_tang_url
+            }}
+          live_thumbprints_present: >-
+            {{
+              _tang_reboot_live_thumbprints.stdout_lines
+              | length > 0
+            }}
+          live_thumbprints_well_formed: >-
+            {{
+              _tang_reboot_live_thumbprints.stdout_lines
+              | reject('match', '^[A-Za-z0-9_-]{43}$')
+              | list | length == 0
+            }}
+          pinned_thumbprint_is_live: >-
+            {{
+              _tang_reboot_pinned_thumbprint
+              in _tang_reboot_live_thumbprints.stdout_lines
+            }}
       no_log: true
 
     - name: Require the exact live Tang trust and binding before reboot
       ansible.builtin.assert:
         that:
-          - _tang_reboot_binding_before_config is mapping
+          - _tang_reboot_safe_trust_checks.binding_is_mapping | bool
+          - _tang_reboot_safe_trust_checks.binding_has_exact_keys | bool
+          - _tang_reboot_safe_trust_checks.binding_has_exact_url | bool
+          - _tang_reboot_safe_trust_checks.live_thumbprints_present | bool
           - >-
-            _tang_reboot_binding_before_config.keys() | list | sort
-            == ['thp', 'url']
-          - >-
-            _tang_reboot_binding_before_config.url
-            == luks_unlock_clevis_tang_url
-          - >-
-            _tang_reboot_binding_before_config.thp
-            == _tang_reboot_pinned_thumbprint
-          - _tang_reboot_live_thumbprints.stdout_lines | length > 0
-          - >-
-            _tang_reboot_live_thumbprints.stdout_lines
-            | reject('match', '^[A-Za-z0-9_-]{43}$')
-            | list | length == 0
-          - >-
-            _tang_reboot_pinned_thumbprint
-            in _tang_reboot_live_thumbprints.stdout_lines
+            _tang_reboot_safe_trust_checks.live_thumbprints_well_formed
+            | bool
+          - _tang_reboot_safe_trust_checks.pinned_thumbprint_is_live | bool
         fail_msg: >-
           The Clevis binding, Vault pin, and live Tang signing-key
           thumbprints do not agree exactly before reboot.
         quiet: true
+
+    - name: Prove the Vault recovery passphrase remains usable
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - open
+          - --test-passphrase
+          - --key-file=-
+          - "{{ _tang_reboot_devices.stdout_lines[0] }}"
+        stdin: "{{ _hetzner_baremetal_recovery_passphrase }}"
+        stdin_add_newline: false
+      changed_when: false
       no_log: true
+
+    - name: Prove the current Clevis keyslot unlocks through live Tang
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/timeout
+          - --kill-after=5s
+          - >-
+            {{
+              luks_unlock_clevis_network_timeout_seconds
+              | default(30) | int | string
+            }}s
+          - /bin/bash
+          - -o
+          - pipefail
+          - -c
+          - >-
+            set -eu;
+            clevis luks pass -d "$1" -s "$2" |
+            cryptsetup open --test-passphrase --key-slot "$2"
+            --key-file=- "$1"
+          - lit-clevis-slot-verification
+          - "{{ _tang_reboot_devices.stdout_lines[0] }}"
+          - "{{ luks_unlock_devices[0].keyslot | string }}"
+      register: _tang_reboot_online_unlock_before
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require live Tang to unlock the current Clevis keyslot
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_online_unlock_before.rc == 0
+        fail_msg: >-
+          The declared Clevis keyslot could not unlock through the live,
+          Vault-pinned Tang server before reboot.
+        quiet: true
+
+    - name: Check for blocking system shutdown inhibitors
+      ansible.builtin.command:
+        argv:
+          - systemd-inhibit
+          - --list
+          - --mode=block
+          - --no-pager
+          - --no-legend
+      register: _tang_reboot_blocking_inhibitors
+      changed_when: false
+
+    - name: Check for active package maintenance units
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - --quiet
+          - "{{ item }}"
+      loop:
+        - apt-daily.service
+        - apt-daily-upgrade.service
+        - dpkg-db-backup.service
+      register: _tang_reboot_package_units
+      changed_when: false
+      failed_when: false
+
+    - name: Require no unrelated blocking maintenance before reboot
+      ansible.builtin.assert:
+        that:
+          - _tang_reboot_blocking_inhibitors.stdout | trim | length == 0
+          - >-
+            _tang_reboot_package_units.results
+            | selectattr('rc', 'equalto', 0)
+            | list | length == 0
+        fail_msg: >-
+          A blocking shutdown inhibitor or package-maintenance unit is active;
+          refusing to start reboot acceptance.
+        quiet: true
 
     - name: Read the pre-reboot kernel boot identity
       ansible.builtin.command:
@@ -295,6 +413,33 @@
           }}
       no_log: true
 
+    - name: Prove the retained Clevis keyslot unlocks through live Tang
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/timeout
+          - --kill-after=5s
+          - >-
+            {{
+              luks_unlock_clevis_network_timeout_seconds
+              | default(30) | int | string
+            }}s
+          - /bin/bash
+          - -o
+          - pipefail
+          - -c
+          - >-
+            set -eu;
+            clevis luks pass -d "$1" -s "$2" |
+            cryptsetup open --test-passphrase --key-slot "$2"
+            --key-file=- "$1"
+          - lit-clevis-slot-verification
+          - "{{ _tang_reboot_devices.stdout_lines[0] }}"
+          - "{{ luks_unlock_devices[0].keyslot | string }}"
+      register: _tang_reboot_online_unlock_after
+      changed_when: false
+      failed_when: false
+      no_log: true
+
     - name: Require a new boot with the exact Tang binding retained
       ansible.builtin.assert:
         that:
@@ -308,9 +453,7 @@
           - >-
             _tang_reboot_binding_after_config.url
             == luks_unlock_clevis_tang_url
-          - >-
-            _tang_reboot_binding_after_config.thp
-            == _tang_reboot_pinned_thumbprint
+          - _tang_reboot_online_unlock_after.rc == 0
         fail_msg: >-
           The host did not complete a new automatic Tang-unlocked boot with
           its exact binding retained.

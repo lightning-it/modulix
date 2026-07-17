@@ -1,0 +1,20 @@
+---
+# AAP-owned host preparation.
+# The reusable logic lives in lit.supplementary.aap_host_prepare and
+# lit.supplementary.aap_preflight.
+
+- name: Apply AAP-owned host changes
+  hosts: aaps
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Apply AAP-owned host changes
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_host_prepare
+        apply:
+          tags: [aap, aap_host_prepare]
+      tags:
+        - aap
+        - aap_host_prepare

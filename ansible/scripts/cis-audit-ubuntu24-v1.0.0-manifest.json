@@ -1,0 +1,1160 @@
+{
+  "schema_version": 1,
+  "benchmark": {
+    "os": "UBUNTU24",
+    "type": "CIS",
+    "version": "1.0.0",
+    "remediation_role": {
+      "version": "1.6.0",
+      "commit": "c893ca6836fb32b1ea067d4a63c341e39693074b"
+    },
+    "audit": {
+      "commit": "87efcc6d409d1a998a7cb809c5ce5a6afedf84c7",
+      "archive_sha256": "9320558d3bf195625399edfd57e6185cf70cce6d5505fa3c9f9924a369af7850"
+    },
+    "goss_version": "0.4.8"
+  },
+  "expected_controls": {
+    "common_level1": [
+      "1.1.1.1",
+      "1.1.1.2",
+      "1.1.1.3",
+      "1.1.1.4",
+      "1.1.1.5",
+      "1.1.1.10",
+      "1.1.2.1.1",
+      "1.1.2.1.2",
+      "1.1.2.1.3",
+      "1.1.2.1.4",
+      "1.1.2.2.1",
+      "1.1.2.2.2",
+      "1.1.2.2.3",
+      "1.1.2.2.4",
+      "1.1.2.3.1",
+      "1.1.2.3.2",
+      "1.1.2.3.3",
+      "1.1.2.4.1",
+      "1.1.2.4.2",
+      "1.1.2.4.3",
+      "1.1.2.5.1",
+      "1.1.2.5.2",
+      "1.1.2.5.3",
+      "1.1.2.5.4",
+      "1.1.2.6.1",
+      "1.1.2.6.2",
+      "1.1.2.6.3",
+      "1.1.2.6.4",
+      "1.1.2.7.1",
+      "1.1.2.7.2",
+      "1.1.2.7.3",
+      "1.1.2.7.4",
+      "1.2.1.1",
+      "1.2.1.2",
+      "1.2.2.1",
+      "1.3.1.1",
+      "1.3.1.2",
+      "1.3.1.3",
+      "1.4.1",
+      "1.4.2",
+      "1.5.1",
+      "1.5.2",
+      "1.5.3",
+      "1.5.4",
+      "1.5.5",
+      "1.6.1",
+      "1.6.2",
+      "1.6.3",
+      "1.6.4",
+      "1.6.5",
+      "1.6.6",
+      "1.7.2",
+      "1.7.3",
+      "1.7.4",
+      "1.7.5",
+      "1.7.10",
+      "2.1.3",
+      "2.1.4",
+      "2.1.5",
+      "2.1.6",
+      "2.1.7",
+      "2.1.8",
+      "2.1.9",
+      "2.1.10",
+      "2.1.12",
+      "2.1.13",
+      "2.1.14",
+      "2.1.15",
+      "2.1.16",
+      "2.1.17",
+      "2.1.18",
+      "2.1.19",
+      "2.1.21",
+      "2.1.22",
+      "2.2.1",
+      "2.2.2",
+      "2.2.3",
+      "2.2.4",
+      "2.2.5",
+      "2.2.6",
+      "2.3.1.1",
+      "2.3.2.1",
+      "2.3.2.2",
+      "2.3.3.1",
+      "2.3.3.2",
+      "2.3.3.3",
+      "2.4.1.1",
+      "2.4.1.2",
+      "2.4.1.3",
+      "2.4.1.4",
+      "2.4.1.5",
+      "2.4.1.6",
+      "2.4.1.7",
+      "2.4.1.8",
+      "2.4.2.1",
+      "3.1.1",
+      "3.3.1",
+      "3.3.2",
+      "3.3.3",
+      "3.3.4",
+      "3.3.5",
+      "3.3.6",
+      "3.3.7",
+      "3.3.8",
+      "3.3.9",
+      "3.3.10",
+      "3.3.11",
+      "4.1.1",
+      "4.2.1",
+      "4.2.2",
+      "4.2.3",
+      "4.2.4",
+      "4.2.5",
+      "4.2.6",
+      "4.2.7",
+      "4.3.1",
+      "4.3.2",
+      "4.3.3",
+      "4.3.4",
+      "4.3.5",
+      "4.3.6",
+      "4.3.7",
+      "4.3.8",
+      "4.3.9",
+      "4.3.10",
+      "4.4.1.1",
+      "4.4.1.2",
+      "4.4.1.3",
+      "4.4.2.1",
+      "4.4.2.2",
+      "4.4.2.3",
+      "4.4.2.4",
+      "4.4.3.2",
+      "4.4.3.3",
+      "4.4.3.4",
+      "5.1.1",
+      "5.1.2",
+      "5.1.3",
+      "5.1.4",
+      "5.1.5",
+      "5.1.6",
+      "5.1.7",
+      "5.1.10",
+      "5.1.11",
+      "5.1.12",
+      "5.1.13",
+      "5.1.14",
+      "5.1.15",
+      "5.1.16",
+      "5.1.17",
+      "5.1.18",
+      "5.1.19",
+      "5.1.20",
+      "5.1.21",
+      "5.1.22",
+      "5.2.1",
+      "5.2.2",
+      "5.2.3",
+      "5.2.5",
+      "5.2.6",
+      "5.2.7",
+      "5.3.1.1",
+      "5.3.1.2",
+      "5.3.1.3",
+      "5.3.2.1",
+      "5.3.2.2",
+      "5.3.2.3",
+      "5.3.2.4",
+      "5.3.3.1.1",
+      "5.3.3.1.2",
+      "5.3.3.2.1",
+      "5.3.3.2.2",
+      "5.3.3.2.3",
+      "5.3.3.2.4",
+      "5.3.3.2.5",
+      "5.3.3.2.6",
+      "5.3.3.2.7",
+      "5.3.3.2.8",
+      "5.3.3.3.1",
+      "5.3.3.3.2",
+      "5.3.3.3.3",
+      "5.3.3.4.1",
+      "5.3.3.4.2",
+      "5.3.3.4.3",
+      "5.3.3.4.4",
+      "5.4.1.1",
+      "5.4.1.3",
+      "5.4.1.4",
+      "5.4.1.5",
+      "5.4.1.6",
+      "5.4.2.1",
+      "5.4.2.2",
+      "5.4.2.3",
+      "5.4.2.4",
+      "5.4.2.5",
+      "5.4.2.6",
+      "5.4.2.7",
+      "5.4.2.8",
+      "5.4.3.2",
+      "5.4.3.3",
+      "6.1.1.1",
+      "6.1.1.2",
+      "6.1.1.3",
+      "6.1.1.4",
+      "6.1.2.1.1",
+      "6.1.2.1.2",
+      "6.1.2.1.3",
+      "6.1.2.1.4",
+      "6.1.2.3",
+      "6.1.2.4",
+      "6.1.3.1",
+      "6.1.3.2",
+      "6.1.3.3",
+      "6.1.3.4",
+      "6.1.3.5",
+      "6.1.3.6",
+      "6.1.3.7",
+      "6.1.3.8",
+      "6.1.4.1",
+      "6.2.4.1",
+      "6.2.4.2",
+      "6.2.4.3",
+      "6.2.4.4",
+      "6.2.4.5",
+      "6.2.4.6",
+      "6.2.4.7",
+      "6.2.4.8",
+      "6.2.4.9",
+      "6.2.4.10",
+      "6.3.1",
+      "6.3.2",
+      "6.3.3",
+      "7.1.1",
+      "7.1.2",
+      "7.1.3",
+      "7.1.4",
+      "7.1.5",
+      "7.1.6",
+      "7.1.7",
+      "7.1.8",
+      "7.1.9",
+      "7.1.10",
+      "7.1.11",
+      "7.1.12",
+      "7.1.13",
+      "7.2.1",
+      "7.2.2",
+      "7.2.3",
+      "7.2.4",
+      "7.2.5",
+      "7.2.6",
+      "7.2.7",
+      "7.2.8",
+      "7.2.9",
+      "7.2.10"
+    ],
+    "level1-server_only": [
+      "1.1.1.9",
+      "1.7.6",
+      "1.7.7",
+      "1.7.8",
+      "1.7.9",
+      "2.1.1",
+      "2.1.2",
+      "2.1.11",
+      "3.1.2",
+      "3.1.3",
+      "4.4.3.1",
+      "6.1.2.2"
+    ],
+    "level1-workstation_only": [
+      "5.1.8",
+      "5.1.9"
+    ],
+    "counts": {
+      "level1-server": 267,
+      "level1-workstation": 257,
+      "common": 255
+    }
+  },
+  "effective_context": {
+    "required": true,
+    "choices": {
+      "time_sync_tool": {
+        "systemd-timesyncd": {
+          "active_controls": [
+            "2.3.2.1",
+            "2.3.2.2"
+          ]
+        },
+        "chrony": {
+          "active_controls": [
+            "2.3.3.1",
+            "2.3.3.2",
+            "2.3.3.3"
+          ]
+        }
+      },
+      "firewall_mode": {
+        "disabled": {
+          "active_controls": [],
+          "required_exception_controls": [
+            "4.2.1",
+            "4.2.2",
+            "4.2.3",
+            "4.2.4",
+            "4.2.5",
+            "4.2.6",
+            "4.2.7",
+            "4.3.1",
+            "4.3.2",
+            "4.3.3",
+            "4.3.4",
+            "4.3.5",
+            "4.3.6",
+            "4.3.7",
+            "4.3.8",
+            "4.3.9",
+            "4.3.10",
+            "4.4.1.1",
+            "4.4.1.2",
+            "4.4.1.3",
+            "4.4.2.1",
+            "4.4.2.2",
+            "4.4.2.3",
+            "4.4.2.4",
+            "4.4.3.1",
+            "4.4.3.2",
+            "4.4.3.3",
+            "4.4.3.4"
+          ]
+        },
+        "ufw": {
+          "active_controls": [
+            "4.2.1",
+            "4.2.2",
+            "4.2.3",
+            "4.2.4",
+            "4.2.5",
+            "4.2.6",
+            "4.2.7"
+          ]
+        },
+        "nftables": {
+          "active_controls": [
+            "4.3.1",
+            "4.3.2",
+            "4.3.3",
+            "4.3.4",
+            "4.3.5",
+            "4.3.6",
+            "4.3.7",
+            "4.3.8",
+            "4.3.9",
+            "4.3.10"
+          ]
+        },
+        "iptables-ipv4": {
+          "active_controls": [
+            "4.4.1.1",
+            "4.4.1.2",
+            "4.4.1.3",
+            "4.4.2.1",
+            "4.4.2.2",
+            "4.4.2.3",
+            "4.4.2.4"
+          ]
+        },
+        "iptables-dual-stack": {
+          "active_controls": [
+            "4.4.1.1",
+            "4.4.1.2",
+            "4.4.1.3",
+            "4.4.2.1",
+            "4.4.2.2",
+            "4.4.2.3",
+            "4.4.2.4",
+            "4.4.3.1",
+            "4.4.3.2",
+            "4.4.3.3",
+            "4.4.3.4"
+          ]
+        }
+      },
+      "syslog_service": {
+        "journald": {
+          "active_controls": [
+            "6.1.2.1.1",
+            "6.1.2.1.2",
+            "6.1.2.1.3",
+            "6.1.2.1.4",
+            "6.1.2.2",
+            "6.1.2.3",
+            "6.1.2.4"
+          ]
+        },
+        "rsyslog": {
+          "active_controls": [
+            "6.1.3.1",
+            "6.1.3.2",
+            "6.1.3.3",
+            "6.1.3.4",
+            "6.1.3.5",
+            "6.1.3.6",
+            "6.1.3.7"
+          ]
+        }
+      },
+      "ipv6_mode": {
+        "required": {
+          "active_controls": [
+            "3.3.11"
+          ]
+        },
+        "disabled": {
+          "active_controls": [
+            "3.1.1"
+          ]
+        }
+      }
+    }
+  },
+  "benchmark_metadata_mismatches": [
+    {
+      "profile": "level1-workstation",
+      "field": "host_system_type",
+      "emitted_value": "Server",
+      "expected_value": "Workstation",
+      "reason": "The upstream Ansible audit task never passes run_audit.sh -w, so the producer retains its Server default."
+    }
+  ],
+  "result_metadata_backfills": [
+    {
+      "resource_id": "disable_dyn_motd: /etc/pam.d/sshd",
+      "title_prefix": "1.6.1 |",
+      "control_id": "1.6.1",
+      "server": 1,
+      "workstation": 1,
+      "reason": "The dynamic-MOTD file resource in cis_1.6.1.yml omits its meta block."
+    }
+  ],
+  "result_duplicate_id_deduplications": [
+    {
+      "resource_id": "/etc/cron.allow",
+      "control_id": "2.4.1.8",
+      "reason": "The cron.allow resource repeats CIS_ID 2.4.1.8 twice."
+    }
+  ],
+  "result_id_remaps": [
+    {
+      "from_control_id": "3.3.1",
+      "to_control_id": "3.1.1",
+      "resource_ids": [
+        "ipv6_disabled"
+      ],
+      "reason": "The sysctl branch in cis_3.1.1.yml emits CIS_ID 3.3.1."
+    },
+    {
+      "from_control_id": "4.3.1.3",
+      "to_control_id": "4.4.1.3",
+      "resource_ids": [
+        "ufw"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.2.1",
+      "to_control_id": "4.4.2.1",
+      "resource_ids": [
+        "ipt_def_deny"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.2.2",
+      "to_control_id": "4.4.2.2",
+      "resource_ids": [
+        "ipt_loopback"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.2.3",
+      "to_control_id": "4.4.2.3",
+      "resource_ids": [
+        "ipt_conns_config"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.2.4",
+      "to_control_id": "4.4.2.4",
+      "resource_ids": [
+        "ipt_open_ports"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.3.1",
+      "to_control_id": "4.4.3.1",
+      "resource_ids": [
+        "ipt6_def_deny"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.3.2",
+      "to_control_id": "4.4.3.2",
+      "resource_ids": [
+        "ipt6_loopback"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.3.3",
+      "to_control_id": "4.4.3.3",
+      "resource_ids": [
+        "ipt6_conns_config"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "4.3.3.4",
+      "to_control_id": "4.4.3.4",
+      "resource_ids": [
+        "ipt6_open_ports"
+      ],
+      "reason": "The iptables audit file emits the obsolete 4.3.x identifier."
+    },
+    {
+      "from_control_id": "5.3.3.3.2",
+      "to_control_id": "5.3.3.3.3",
+      "resource_ids": [
+        "pwhistory_use_authtok",
+        "pwhistory_use_authtok_pam_configs"
+      ],
+      "reason": "cis_5.3.3.3.3.yml is gated by and emits the preceding control ID."
+    },
+    {
+      "from_control_id": "6.2.1.1",
+      "to_control_id": "6.1.1.1",
+      "resource_ids": [
+        "systemd-journald"
+      ],
+      "reason": "cis_6.1.1.1.yml labels the journald service test as auditd control 6.2.1.1."
+    }
+  ],
+  "profile_metadata_mismatches": [
+    {
+      "control_id": "1.1.2.6.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "metadata_value": 2,
+      "expected_applicable": true,
+      "reason": "Audit metadata marks this L1 separate-/var/log control as Level 2."
+    },
+    {
+      "control_id": "1.1.2.7.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "metadata_value": 2,
+      "expected_applicable": true,
+      "reason": "Audit metadata marks this L1 separate-/var/log/audit control as Level 2."
+    },
+    {
+      "control_id": "3.1.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "metadata_value": 2,
+      "expected_applicable": true,
+      "reason": "The L1 producer branch labels IPv6-status results as Level 2."
+    },
+    {
+      "control_id": "2.1.20",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit produces this remediation Level-2-server-only control under Level 1 for both classes."
+    },
+    {
+      "control_id": "1.2.1.2",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 2,
+      "expected_applicable": true,
+      "reason": "Audit metadata marks the workstation-applicable L1 repository control as Level 2."
+    },
+    {
+      "control_id": "1.7.6",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit metadata marks a remediation Level-2-workstation control as workstation Level 1."
+    },
+    {
+      "control_id": "1.7.7",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit metadata marks a remediation Level-2-workstation control as workstation Level 1."
+    },
+    {
+      "control_id": "1.7.8",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit metadata marks a remediation Level-2-workstation control as workstation Level 1."
+    },
+    {
+      "control_id": "1.7.9",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit metadata marks a remediation Level-2-workstation control as workstation Level 1."
+    },
+    {
+      "control_id": "2.1.11",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit metadata marks a remediation server-only L1 print-service control as workstation Level 1."
+    },
+    {
+      "control_id": "4.4.3.1",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Remediation tag is misspelled level1-workstation\u00e5, so exact workstation L1 execution omits this control."
+    },
+    {
+      "control_id": "6.1.2.2",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "metadata_value": 1,
+      "expected_applicable": false,
+      "reason": "Audit metadata marks a remediation Level-2-workstation journald control as workstation Level 1."
+    }
+  ],
+  "coverage_gaps": [
+    {
+      "control_id": "1.1.1.10",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "filesystem-module-cve-review",
+      "requirement": "The pinned remediation discovery script returns no unreviewed filesystem modules.",
+      "reason": "No audit file exists for this remediation L1 manual-discovery control."
+    },
+    {
+      "control_id": "1.1.2.6.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "var-log-noexec",
+      "requirement": "The /var/log mount has the noexec option.",
+      "reason": "The audit file is incorrectly gated by rule 1.1.2.6.1 instead of its own rule 1.1.2.6.4."
+    },
+    {
+      "control_id": "1.1.2.7.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "var-log-audit-nosuid",
+      "requirement": "The /var/log/audit mount has the nosuid option.",
+      "reason": "The audit file is incorrectly gated by rule 1.1.2.7.1 instead of its own rule 1.1.2.7.3."
+    },
+    {
+      "control_id": "1.2.1.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "apt-signing-keys-reviewed",
+      "requirement": "Every enabled APT source uses an approved signing key or signed-by keyring whose fingerprint is independently reviewed.",
+      "reason": "The audit command intentionally prints MANUAL and therefore always fails its own negative matcher.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "1.2.1.2",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "apt-repositories-reviewed",
+      "requirement": "Every enabled APT repository is inventory-approved and uses the expected suite and components.",
+      "reason": "The audit command intentionally prints MANUAL and therefore always fails its own negative matcher.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "1.6.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "motd-access",
+      "requirement": "/etc/motd, when present, is owned by root:root and is no more permissive than 0644.",
+      "reason": "The audit declares this test under unsupported top-level resource type exec, so Goss produces no result."
+    },
+    {
+      "control_id": "2.1.9",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "nfs-server-not-in-use",
+      "requirement": "nfs-kernel-server is absent or its service is masked and inactive unless an explicit service exception approves it.",
+      "reason": "The audit produces no result when the upstream nfs-server allowance variable is true."
+    },
+    {
+      "control_id": "2.1.10",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "nis-server-not-in-use",
+      "requirement": "ypserv is absent or its service is masked and inactive unless an explicit service exception approves it.",
+      "reason": "The audit produces no result when the upstream nis-server allowance variable is true."
+    },
+    {
+      "control_id": "2.1.12",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "rpcbind-not-in-use",
+      "requirement": "rpcbind is absent or its service and socket are masked and inactive unless an explicit service exception approves it.",
+      "reason": "The audit produces no result when the upstream rpc-server allowance variable is true."
+    },
+    {
+      "control_id": "2.1.21",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "mta-local-only",
+      "requirement": "No mail transfer agent listens on non-loopback TCP port 25; installed MTAs are configured for local-only delivery.",
+      "reason": "The audit is gated on is-mail-server while remediation applies only when that variable is false."
+    },
+    {
+      "control_id": "2.2.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "nis-client-absent",
+      "requirement": "The NIS client package is absent unless an explicit client exception approves it.",
+      "reason": "The audit produces no result when the upstream nis-server allowance also suppresses the client control."
+    },
+    {
+      "control_id": "3.3.5",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "icmp-redirects-live-and-persistent",
+      "requirement": "IPv4 and IPv6 accept_redirects are zero for all and default interfaces in live sysctl state and persistent configuration.",
+      "reason": "The IPv6 persistence tests omit grep's filename prefix from their match expressions and produce false failures.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "3.3.8",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "source-route-live-and-persistent",
+      "requirement": "IPv4 and IPv6 accept_source_route are zero for all and default interfaces in live sysctl state and persistent configuration.",
+      "reason": "The IPv6 persistence tests use match expressions incompatible with grep's filename-prefixed output.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "3.3.9",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "suspicious-packets-logged",
+      "requirement": "IPv4 log_martians is one for all and default interfaces in live sysctl state and persistent configuration.",
+      "reason": "The audit adds unrelated IPv6 router-advertisement tests under control 3.3.9 and uses incompatible persistence match expressions.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "3.3.11",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "ipv6-router-advertisements-disabled",
+      "requirement": "IPv6 accept_ra is zero for all and default interfaces in live sysctl state and persistent configuration.",
+      "reason": "The audit kernel checks contradict the control by expecting value one, while its persistence grep expressions are malformed.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "4.1.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "single-firewall-owner",
+      "requirement": "At most one declared host firewall utility is enabled, or an inventory exception identifies the external firewall owner.",
+      "reason": "No audit file exists for the single-firewall-utility control."
+    },
+    {
+      "control_id": "4.4.1.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ufw-disabled",
+      "requirement": "UFW is absent or disabled when iptables is the declared firewall implementation.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.1.3 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.2.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv4-default-deny",
+      "requirement": "The IPv4 iptables policy provides the declared default-deny behavior.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.2.1 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.2.2",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv4-loopback",
+      "requirement": "IPv4 iptables accepts loopback traffic and rejects spoofed loopback source traffic.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.2.2 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.2.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv4-established",
+      "requirement": "IPv4 iptables permits the declared outbound and established connections.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.2.3 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.2.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv4-open-ports",
+      "requirement": "Every listening IPv4 port is covered by a declared iptables rule.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.2.4 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.3.1",
+      "profiles": [
+        "level1-server"
+      ],
+      "supplemental_check_id": "iptables-ipv6-default-deny",
+      "requirement": "The IPv6 iptables policy provides the declared default-deny behavior.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.3.1 and emits the obsolete control ID; remediation also misspells its workstation L1 tag."
+    },
+    {
+      "control_id": "4.4.3.2",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv6-loopback",
+      "requirement": "IPv6 iptables accepts loopback traffic and rejects spoofed loopback source traffic.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.3.2 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.3.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv6-established",
+      "requirement": "IPv6 iptables permits the declared outbound and established connections.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.3.3 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "4.4.3.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "iptables-ipv6-open-ports",
+      "requirement": "Every listening IPv6 port is covered by a declared iptables rule.",
+      "reason": "The audit file uses nonexistent rule variable 4.3.3.4 and emits the obsolete control ID."
+    },
+    {
+      "control_id": "5.1.8",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "sshd-effective-disable-forwarding",
+      "requirement": "The effective sshd configuration reports disableforwarding yes.",
+      "reason": "Audit gates this workstation L1 control under Level 2 and also labels it workstation Level 2."
+    },
+    {
+      "control_id": "5.1.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "sshd-effective-access",
+      "requirement": "The effective sshd configuration contains the inventory-declared AllowUsers, AllowGroups, DenyUsers, or DenyGroups policy and passes sshd validation.",
+      "reason": "The audit reads only /etc/ssh/sshd_config and does not evaluate included drop-in configuration.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "5.1.9",
+      "profiles": [
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "sshd-effective-gssapi-disabled",
+      "requirement": "The effective sshd configuration reports gssapiauthentication no.",
+      "reason": "Audit gates this workstation L1 control under Level 2."
+    },
+    {
+      "control_id": "5.4.2.8",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "noninteractive-accounts-locked",
+      "requirement": "Every non-root account without a valid login shell has a locked password field.",
+      "reason": "The pinned audit contains no control 5.4.2.8 file."
+    },
+    {
+      "control_id": "5.4.2.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "root-access-controlled",
+      "requirement": "The root password state is either a set password or a locked account, matching the remediation precondition.",
+      "reason": "Remediation explicitly accepts a locked root account, but the audit accepts only passwd status P.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "5.3.3.3.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "pam-pwhistory-use-authtok",
+      "requirement": "pam_pwhistory entries include use_authtok in the effective PAM configuration and source profiles.",
+      "reason": "The audit file is gated by rule 5.3.3.3.2 and emits that preceding control ID."
+    },
+    {
+      "control_id": "6.1.1.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "journald-enabled-active",
+      "requirement": "systemd-journald is enabled and active.",
+      "reason": "The audit file is gated by and emits auditd control 6.2.1.1 rather than journald control 6.1.1.1."
+    },
+    {
+      "control_id": "6.1.1.2",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "journald-log-access",
+      "requirement": "Journald-created files and directories use the benchmark access modes and ownership.",
+      "reason": "The pinned audit implements this control as an unconditional manual-result command.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "6.1.1.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "single-logging-system",
+      "requirement": "The selected logging service is enabled and active and the unselected logging service is disabled and inactive.",
+      "reason": "The audit checks misspelled unit systemd-jounald.service, producing false failures.",
+      "raw_result_policy": "supplemental_required"
+    },
+    {
+      "control_id": "6.1.3.8",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "logrotate-frequency",
+      "requirement": "The global and per-service logrotate configuration uses the inventory-declared frequency.",
+      "reason": "The audit root includes this unconditional remediation L1 control only when rsyslog is selected, omitting it for journald."
+    },
+    {
+      "control_id": "6.2.4.1",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-log-files-mode",
+      "requirement": "Audit log files are no more permissive than 0640.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.2",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-log-files-owner",
+      "requirement": "Audit log files are owned by root.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-log-files-group",
+      "requirement": "Audit log files are group-owned by root or adm.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.4",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-log-directory-mode",
+      "requirement": "The audit log directory is no more permissive than 0750.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.5",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-config-files-mode",
+      "requirement": "Audit configuration and rules files are no more permissive than 0640.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.6",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-config-files-owner",
+      "requirement": "Audit configuration and rules files are owned by root.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.7",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-config-files-group",
+      "requirement": "Audit configuration and rules files are group-owned by root.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.8",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-tools-mode",
+      "requirement": "Audit tools are no more permissive than 0755.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.9",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-tools-owner",
+      "requirement": "Audit tools are owned by root.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.2.4.10",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "audit-tools-group",
+      "requirement": "Audit tools are group-owned by root.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "6.3.3",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "aide-audit-tools-sha512",
+      "requirement": "AIDE configuration protects all six audit tools with the required attributes and sha512.",
+      "reason": "Remediation tags this control L1, but Audit gates and labels it Level 2."
+    },
+    {
+      "control_id": "7.1.13",
+      "profiles": [
+        "level1-server",
+        "level1-workstation"
+      ],
+      "supplemental_check_id": "suid-sgid-reviewed",
+      "requirement": "Every discovered SUID or SGID executable is package-owned or explicitly approved in the acceptance evidence.",
+      "reason": "The audit expects an empty SUID/SGID discovery result although the benchmark control requires manual review.",
+      "raw_result_policy": "supplemental_required"
+    }
+  ]
+}
