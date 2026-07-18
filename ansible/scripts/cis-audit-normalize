@@ -209,6 +209,10 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
                         set(parsed) <= all_profile_controls,
                         f"{choice_context}.{field} contains a non-L1 control",
                     )
+                    if field == "active_controls":
+                        active = parsed
+                    else:
+                        required_exceptions = parsed
                     family_controls.update(parsed)
                 require(
                     not set(active) & set(required_exceptions),
