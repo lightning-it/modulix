@@ -1,9 +1,16 @@
 ---
-- name: Require a complete machine-readable Workbench acceptance contract
+- name: Require the Workbench acceptance contract root
   ansible.builtin.assert:
     that:
       - workbench_acceptance is defined
       - workbench_acceptance is mapping
+    fail_msg: "The selected host does not define a Workbench acceptance contract."
+    quiet: true
+  changed_when: false
+
+- name: Require a complete machine-readable Workbench acceptance contract
+  ansible.builtin.assert:
+    that:
       - workbench_acceptance.hostname | default('') == workbench_target_hostname
       - workbench_acceptance.hostname == inventory_hostname
       - workbench_acceptance.users | default([]) is sequence
@@ -13,6 +20,8 @@
       - workbench_acceptance.tools | default([]) is not string
       - workbench_acceptance.tools | length > 0
       - workbench_acceptance.python_environment | default({}) is mapping
+      - workbench_acceptance.python_environment.path | default('') is match('^/')
+      - workbench_acceptance.python_environment.packages | default({}) is mapping
       - workbench_acceptance.npm_packages | default({}) is mapping
       - workbench_acceptance.incus | default({}) is mapping
       - workbench_acceptance.podman | default({}) is mapping
@@ -27,6 +36,8 @@
       - workbench_acceptance.github_runner | default({}) is mapping
       - workbench_acceptance.github_runner.enabled | default(true) is boolean
       - not (workbench_acceptance.github_runner.enabled | bool)
+      - workbench_incus_storage | default({}) is mapping
+      - workbench_incus_storage.device | default('') is match('^/dev/')
     fail_msg: >-
       The selected host does not have a complete acceptance contract matching
       its exact inventory hostname.

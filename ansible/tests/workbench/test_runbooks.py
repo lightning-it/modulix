@@ -84,10 +84,18 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "ansible.builtin.user",
             "community.general.lvol",
         }
+        def walk_tasks(tasks):
+            for task in tasks:
+                yield task
+                for section in ("block", "rescue", "always"):
+                    nested = task.get(section, [])
+                    if isinstance(nested, list):
+                        yield from walk_tasks(nested)
+
         for path in sorted((RUNBOOK_DIRECTORY / "tasks").glob("validate-*.yml")):
             with self.subTest(task_file=path.name):
                 tasks = load_yaml(path)
-                for task in tasks:
+                for task in walk_tasks(tasks):
                     self.assertFalse(forbidden_modules.intersection(task))
                     if "ansible.builtin.command" in task:
                         self.assertIs(task.get("changed_when"), False)

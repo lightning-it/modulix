@@ -52,7 +52,7 @@
     workbench_validation_python_package_map: >-
       {{
         workbench_validation_python_package_map
-        | combine({item.name | lower: item.version | string})
+        | combine({(item.name | lower): (item.version | string)})
       }}
   loop: "{{ workbench_validation_python_packages.stdout | from_json }}"
   loop_control:
