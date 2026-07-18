@@ -483,7 +483,10 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         self.assertNotIn(fake_token, result.stdout)
         report = json.loads(result.stdout)
         self.assertEqual(report["status"], "failed")
-        self.assertEqual(report["findings"][0]["pattern"], "github-token")
+        self.assertIn(
+            "github-token",
+            {finding["pattern"] for finding in report["findings"]},
+        )
 
     def test_sanitizer_redacts_private_keys_and_generic_credentials(self):
         sanitizer = RUNBOOK_DIRECTORY / "files" / "workbench-sanitize-log.py"

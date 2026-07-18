@@ -24,6 +24,7 @@
   loop_control:
     label: "{{ item.name | default('unnamed tool') }}"
   register: workbench_validation_tool_probes
+  become: false
   changed_when: false
   failed_when: false
   check_mode: false
@@ -56,6 +57,7 @@
       - list
       - --format=json
   register: workbench_validation_python_packages
+  become: false
   changed_when: false
   failed_when: false
   check_mode: false
@@ -100,6 +102,7 @@
   ansible.builtin.command:
     argv: [npm, list, --global, --depth=0, --json]
   register: workbench_validation_npm_packages
+  become: false
   changed_when: false
   failed_when: false
   check_mode: false
