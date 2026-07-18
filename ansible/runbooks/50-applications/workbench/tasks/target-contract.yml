@@ -30,7 +30,7 @@
       - ansible_facts.get('distribution_version', '') == '24.04'
       - ansible_facts.get('fqdn', '') == inventory_hostname
     fail_msg: >-
-      The selected host is not the inventory-named Ubuntu 24.04 Workbench.
+      The selected host is not the inventory-named Ubuntu Workbench (>=24.04,<25.04).
     quiet: true
   changed_when: false
 
