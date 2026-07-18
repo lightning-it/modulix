@@ -51,13 +51,19 @@ finalize() {
   set +e
   python3 "$scanner" "$raw_log" >"$scan_report"
   scan_status="$?"
-  python3 "$sanitizer" \
-    "$raw_log" \
-    "$safe_log" \
-    --replace "$workdir" \
-    --replace "$HOME"
-  sanitize_status="$?"
-  rm -f "$raw_log"
+
+  sanitize_status=1
+  if [ -f "$raw_log" ]; then
+    python3 "$sanitizer" \
+      "$raw_log" \
+      "$safe_log" \
+      --replace "$workdir" \
+      --replace "$HOME"
+    sanitize_status="$?"
+    rm -f "$raw_log"
+  else
+    : >"$safe_log"
+  fi
   summary_status=failed
   if [ "$original_status" -eq 0 ] && [ "$scan_status" -eq 0 ] && [ "$sanitize_status" -eq 0 ]; then
     summary_status=passed
