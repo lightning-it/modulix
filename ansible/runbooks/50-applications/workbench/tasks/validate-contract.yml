@@ -8,6 +8,34 @@
     quiet: true
   changed_when: false
 
+- name: Require structured Workbench acceptance contract sections
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance.get('tiny', {}) is mapping
+      - workbench_acceptance.get('heavy', {}) is mapping
+      - workbench_acceptance.get('application', {}) is mapping
+      - workbench_acceptance.get('python_environment', {}) is mapping
+      - workbench_acceptance.get('incus', {}) is mapping
+      - workbench_acceptance.get('podman', {}) is mapping
+      - workbench_acceptance.get('github_runner', {}) is mapping
+    fail_msg: >-
+      The selected host has malformed top-level Workbench acceptance contract
+      sections.
+    quiet: true
+  changed_when: false
+
+- name: Require structured Incus acceptance contract sections
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}) is mapping
+      - workbench_acceptance.get('incus', {}).get('network', {}) is mapping
+      - workbench_acceptance.get('incus', {}).get('project', {}) is mapping
+      - workbench_acceptance.get('incus', {}).get('profile', {}) is mapping
+    fail_msg: >-
+      The selected host has malformed nested Incus acceptance contract sections.
+    quiet: true
+  changed_when: false
+
 - name: Require a complete machine-readable Workbench acceptance contract
   ansible.builtin.assert:
     that:
@@ -24,6 +52,49 @@
       - workbench_acceptance.python_environment.packages | default({}) is mapping
       - workbench_acceptance.npm_packages | default({}) is mapping
       - workbench_acceptance.incus | default({}) is mapping
+      - >-
+        (workbench_acceptance.get('tiny', {}).get('image', '') | string)
+        is match('^images:[0-9a-f]{64}$')
+      - >-
+        (workbench_acceptance.get('heavy', {}).get('image', '') | string)
+        is match('^images:[0-9a-f]{64}$')
+      - >-
+        (workbench_acceptance.get('application', {}).get('image', '') | string)
+        is match('^images:[0-9a-f]{64}$')
+      - workbench_acceptance.get('incus', {}).get('remote_api_enabled', none) is boolean
+      - not (workbench_acceptance.get('incus', {}).get('remote_api_enabled', true) | bool)
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('name', '') is string
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('name', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('driver', '') is string
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('driver', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('source', '') is string
+      - >-
+        (
+          workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('source', '')
+          | string
+        ) is match('^/dev/')
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('size_gib', none) is number
+      - workbench_acceptance.get('incus', {}).get('storage_pool', {}).get('size_gib', 0) | int > 0
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('name', '') is string
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('name', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('type', '') is string
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('type', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('ipv4_address', '') is string
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('ipv4_address', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('ipv4_dhcp', none) is boolean
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('ipv4_nat', none) is boolean
+      - workbench_acceptance.get('incus', {}).get('network', {}).get('ipv6_enabled', none) is boolean
+      - workbench_acceptance.get('incus', {}).get('project', {}).get('name', '') is string
+      - workbench_acceptance.get('incus', {}).get('project', {}).get('name', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('project', {}).get('limits', {}) is mapping
+      - workbench_acceptance.get('incus', {}).get('profile', {}).get('name', '') is string
+      - workbench_acceptance.get('incus', {}).get('profile', {}).get('name', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('profile', {}).get('cpu', none) is number
+      - workbench_acceptance.get('incus', {}).get('profile', {}).get('cpu', 0) | int > 0
+      - workbench_acceptance.get('incus', {}).get('profile', {}).get('memory', '') is string
+      - workbench_acceptance.get('incus', {}).get('profile', {}).get('memory', '') | string | length > 0
+      - workbench_acceptance.get('incus', {}).get('expected_instances', none) is sequence
+      - workbench_acceptance.get('incus', {}).get('expected_instances', none) is not string
       - workbench_acceptance.podman | default({}) is mapping
       - workbench_acceptance.podman.users | default([]) is sequence
       - workbench_acceptance.podman.users | default([]) is not string
@@ -33,9 +104,16 @@
       - workbench_acceptance.podman.user_socket_enabled | bool
       - workbench_acceptance.podman.system_socket_enabled | default(none) is boolean
       - not (workbench_acceptance.podman.system_socket_enabled | bool)
+      - workbench_acceptance.get('podman', {}).get('storage_driver', '') is string
+      - workbench_acceptance.get('podman', {}).get('storage_driver', '') | string | length > 0
       - workbench_acceptance.github_runner | default({}) is mapping
       - workbench_acceptance.github_runner.enabled | default(true) is boolean
       - not (workbench_acceptance.github_runner.enabled | bool)
+      - workbench_acceptance.get('github_runner', {}).get('forbidden_accounts', none) is sequence
+      - workbench_acceptance.get('github_runner', {}).get('forbidden_accounts', none) is not string
+      - >-
+        workbench_acceptance.get('github_runner', {}).get('forbidden_accounts', [])
+        | default([], true) | length > 0
       - workbench_incus_storage | default({}) is mapping
       - workbench_incus_storage.device | default('') is match('^/dev/')
     fail_msg: >-

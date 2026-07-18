@@ -78,12 +78,21 @@
   changed_when: false
   check_mode: false
 
+- name: Decode global npm package inventory
+  ansible.builtin.set_fact:
+    workbench_validation_npm_package_map: >-
+      {%- set npm_inventory = workbench_validation_npm_packages.stdout | from_json -%}
+      {%- set npm_dependencies = npm_inventory.get('dependencies', {})
+          if npm_inventory is mapping else {} -%}
+      {{ npm_dependencies if npm_dependencies is mapping else {} }}
+  changed_when: false
+
 - name: Require declared global npm package versions
   ansible.builtin.assert:
     that:
-      - item.key in (workbench_validation_npm_packages.stdout | from_json).dependencies
+      - item.key in workbench_validation_npm_package_map
       - >-
-        (workbench_validation_npm_packages.stdout | from_json).dependencies[item.key].version
+        workbench_validation_npm_package_map.get(item.key, {}).get('version', '')
         == item.value | string
     fail_msg: "Global npm package {{ item.key }} is absent or has version drift."
     quiet: true

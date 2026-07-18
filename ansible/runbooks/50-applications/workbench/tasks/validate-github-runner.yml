@@ -36,6 +36,9 @@
     that:
       - >-
         workbench_validation_github_runner_accounts.results
+        | map(attribute='rc') | list | difference([0, 2]) | length == 0
+      - >-
+        workbench_validation_github_runner_accounts.results
         | selectattr('rc', 'equalto', 0) | list | length == 0
       - >-
         workbench_validation_service_units.stdout

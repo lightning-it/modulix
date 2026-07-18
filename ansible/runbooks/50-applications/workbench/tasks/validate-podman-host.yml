@@ -19,6 +19,10 @@
   ansible.builtin.assert:
     that:
       - not (workbench_acceptance.podman.system_socket_enabled | bool)
+      - workbench_validation_system_podman_socket_enabled.rc in [0, 1]
+      - workbench_validation_system_podman_socket_active.rc in [0, 3]
+      - workbench_validation_system_podman_socket_enabled.stdout | trim | length > 0
+      - workbench_validation_system_podman_socket_active.stdout | trim | length > 0
       - workbench_validation_system_podman_socket_enabled.stdout | trim != 'enabled'
       - workbench_validation_system_podman_socket_active.stdout | trim != 'active'
     fail_msg: "The privileged Podman API socket must remain disabled and inactive."
