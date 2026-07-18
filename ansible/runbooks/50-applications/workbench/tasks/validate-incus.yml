@@ -238,6 +238,7 @@
     that:
       - workbench_validation_incus_lv_row.get('lv_size', none) is string
       - workbench_validation_incus_lv_row.get('lv_size', none) not in [none, '']
+      - workbench_validation_incus_lv_row.get('lv_size', none) is match('^[0-9]+$')
     fail_msg: "Dedicated Incus logical-volume size evidence is malformed."
     quiet: true
   changed_when: false
