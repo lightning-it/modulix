@@ -1,0 +1,86 @@
+---
+# Ansible Automation Platform (AAP) deployment.
+# OS substrate preparation is handled by 06-base-os-prepare.yml.
+
+- name: Deploy and configure AAP
+  hosts: aaps
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Verify AAP setup account and prerequisites before deploy
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_preflight
+        apply:
+          tags: [aap, aap_preflight, aap_deploy]
+      vars:
+        aap_preflight_allow_partial_install_runtime: true
+      tags:
+        - aap
+        - aap_preflight
+        - aap_deploy
+
+  tasks:
+    - name: Prepare AAP prerequisites and artifacts
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_prepare
+        apply:
+          tags: [aap, aap_prepare, aap_deploy, aap_cac, artifacts, dns]
+      tags:
+        - aap
+        - aap_prepare
+        - aap_deploy
+        - aap_cac
+        - artifacts
+        - dns
+
+    - name: Seed AAP secrets
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_secrets
+        apply:
+          tags: [aap, aap_deploy, aap_passwords, vault]
+      when: aap_password_seed_enabled | default(false) | bool
+      tags:
+        - aap
+        - aap_deploy
+        - aap_passwords
+        - vault
+
+    - name: Prepare AAP shared context
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap
+        apply:
+          tags: [aap, aap_deploy, aap_cac]
+      tags:
+        - aap
+        - aap_deploy
+        - aap_cac
+
+    - name: Deploy AAP
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_deploy
+        apply:
+          tags: [aap, aap_deploy]
+      tags:
+        - aap
+        - aap_deploy
+
+    - name: AAP configuration-as-code
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_cac
+        apply:
+          tags: [aap, aap_cac]
+      tags:
+        - aap
+        - aap_cac
+
+    - name: Report AAP registry credential and execution environment configuration success
+      ansible.builtin.debug:
+        msg: AAP_REGISTRY_CREDENTIAL_AND_EE_CONFIGURED_OK
+      changed_when: false
+      when: aap_configure_registry_ee | default(false) | bool
+
+    - name: Report AAP deployment success
+      ansible.builtin.debug:
+        msg: AAP_DEPLOYMENT_OK
+      changed_when: false

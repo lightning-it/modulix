@@ -1,0 +1,192 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - Base Setup
+#
+# Purpose:
+# - Require --limit (fail fast)
+# - Bootstrap managed local users when the normal deploy user is not reachable yet
+# - Reconnect through the managed deploy user and re-apply users idempotently
+# - Apply host networking from inventory when netplan inputs are present
+#
+# Keep this conservative: application runtime setup stays in application runbooks.
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require --limit)
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Verify that a limit is set
+      ansible.builtin.fail:
+        msg: "This runbook cannot be run without --limit. Please use --limit <host-or-group>."
+      run_once: true
+      when: ansible_limit is not defined
+      tags: [always]
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing."
+      run_once: true
+      when: ansible_limit is defined
+      tags: [always]
+
+- name: Bootstrap managed Ubuntu users
+  hosts: all
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  vars:
+    _probe_port_normal: >-
+      {{ openssh_server_primary_port | default(sshd_port | default(22)) | int }}
+    _probe_port_bootstrap: "{{ linux_bootstrap_ssh_port | default(22) | int }}"
+    _bootstrap_user_effective: "{{ linux_bootstrap_user | default('', true) }}"
+    _bootstrap_password_effective: "{{ linux_bootstrap_password | default(omit) }}"
+    linux_admin_group: sudo
+    _bootstrap_configured: >-
+      {{
+        (_bootstrap_user_effective | default('', true) | trim | length > 0)
+        and (linux_bootstrap_password | default('', true) | trim | length > 0)
+      }}
+
+  pre_tasks:
+    - name: Check reachability with managed deploy user
+      ansible.builtin.ping:
+      ignore_unreachable: true
+      ignore_errors: true
+      register: _ubuntu_base_ping_normal
+      vars:
+        ansible_become: false
+        ansible_port: "{{ _probe_port_normal }}"
+      tags: [bootstrap]
+
+    - name: Check reachability with bootstrap user
+      ansible.builtin.ping:
+      ignore_unreachable: true
+      ignore_errors: true
+      register: _ubuntu_base_ping_bootstrap
+      vars:
+        ansible_become: false
+        ansible_port: "{{ _probe_port_bootstrap }}"
+        ansible_user: "{{ _bootstrap_user_effective }}"
+        ansible_password: "{{ _bootstrap_password_effective }}"
+        ansible_become_password: "{{ _bootstrap_password_effective }}"
+        ansible_become_flags: "-H -S"
+      when: _bootstrap_configured | bool
+      tags: [bootstrap]
+
+    - name: Derive reachability flags
+      ansible.builtin.set_fact:
+        _ubuntu_base_normal_ok: >-
+          {{
+            not (
+              _ubuntu_base_ping_normal is failed
+              or (_ubuntu_base_ping_normal.unreachable | default(false))
+            )
+          }}
+        _ubuntu_base_bootstrap_ok: >-
+          {{
+            _bootstrap_configured | bool
+            and not (
+              _ubuntu_base_ping_bootstrap is failed
+              or (_ubuntu_base_ping_bootstrap.unreachable | default(false))
+            )
+          }}
+      changed_when: false
+      tags: [bootstrap]
+
+    - name: Fail if neither managed nor bootstrap SSH works
+      ansible.builtin.fail:
+        msg: >-
+          Host {{ inventory_hostname }} is unreachable with the managed deploy
+          user, and bootstrap SSH is not available. Check linux_bootstrap_* vars
+          and the VM installer account.
+      when:
+        - not (_ubuntu_base_normal_ok | bool)
+        - not (_ubuntu_base_bootstrap_ok | bool)
+      tags: [bootstrap]
+
+  tasks:
+    - name: Bootstrap - ensure managed users exist
+      ansible.builtin.include_role:
+        name: lit.ubuntu.users
+        apply:
+          become: true
+      vars:
+        ansible_port: "{{ _probe_port_bootstrap }}"
+        ansible_user: "{{ _bootstrap_user_effective }}"
+        ansible_password: "{{ _bootstrap_password_effective }}"
+        ansible_become_password: "{{ _bootstrap_password_effective }}"
+        ansible_become_flags: "-H -S"
+      when:
+        - not (_ubuntu_base_normal_ok | bool)
+        - _ubuntu_base_bootstrap_ok | bool
+      tags: [bootstrap, users]
+
+    - name: Reset SSH connection after bootstrap
+      ansible.builtin.meta: reset_connection
+      tags: [bootstrap]
+
+- name: Base setup
+  hosts: all
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+
+  vars:
+    linux_admin_group: sudo
+
+  pre_tasks:
+    - name: Ensure the Ubuntu base setup only runs on Ubuntu
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+        fail_msg: "This runbook is for Ubuntu hosts only."
+      tags: [always]
+
+  tasks:
+    - name: Configure netplan
+      ansible.builtin.include_role:
+        name: lit.ubuntu.netplan
+      when: >-
+        ubuntu_base_configure_netplan
+        | default(
+            (net_ifaces | default([]) | length > 0)
+            or (netplan_ethernets | default({}) | length > 0)
+            or (netplan_config_files_absent | default([]) | length > 0)
+            or (netplan_runtime_networkd_files_absent | default([]) | length > 0)
+          )
+        | bool
+      tags: [network, networking, netplan]
+
+    - name: Users
+      ansible.builtin.include_role:
+        name: lit.ubuntu.users
+      tags: [users]
+
+    - name: Read managed user group membership
+      ansible.builtin.command: "id -nG {{ item.name }}"
+      loop: "{{ users_accounts_effective | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: ubuntu_base_user_group_memberships
+      changed_when: false
+      failed_when: false
+      when:
+        - item is mapping
+        - item.name | default('', true) | trim | length > 0
+        - item.state | default('present') == 'present'
+      tags: [users]
+
+    - name: Remove accidental RedHat wheel membership from Ubuntu users
+      ansible.builtin.command: "gpasswd -d {{ item.item.name }} wheel"
+      loop: "{{ ubuntu_base_user_group_memberships.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name | default('unknown') }}"
+      when:
+        - item.rc | default(1) == 0
+        - "'wheel' in (item.stdout | default('')).split()"
+        - "'wheel' not in (item.item.groups | default([]))"
+      changed_when: true
+      tags: [users]

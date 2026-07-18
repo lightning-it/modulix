@@ -1,0 +1,8 @@
+---
+- name: Manage Keycloak lifecycle
+  hosts: keycloak
+  gather_facts: true
+  become: true
+
+  roles:
+    - role: lit.supplementary.keycloak

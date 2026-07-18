@@ -1,0 +1,10 @@
+---
+- name: Deploy Nexus
+  become: true
+  hosts: "{{ nexus_target | default('nexus') }}"
+  gather_facts: true
+  roles:
+    - role: lit.supplementary.nexus
+      tags:
+        - nexus
+        - nexus_deploy

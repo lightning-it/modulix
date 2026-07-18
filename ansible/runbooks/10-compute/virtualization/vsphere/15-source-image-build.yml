@@ -1,0 +1,32 @@
+---
+- name: Build vSphere source image through Packer
+  hosts: all
+  connection: local
+  gather_facts: false
+  serial: 1
+
+  pre_tasks:
+    - name: Require --limit
+      ansible.builtin.fail:
+        msg: "This runbook cannot be run with no --limit (single source image host required)."
+      when: ansible_limit is not defined
+      run_once: true
+
+    - name: Require a single host in --limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is match('^[^,:&|!()]+$')
+        fail_msg: >-
+          ansible_limit must be a single source image hostname. Example:
+          --limit template-rhel-8-minimal
+      when: ansible_limit is defined
+      run_once: true
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing with source image build."
+      when: ansible_limit is defined
+      run_once: true
+
+  roles:
+    - role: lit.foundational.vmware_vsphere_packer_build

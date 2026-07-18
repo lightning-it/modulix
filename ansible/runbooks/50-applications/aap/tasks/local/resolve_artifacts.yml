@@ -1,0 +1,31 @@
+---
+- name: Find remote AAP setup bundle
+  ansible.builtin.find:
+    paths: "{{ aap_effective_artifact_dir }}"
+    patterns: "ansible-automation-platform-containerized-setup-bundle-*-x86_64.tar.gz"
+    file_type: any
+    follow: true
+  register: aap_remote_bundle_find
+
+- name: Find remote AAP manifest
+  ansible.builtin.find:
+    paths: "{{ aap_effective_artifact_dir }}"
+    patterns: "manifest*.zip"
+    file_type: any
+    follow: true
+  register: aap_remote_manifest_find
+
+- name: Assert exactly one remote AAP bundle and manifest exist
+  ansible.builtin.assert:
+    that:
+      - (aap_remote_bundle_find.files | default([]) | length) == 1
+      - (aap_remote_manifest_find.files | default([]) | length) == 1
+    fail_msg: >-
+      Expected exactly one AAP setup bundle and one manifest in
+      {{ aap_effective_artifact_dir }}.
+    quiet: true
+
+- name: Record remote AAP artifact paths
+  ansible.builtin.set_fact:
+    aap_bundle_remote_src: "{{ (aap_remote_bundle_find.files | sort(attribute='path') | last).path }}"
+    aap_manifest_remote_src: "{{ (aap_remote_manifest_find.files | sort(attribute='path') | last).path }}"

@@ -1,0 +1,194 @@
+---
+- name: Create OCP Agent Incus VM shells
+  hosts: "{{ ocp_incus_hosts | default('incus_hosts') }}"
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Validate Incus OCP VM shell inputs
+      ansible.builtin.assert:
+        that:
+          - ocp_incus_instances is defined
+          - ocp_incus_instances is sequence
+          - ocp_incus_instances is not string
+          - ocp_incus_instances | length > 0
+        fail_msg: "Define ocp_incus_instances in inventory for the Incus VM shell definitions."
+        quiet: true
+      tags:
+        - always
+
+  roles:
+    - role: lit.ubuntu.incus_instance
+      vars:
+        incus_instance_items: "{{ ocp_incus_instances }}"
+      tags:
+        - incus
+        - ocp
+        - ocp_incus
+
+- name: Create OCP Agent install assets for Incus
+  hosts: "{{ ocp_incus_ocp_hosts | default('ocp') }}"
+  gather_facts: false
+  vars:
+    ocp_incus_install_delegate: "{{ groups[ocp_incus_hosts | default('incus_hosts')] | first }}"
+    ocp_incus_agent_iso_path: >-
+      {{
+        ocp_incus_agent_iso_path_override
+        | default('/runner/project/agent-' ~ cluster_id ~ '.' ~ (ocp_incus_agent_arch | default('x86_64')) ~ '.iso')
+      }}
+
+  pre_tasks:
+    - name: Validate OCP Agent Incus install inputs
+      ansible.builtin.assert:
+        that:
+          - ocp_incus_nodes is defined
+          - ocp_incus_nodes is sequence
+          - ocp_incus_nodes is not string
+          - ocp_incus_nodes | length > 0
+          - ocp_incus_control_plane_replicas is defined
+          - ocp_incus_compute_replicas is defined
+          - ocp_incus_install_delegate | length > 0
+        fail_msg: >-
+          Define ocp_incus_nodes, ocp_incus_control_plane_replicas, and
+          ocp_incus_compute_replicas in inventory.
+        quiet: true
+      tags:
+        - always
+
+  roles:
+    - role: lit.ocp.install_agent
+      vars:
+        install_agent_delegate_to: "{{ ocp_incus_install_delegate }}"
+        install_agent_provider: external
+        install_agent_platform: none
+        install_agent_nodes: "{{ ocp_incus_nodes }}"
+        install_agent_control_plane_replicas: "{{ ocp_incus_control_plane_replicas }}"
+        install_agent_compute_replicas: "{{ ocp_incus_compute_replicas }}"
+        install_agent_agent_iso_path: "{{ ocp_incus_agent_iso_path }}"
+        install_agent_power_on_nodes: false
+        install_agent_run_assets: true
+        install_agent_run_wait: false
+        install_agent_run_post: false
+        install_agent_run_setup_nodes: false
+        install_agent_write_kube_credentials: false
+      tags:
+        - ocp
+        - ocp_install
+        - ocp_incus
+
+- name: Attach OCP Agent ISO and start Incus VMs
+  hosts: "{{ ocp_incus_hosts | default('incus_hosts') }}"
+  become: true
+  gather_facts: false
+  vars:
+    ocp_incus_agent_iso_device_name: "{{ ocp_incus_agent_iso_device_name_override | default('agent-iso') }}"
+    ocp_incus_agent_iso_boot_priority: "{{ ocp_incus_agent_iso_boot_priority_override | default('10') }}"
+    ocp_incus_agent_iso_path: >-
+      {{
+        ocp_incus_agent_iso_path_override
+        | default('/runner/project/agent-' ~ cluster_id ~ '.' ~ (ocp_incus_agent_arch | default('x86_64')) ~ '.iso')
+      }}
+    ocp_incus_boot_instances: []
+
+  pre_tasks:
+    - name: Build Incus OCP boot instance definitions
+      ansible.builtin.set_fact:
+        ocp_incus_boot_instances: >-
+          {{
+            ocp_incus_boot_instances
+            + [
+              ocp_incus_instance
+              | combine(
+                  {
+                    'state': 'running',
+                    'reconfigure': true,
+                    'wait_for_ip': false,
+                    'wait_for_ssh': false,
+                    'devices': (
+                      ocp_incus_instance.devices | default({})
+                    )
+                    | combine(
+                        {
+                          ocp_incus_agent_iso_device_name: {
+                            'type': 'disk',
+                            'source': ocp_incus_agent_iso_path,
+                            'boot.priority': ocp_incus_agent_iso_boot_priority
+                          }
+                        },
+                        recursive=True
+                      )
+                  },
+                  recursive=True
+                )
+            ]
+          }}
+      loop: "{{ ocp_incus_instances }}"
+      loop_control:
+        loop_var: ocp_incus_instance
+        label: "{{ ocp_incus_instance.name | default('ocp-incus-vm') }}"
+      tags:
+        - always
+
+  roles:
+    - role: lit.ubuntu.incus_instance
+      vars:
+        incus_instance_items: "{{ ocp_incus_boot_instances }}"
+      tags:
+        - incus
+        - ocp
+        - ocp_incus
+
+- name: Wait for OCP Agent install on Incus
+  hosts: "{{ ocp_incus_ocp_hosts | default('ocp') }}"
+  gather_facts: false
+  vars:
+    ocp_incus_install_delegate: "{{ groups[ocp_incus_hosts | default('incus_hosts')] | first }}"
+    ocp_incus_agent_iso_path: >-
+      {{
+        ocp_incus_agent_iso_path_override
+        | default('/runner/project/agent-' ~ cluster_id ~ '.' ~ (ocp_incus_agent_arch | default('x86_64')) ~ '.iso')
+      }}
+
+  roles:
+    - role: lit.ocp.install_agent
+      vars:
+        install_agent_delegate_to: "{{ ocp_incus_install_delegate }}"
+        install_agent_provider: external
+        install_agent_platform: none
+        install_agent_nodes: "{{ ocp_incus_nodes }}"
+        install_agent_control_plane_replicas: "{{ ocp_incus_control_plane_replicas }}"
+        install_agent_compute_replicas: "{{ ocp_incus_compute_replicas }}"
+        install_agent_agent_iso_path: "{{ ocp_incus_agent_iso_path }}"
+        install_agent_power_on_nodes: false
+        install_agent_run_assets: false
+        install_agent_run_wait: true
+        install_agent_run_post: false
+        install_agent_run_setup_nodes: false
+        install_agent_write_kube_credentials: false
+      tags:
+        - ocp
+        - ocp_install
+        - ocp_incus
+        - ocp_wait
+
+    - role: lit.ocp.install_agent
+      vars:
+        install_agent_delegate_to: "{{ ocp_incus_install_delegate }}"
+        install_agent_provider: external
+        install_agent_platform: none
+        install_agent_nodes: "{{ ocp_incus_nodes }}"
+        install_agent_control_plane_replicas: "{{ ocp_incus_control_plane_replicas }}"
+        install_agent_compute_replicas: "{{ ocp_incus_compute_replicas }}"
+        install_agent_agent_iso_path: "{{ ocp_incus_agent_iso_path }}"
+        install_agent_power_on_nodes: false
+        install_agent_run_assets: false
+        install_agent_run_wait: false
+        install_agent_run_post: true
+        install_agent_run_setup_nodes: true
+        install_agent_write_kube_credentials: true
+      tags:
+        - ocp
+        - ocp_install
+        - ocp_incus
+        - ocp_post
+...

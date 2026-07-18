@@ -1,0 +1,785 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
+
+engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
+runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1}"
+run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.2}}"
+pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
+nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
+nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
+nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
+rh_collections_strict="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT:-true}"
+rh_collections_requirements="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS:-${REPO_ROOT}/collections/requirements-rh.yml}"
+rh_collections_target="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections}"
+rh_collections_use="${RH_COLLECTIONS_USE:-true}"
+case "${runtime_mode}" in
+  connected)
+    run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
+    rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
+    auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}"
+    ;;
+  disconnected)
+    run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-true}"
+    rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-never}"
+    auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-false}"
+    ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_RUNTIME_MODE='${runtime_mode}' (use: connected|disconnected)." >&2
+    exit 1
+    ;;
+esac
+
+inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-auto}"
+ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-auto}"
+ssh_agent_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT:-auto}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/ansible-nav run <runbook.yml> [ansible run args...]
+  ./scripts/ansible-nav exec -- <command> [args...]
+
+Environment:
+  ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
+  ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1)
+  MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.2)
+  ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
+  ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
+  ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
+  ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
+  ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+  ANSIBLE_VAULT_PASSWORD_FILE=<owner-only file>    (Podman transport requires mode 0400 or 0600)
+  RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, for certified collection installs)
+
+  ANSIBLE_NAVIGATOR_MOUNT_*
+EOF
+}
+
+validate_tristate() {
+  local name="$1"
+  local value="$2"
+  case "${value}" in
+    auto|true|false) ;;
+    *)
+      echo "Invalid ${name}='${value}' (use: auto|true|false)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_bool() {
+  local name="$1"
+  local value="$2"
+  case "${value}" in
+    true|false) ;;
+    *)
+      echo "Invalid ${name}='${value}' (use: true|false)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_rh_collections_mode() {
+  local value="$1"
+  case "${value}" in
+    auto|always|never) ;;
+    *)
+      echo "Invalid ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE='${value}' (use: auto|always|never)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+running_inside_container() {
+  [[ -f "/run/.containerenv" || -f "/.dockerenv" ]]
+}
+
+detect_container_engine() {
+  local requested="$1"
+
+  case "${requested}" in
+    auto)
+      if command -v podman >/dev/null 2>&1; then
+        echo "podman"
+        return 0
+      fi
+      if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+        return 0
+      fi
+      # When invoked from inside the toolbox image, there is typically no
+      # container engine available. Fall back to local in-container execution.
+      if running_inside_container && [[ -x "${SCRIPT_DIR}/ansible-nav-local" ]]; then
+        echo "local"
+        return 0
+      fi
+      echo "Neither podman nor docker is installed." >&2
+      return 1
+      ;;
+    podman|docker)
+      if ! command -v "${requested}" >/dev/null 2>&1; then
+        echo "Requested container engine '${requested}' is not installed." >&2
+        return 1
+      fi
+      echo "${requested}"
+      return 0
+      ;;
+    *)
+      echo "Invalid ANSIBLE_TOOLBOX_ENGINE='${requested}' (use: auto|podman|docker)." >&2
+      return 1
+      ;;
+  esac
+}
+
+find_container_api_socket() {
+  local uid
+  uid="$(id -u)"
+
+  if [[ -S "/var/run/docker.sock" ]]; then
+    echo "/var/run/docker.sock"
+    return 0
+  fi
+
+  if [[ -S "/run/docker.sock" ]]; then
+    echo "/run/docker.sock"
+    return 0
+  fi
+
+  if [[ -S "/run/user/${uid}/podman/podman.sock" ]]; then
+    echo "/run/user/${uid}/podman/podman.sock"
+    return 0
+  fi
+
+  return 1
+}
+
+find_inventory_source() {
+  local from_env="${ANSIBLE_TOOLBOX_INVENTORY_SOURCE:-${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}}"
+  local inventory_file="${ANSIBLE_TOOLBOX_INVENTORY_FILE:-${INVENTORY_FILE:-${INVENTORY:-}}}"
+  local source_from_inventory_file
+  local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory/inventories"
+
+  if [[ -n "${from_env}" ]]; then
+    if [[ -d "${from_env}" ]]; then
+      echo "${from_env}"
+      return 0
+    fi
+    echo "Configured ANSIBLE_NAVIGATOR_INVENTORY_SOURCE does not exist: ${from_env}" >&2
+    return 1
+  fi
+
+  if [[ -n "${inventory_file}" && "${inventory_file}" == */inventories/* ]]; then
+    source_from_inventory_file="${inventory_file%%/inventories/*}/inventories"
+    if [[ -d "${source_from_inventory_file}" ]]; then
+      echo "${source_from_inventory_file}"
+      return 0
+    fi
+  fi
+
+  if [[ -d "${default_source}" ]]; then
+    echo "${default_source}"
+    return 0
+  fi
+
+  return 1
+}
+
+find_ssh_source() {
+  local from_env="${ANSIBLE_TOOLBOX_SSH_SOURCE:-${ANSIBLE_NAVIGATOR_SSH_SOURCE:-}}"
+  local default_source="${HOME}/.ssh"
+
+  if [[ -n "${from_env}" ]]; then
+    if [[ -d "${from_env}" ]]; then
+      echo "${from_env}"
+      return 0
+    fi
+    echo "Configured ANSIBLE_NAVIGATOR_SSH_SOURCE does not exist: ${from_env}" >&2
+    return 1
+  fi
+
+  if [[ -d "${default_source}" ]]; then
+    echo "${default_source}"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_image_present() {
+  local engine="$1"
+  local image_ref="$2"
+  local policy="$3"
+
+  case "${policy}" in
+    always)
+      "${engine}" pull "${image_ref}"
+      ;;
+    missing)
+      if ! "${engine}" image inspect "${image_ref}" >/dev/null 2>&1; then
+        "${engine}" pull "${image_ref}"
+      fi
+      ;;
+    never)
+      ;;
+    *)
+      echo "Invalid ANSIBLE_TOOLBOX_PULL_POLICY='${policy}' (use: missing|always|never)." >&2
+      return 1
+      ;;
+  esac
+}
+
+rewrite_host_path_for_container() {
+  local original="$1"
+  local abs=""
+
+  if [[ -z "${original}" ]]; then
+    echo "${original}"
+    return 0
+  fi
+
+  if [[ "${original}" == /runner/project/* ]]; then
+    echo "${original}"
+    return 0
+  fi
+
+  if [[ "${original}" == /* ]]; then
+    abs="${original}"
+  else
+    abs="$(readlink -f -- "${REPO_ROOT}/${original}" 2>/dev/null || true)"
+  fi
+
+  if [[ -n "${abs}" && "${abs}" == "${REPO_ROOT}"* ]]; then
+    echo "/runner/project${abs#"${REPO_ROOT}"}"
+    return 0
+  fi
+
+  echo "${original}"
+}
+
+map_file_for_container() {
+  local original="$1"
+  local target="$2"
+  local rewritten=""
+
+  rewritten="$(rewrite_host_path_for_container "${original}")"
+  if [[ "${rewritten}" != "${original}" ]]; then
+    mapped_file_for_container_result="${rewritten}"
+    return 0
+  fi
+
+  if [[ ! -f "${original}" ]]; then
+    mapped_file_for_container_result="${original}"
+    return 0
+  fi
+
+  container_args+=(-v "${original}:${target}:ro")
+  mapped_file_for_container_result="${target}"
+}
+
+add_env_if_set() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ -n "${value}" ]]; then
+    container_args+=(-e "${name}=${value}")
+  fi
+}
+
+add_rewritten_run_env_if_set() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ -n "${value}" ]]; then
+    run_nav_env+=("${name}=$(rewrite_host_path_for_container "${value}")")
+  fi
+}
+
+add_mount() {
+  local source="$1"
+  local target="$2"
+  local mode="${3:-}"
+  local mount_spec="${source}:${target}"
+
+  if [[ -n "${mode}" ]]; then
+    mount_spec+=":${mode}"
+  fi
+
+  container_args+=(-v "${mount_spec}")
+}
+
+validate_owner_only_secret_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" ]]; then
+    echo "${label} must reference a regular, non-symlink file." >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' -- "${path}")"
+  owner="$(stat -c '%u' -- "${path}")"
+  case "${mode}" in
+    400|600) ;;
+    *)
+      echo "${label} must have mode 0400 or 0600 (found ${mode})." >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${owner}" != "$(id -u)" ]]; then
+    echo "${label} must be owned by the effective user." >&2
+    return 1
+  fi
+}
+
+mount_requested_source() {
+  local requested="$1"
+  local finder="$2"
+  local target="$3"
+  local mode="$4"
+  local source=""
+
+  case "${requested}" in
+    auto)
+      if source="$("${finder}")"; then
+        add_mount "${source}" "${target}" "${mode}"
+        mounted_source_result="${source}"
+        return 0
+      fi
+      return 1
+      ;;
+    true)
+      source="$("${finder}")" || exit 1
+      add_mount "${source}" "${target}" "${mode}"
+      mounted_source_result="${source}"
+      return 0
+      ;;
+    false)
+      return 1
+      ;;
+  esac
+}
+
+find_ssh_agent_socket() {
+  local from_env="${SSH_AUTH_SOCK:-}"
+  local resolved=""
+
+  if [[ -z "${from_env}" ]]; then
+    return 1
+  fi
+
+  resolved="$(readlink -f -- "${from_env}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && -S "${resolved}" ]]; then
+    echo "${resolved}"
+    return 0
+  fi
+
+  if [[ -S "${from_env}" ]]; then
+    echo "${from_env}"
+    return 0
+  fi
+
+  return 1
+}
+
+rewrite_inventory_spec_for_container() {
+  local spec="$1"
+  local out=()
+  local part
+  local inventory_source_prefix="${inventory_source:-}"
+  IFS=',' read -r -a parts <<< "${spec}"
+
+  for part in "${parts[@]}"; do
+    if [[ -n "${inventory_source_prefix}" && "${part}" == "${inventory_source_prefix}"/* ]]; then
+      out+=("/runner/project/inventories/${part#"${inventory_source_prefix}"/}")
+      continue
+    fi
+
+    case "${part}" in
+      inventories/*)
+        out+=("/runner/project/${part}")
+        ;;
+      ./inventories/*)
+        out+=("/runner/project/${part#./}")
+        ;;
+      "${REPO_ROOT}"/inventories/*)
+        out+=("/runner/project/inventories/${part#"${REPO_ROOT}"/inventories/}")
+        ;;
+      *)
+        out+=("${part}")
+        ;;
+    esac
+  done
+
+  local joined=""
+  local i
+  for i in "${!out[@]}"; do
+    if [[ "${i}" -gt 0 ]]; then
+      joined+=","
+    fi
+    joined+="${out[$i]}"
+  done
+  echo "${joined}"
+}
+
+tags_contain_aap() {
+  local spec="${1:-}"
+  local tag
+
+  IFS=',' read -r -a tags <<< "${spec}"
+  for tag in "${tags[@]}"; do
+    tag="$(printf '%s' "${tag}" | tr '[:upper:]' '[:lower:]' | xargs)"
+    case "${tag}" in
+      aap|aap_*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+should_prepare_rh_collections() {
+  local mode="$1"
+  shift
+  local args=("$@")
+  local playbook_path=""
+  local current=""
+
+  case "${mode}" in
+    never)
+      return 1
+      ;;
+    always)
+      return 0
+      ;;
+    auto)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if [[ ${#args[@]} -gt 0 ]]; then
+    playbook_path="${args[0]}"
+    if [[ "${playbook_path,,}" == *aap* ]]; then
+      return 0
+    fi
+  fi
+
+  local i=0
+  while (( i < ${#args[@]} )); do
+    current="${args[$i]}"
+    case "${current}" in
+      -t|--tags)
+        if (( i + 1 < ${#args[@]} )) && tags_contain_aap "${args[$((i + 1))]}"; then
+          return 0
+        fi
+        ((i+=2))
+        continue
+        ;;
+      --tags=*)
+        if tags_contain_aap "${current#--tags=}"; then
+          return 0
+        fi
+        ;;
+    esac
+    ((i+=1))
+  done
+
+  return 1
+}
+
+rewrite_inventory_args() {
+  local -n args_ref="$1"
+  local out=()
+  local i=0
+  local current
+
+  while (( i < ${#args_ref[@]} )); do
+    current="${args_ref[$i]}"
+    case "${current}" in
+      -i|--inventory)
+        if (( i + 1 < ${#args_ref[@]} )); then
+          out+=("${current}" "$(rewrite_inventory_spec_for_container "${args_ref[$((i + 1))]}")")
+          ((i+=2))
+          continue
+        fi
+        out+=("${current}")
+        ;;
+      --inventory=*)
+        out+=("--inventory=$(rewrite_inventory_spec_for_container "${current#--inventory=}")")
+        ;;
+      -i*)
+        if [[ "${current}" == "-i" ]]; then
+          out+=("${current}")
+        else
+          out+=("-i$(rewrite_inventory_spec_for_container "${current#-i}")")
+        fi
+        ;;
+      *)
+        out+=("${current}")
+        ;;
+    esac
+    ((i+=1))
+  done
+
+  args_ref=("${out[@]}")
+}
+
+validate_tristate "ANSIBLE_TOOLBOX_MOUNT_INVENTORIES" "${inventory_mount_requested}"
+validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH" "${ssh_mount_requested}"
+validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT" "${ssh_agent_mount_requested}"
+validate_rh_collections_mode "${rh_collections_mode}"
+validate_bool "ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT" "${rh_collections_strict}"
+validate_bool "RH_COLLECTIONS_USE" "${rh_collections_use}"
+validate_bool "ANSIBLE_TOOLBOX_RUN_EE_PRELOAD" "${run_ee_preload}"
+
+case "${nav_mode}" in
+  stdout|interactive) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_MODE='${nav_mode}' (use: stdout|interactive)." >&2
+    exit 1
+    ;;
+esac
+
+if [[ $# -ge 1 ]]; then
+  case "$1" in
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+  esac
+fi
+
+engine="$(detect_container_engine "${engine_requested}")"
+
+if [[ "${engine}" == "local" ]]; then
+  if [[ "${1:-}" == "run" ]]; then
+    echo "Local fallback is not supported for 'run'." >&2
+    echo "Use host wrapper execution with podman socket: /run/user/$(id -u)/podman/podman.sock" >&2
+    echo "Hint: systemctl --user enable --now podman.socket" >&2
+    exit 1
+  fi
+  exec "${SCRIPT_DIR}/ansible-nav-local" "$@"
+fi
+
+container_args=("${engine}" run --rm)
+if [[ -t 0 && -t 1 ]]; then
+  container_args+=(-it)
+fi
+
+if [[ "${engine}" == "podman" ]]; then
+  container_args+=(--security-opt label=disable)
+fi
+
+container_args+=(-v "${REPO_ROOT}:/runner/project" -w /runner/project)
+
+inventory_mounted=false
+ssh_agent_mounted=false
+inventory_source=""
+mounted_source_result=""
+run_ee_tar=""
+secrets_dir=""
+mapped_file_for_container_result=""
+
+cleanup() {
+  if [[ -n "${run_ee_tar}" ]]; then
+    rm -f -- "${run_ee_tar}"
+  fi
+  if [[ -n "${secrets_dir}" ]]; then
+    chmod -R u+w -- "${secrets_dir}" 2>/dev/null || true
+    rm -rf -- "${secrets_dir}"
+  fi
+}
+trap cleanup EXIT
+
+if mount_requested_source "${inventory_mount_requested}" find_inventory_source "/runner/project/inventories" "ro"; then
+  inventory_source="${mounted_source_result}"
+  inventory_mounted=true
+fi
+
+mount_requested_source "${ssh_mount_requested}" find_ssh_source "/runner/.ssh" "ro" || true
+
+if mount_requested_source "${ssh_agent_mount_requested}" find_ssh_agent_socket "/runner/ssh-agent.sock" ""; then
+  ssh_agent_mounted=true
+fi
+
+collections_path="/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+
+container_args+=(
+  -e "HOME=/runner"
+  -e "ANSIBLE_HOME=/tmp/.ansible"
+  -e "ANSIBLE_GALAXY_CACHE_DIR=/tmp/.ansible/galaxy_cache"
+  -e "XDG_CACHE_HOME=${nav_cache_dir}"
+  -e "ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
+  -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
+  -e "ANSIBLE_LOCAL_TEMP=/tmp/.ansible/tmp"
+  -e "ANSIBLE_REMOTE_TEMP=${ANSIBLE_REMOTE_TEMP:-~/.ansible/tmp}"
+  -e "ANSIBLE_COLLECTIONS_PATH=${collections_path}"
+)
+
+add_env_if_set VAULT_ADDR
+add_env_if_set VAULT_SKIP_VERIFY
+add_env_if_set VAULT_TOKEN
+add_env_if_set RH_AUTOMATION_HUB_TOKEN
+
+if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
+  if [[ "${engine}" != "podman" ]]; then
+    echo "Secure ANSIBLE_VAULT_PASSWORD_FILE transport is supported only with Podman." >&2
+    exit 1
+  fi
+
+  validate_owner_only_secret_file \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "ANSIBLE_VAULT_PASSWORD_FILE"
+  secret_runtime_dir="${TMPDIR:-${XDG_RUNTIME_DIR:-/tmp}}"
+  secrets_dir="$(mktemp -d "${secret_runtime_dir%/}/modulix-ansible-secrets.XXXXXX")"
+  chmod 0700 "${secrets_dir}"
+  install -m 0400 \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "${secrets_dir}/ansible-vault-pass.txt"
+  validate_owner_only_secret_file \
+    "${secrets_dir}/ansible-vault-pass.txt" \
+    "staged ANSIBLE_VAULT_PASSWORD_FILE"
+  add_mount "${secrets_dir}" "/runner/secrets" "ro"
+  vault_pass_file_in_container="/runner/secrets/ansible-vault-pass.txt"
+  container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
+fi
+
+for pass_var in \
+  AUTOMATION_HUB_GALAXY_SERVER \
+  AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED \
+  AUTOMATION_HUB_GALAXY_SERVER_VALIDATED \
+  RH_COLLECTIONS_USE \
+  RH_COLLECTIONS_REQUIREMENTS_FILE \
+  RH_COLLECTIONS_TARGET \
+  RH_COLLECTIONS_STRICT \
+  RH_COLLECTIONS_REQUIRED; do
+  add_env_if_set "${pass_var}"
+done
+
+if [[ "${ssh_agent_mounted}" == true ]]; then
+  container_args+=(-e "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
+fi
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+subcommand="$1"
+shift
+
+in_container_cmd=()
+run_rh_collection_preflight=false
+execution_image="${image}"
+case "${subcommand}" in
+  run)
+    run_nav_env=(
+      "ANSIBLE_TOOLBOX_NAV_MODE=${nav_mode}"
+      "ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
+      "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
+      "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
+      "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
+    )
+
+    if [[ -n "${auto_collections}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${auto_collections}")
+    fi
+
+    add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS
+    add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH
+    add_rewritten_run_env_if_set ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE
+
+    container_args+=(--privileged --user 0:0)
+    if [[ $# -lt 1 ]]; then
+      echo "Missing runbook path for 'run'." >&2
+      usage
+      exit 1
+    fi
+    run_args=("$@")
+    if [[ "${inventory_mounted}" == true ]]; then
+      rewrite_inventory_args run_args
+    fi
+    if [[ "${rh_collections_use}" == "true" ]] && should_prepare_rh_collections "${rh_collections_mode}" "${run_args[@]}"; then
+      run_rh_collection_preflight=true
+    fi
+    if [[ "${run_ee_preload}" == "true" ]]; then
+      ensure_image_present "${engine}" "${run_ee_image}" "${pull_policy}"
+      run_ee_tar="$(mktemp "${TMPDIR:-/tmp}/modulix-run-ee.XXXXXX.tar")"
+      "${engine}" save -o "${run_ee_tar}" "${run_ee_image}"
+      container_args+=(-v "${run_ee_tar}:/runner/run-ee.tar:ro")
+      run_nav_env+=("ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never")
+    fi
+    execution_image="${image}"
+    in_container_cmd=(
+      env
+      "${run_nav_env[@]}"
+      /runner/project/scripts/ansible-nav-local
+      run
+      "${run_args[@]}"
+    )
+    if [[ "${run_ee_preload}" == "true" ]]; then
+      in_container_cmd=(bash -lc 'set -euo pipefail; podman load -i /runner/run-ee.tar; exec "$@"' bash "${in_container_cmd[@]}")
+    fi
+    ;;
+  exec)
+    if [[ -n "${secrets_dir}" ]]; then
+      # Exec retains the invoking numeric UID, so keep that UID mapped to the
+      # staged directory owner instead of relying on Podman's root mapping.
+      container_args+=(--userns keep-id)
+    fi
+    container_args+=(--user "$(id -u):$(id -g)")
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+    if container_api_socket="$(find_container_api_socket)"; then
+      container_args+=(-v "${container_api_socket}:/var/run/docker.sock")
+      container_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
+    fi
+    if [[ $# -eq 0 ]]; then
+      in_container_cmd=(/bin/bash)
+    else
+      in_container_cmd=("$@")
+    fi
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unsupported subcommand '${subcommand}'. Use 'run' or 'exec'." >&2
+    usage
+    exit 1
+    ;;
+esac
+
+ensure_image_present "${engine}" "${execution_image}" "${pull_policy}"
+
+if [[ "${run_rh_collection_preflight}" == true ]]; then
+  rh_collections_requirements_in_container="$(rewrite_host_path_for_container "${rh_collections_requirements}")"
+  rh_collections_target_in_container="$(rewrite_host_path_for_container "${rh_collections_target}")"
+
+  echo "Running RH collection preflight..."
+  "${container_args[@]}" "${execution_image}" \
+    env \
+    "RH_COLLECTIONS_REQUIREMENTS_FILE=${rh_collections_requirements_in_container}" \
+    "RH_COLLECTIONS_TARGET=${rh_collections_target_in_container}" \
+    "RH_COLLECTIONS_STRICT=${rh_collections_strict}" \
+    /runner/project/scripts/install-rh-collections
+fi
+
+if [[ -n "${run_ee_tar}" || -n "${secrets_dir}" ]]; then
+  "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
+else
+  exec "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
+fi

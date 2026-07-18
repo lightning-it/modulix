@@ -1,0 +1,9 @@
+---
+extends: default
+
+rules:
+  # Use 120 chars across repos (ansible-lint/ansible best practice in this workspace).
+  line-length:
+    max: 120
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true

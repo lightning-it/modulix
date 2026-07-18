@@ -1,0 +1,473 @@
+---
+# Leave Rescue only after explicit approval, verify the generated Dropbear and
+# OpenSSH host keys against the fingerprints stored on the new /boot, and wait
+# while the operator performs the one-time interactive recovery unlock.
+- name: Perform the first encrypted Ubuntu boot
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+
+  pre_tasks:
+    - name: Require one explicit host and boot confirmation
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - not ansible_check_mode
+          - hetzner_installimage_expected_disks is sequence
+          - hetzner_installimage_expected_disks is not string
+          - >-
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length > 0
+          - >-
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | map(attribute='serial') | list | unique | length
+            ==
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | list | length
+          - >-
+            not (hetzner_installimage_layout.software_raid.enabled | bool)
+            or hetzner_installimage_layout.software_raid.level | int == 1
+          - >-
+            hetzner_baremetal_secret_backend
+            in ['ansible_vault_bootstrap', 'hashicorp_vault']
+          - >-
+            hetzner_first_boot_confirmation | default('')
+            == 'BOOT:' ~ inventory_hostname
+        fail_msg: >-
+          Use --limit with one exact inventory FQDN and pass
+          hetzner_first_boot_confirmation=BOOT:<inventory-hostname> outside
+          check mode. The inventory must declare unique approved system disks
+          and, when enabled, RAID level 1.
+      tags: [always]
+
+  tasks:
+    - name: Read fingerprints only from the approved installed boot filesystem
+      ansible.builtin.shell: |
+        set -euo pipefail
+        export LC_ALL=C
+
+        expected_serials() {
+          printf '%s\n' "${LIT_EXPECTED_SYSTEM_SERIALS}" |
+            tr ' ' '\n' | sed '/^$/d' | sort -u
+        }
+
+        device_serials() {
+          local device="$1"
+          local disk serial
+
+          while read -r disk; do
+            test -n "${disk}" || continue
+            serial="$(
+              lsblk -dn -o SERIAL -- "${disk}" |
+                sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+            )"
+            test -n "${serial}"
+            printf '%s\n' "${serial}"
+          done < <(
+            lsblk -srpn -o PATH,TYPE -- "${device}" |
+              awk '$2 == "disk" {print $1}' | sort -u
+          )
+        }
+
+        has_approved_ancestry() {
+          test "$(expected_serials)" = "$(device_serials "$1" | sort -u)"
+        }
+
+        expected_device_type=part
+        if test "${LIT_EXPECTED_RAID_ENABLED}" = 1; then
+          expected_device_type=raid1
+        fi
+
+        root_candidates=0
+        while read -r device fstype type; do
+          test "${fstype}" = crypto_LUKS || continue
+          has_approved_ancestry "${device}" || continue
+          test "${type}" = "${expected_device_type}"
+          root_candidates=$((root_candidates + 1))
+        done < <(lsblk -rpn -o PATH,FSTYPE,TYPE | sort -u)
+        test "${root_candidates}" -eq 1
+
+        work="$(mktemp -d /mnt/lit-first-boot-keys.XXXXXX)"
+        mounted=false
+        cleanup() {
+          if ${mounted}; then
+            umount "${work}"
+          fi
+          rmdir "${work}"
+        }
+        trap cleanup EXIT
+
+        found=0
+        while read -r device fstype type; do
+          test "${fstype}" = ext4 || continue
+          test "${type}" = "${expected_device_type}" || continue
+          has_approved_ancestry "${device}" || continue
+          mount -o ro,nosuid,nodev,noexec "${device}" "${work}" || continue
+          mounted=true
+          marker="${work}/lit-first-boot-hostkey-fingerprints"
+          if test -e "${marker}"; then
+            test -f "${marker}"
+            test "$(stat -c '%u:%g:%a' "${marker}")" = 0:0:644
+            test "$(stat -c '%s' "${marker}")" -le 512
+            test "$(wc -l <"${marker}")" -eq 2
+            test "$(grep -Ec '^LIT_DROPBEAR_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$' "${marker}")" -eq 1
+            test "$(grep -Ec '^LIT_OPENSSH_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$' "${marker}")" -eq 1
+            cat "${marker}"
+            found=$((found + 1))
+          fi
+          umount "${work}"
+          mounted=false
+        done < <(lsblk -rpn -o PATH,FSTYPE,TYPE | sort -u)
+        test "${found}" -eq 1
+      args:
+        executable: /bin/bash
+      register: _first_boot_expected_fingerprints
+      changed_when: false
+      check_mode: false
+      environment:
+        LIT_EXPECTED_SYSTEM_SERIALS: >-
+          {{
+            hetzner_installimage_expected_disks
+            | selectattr('purpose', 'equalto', 'system')
+            | map(attribute='serial') | list | sort | join(' ')
+          }}
+        LIT_EXPECTED_RAID_ENABLED: >-
+          {{
+            (hetzner_installimage_layout.software_raid.enabled | bool)
+            | ternary('1', '0')
+          }}
+
+    - name: Require one exact generated fingerprint line for each SSH service
+      ansible.builtin.assert:
+        that:
+          - _first_boot_expected_fingerprints.stdout_lines | length == 2
+          - >-
+            _first_boot_expected_fingerprints.stdout_lines
+            | select(
+                'match',
+                '^LIT_DROPBEAR_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$'
+              )
+            | list | length == 1
+          - >-
+            _first_boot_expected_fingerprints.stdout_lines
+            | select(
+                'match',
+                '^LIT_OPENSSH_HOSTKEY_SHA256=SHA256:[A-Za-z0-9+/]{43}$'
+              )
+            | list | length == 1
+        fail_msg: >-
+          The approved installed /boot does not contain exactly one valid
+          generated Dropbear and OpenSSH Ed25519 fingerprint.
+
+    - name: Decode the expected first-boot fingerprints
+      ansible.builtin.set_fact:
+        _first_boot_dropbear_fingerprint: >-
+          {{
+            _first_boot_expected_fingerprints.stdout
+            | regex_search(
+                '(?m)^LIT_DROPBEAR_HOSTKEY_SHA256=(SHA256:[A-Za-z0-9+/]{43})$',
+                '\1'
+              )
+            | first
+          }}
+        _first_boot_openssh_fingerprint: >-
+          {{
+            _first_boot_expected_fingerprints.stdout
+            | regex_search(
+                '(?m)^LIT_OPENSSH_HOSTKEY_SHA256=(SHA256:[A-Za-z0-9+/]{43})$',
+                '\1'
+              )
+            | first
+          }}
+      changed_when: false
+
+    - name: Reboot from Rescue into encrypted Ubuntu
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - reboot
+      async: 1
+      poll: 0
+      changed_when: true
+      failed_when: false
+      when: not (hetzner_first_boot_resume | default(false) | bool)
+
+    - name: Wait for Dropbear recovery SSH
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ luks_unlock_dropbear_port | int }}"
+        state: started
+        connect_timeout: 5
+        timeout: 900
+      delegate_to: localhost
+      become: false
+
+    - name: Scan the generated Dropbear host key
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - -q
+          - -T
+          - "10"
+          - -p
+          - "{{ luks_unlock_dropbear_port | int }}"
+          - -t
+          - ed25519
+          - "{{ ansible_host }}"
+      delegate_to: localhost
+      become: false
+      register: _first_boot_dropbear_keyscan
+      changed_when: false
+
+    - name: Require exactly one valid generated Dropbear key line
+      ansible.builtin.assert:
+        that:
+          - _first_boot_dropbear_keyscan.rc == 0
+          - _first_boot_dropbear_keyscan.stdout_lines | length == 1
+          - _first_boot_dropbear_keyscan.stdout_lines[0].split() | length == 3
+          - >-
+            _first_boot_dropbear_keyscan.stdout_lines[0].split()[0]
+            ==
+            '[' ~ ansible_host ~ ']:'
+            ~ (luks_unlock_dropbear_port | string)
+          - >-
+            _first_boot_dropbear_keyscan.stdout_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _first_boot_dropbear_keyscan.stdout_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          Dropbear keyscan did not return exactly one valid Ed25519 host key;
+          nothing was pinned.
+
+    - name: Create a temporary Dropbear key file
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .pub
+      delegate_to: localhost
+      become: false
+      register: _first_boot_dropbear_key_file
+      changed_when: false
+
+    - name: Validate and pin the generated Dropbear key
+      block:
+        - name: Store the scanned Dropbear key
+          ansible.builtin.copy:
+            content: "{{ _first_boot_dropbear_keyscan.stdout | trim }}\n"
+            dest: "{{ _first_boot_dropbear_key_file.path }}"
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Calculate the Dropbear fingerprint
+          ansible.builtin.command:
+            argv:
+              - ssh-keygen
+              - -E
+              - sha256
+              - -lf
+              - "{{ _first_boot_dropbear_key_file.path }}"
+          delegate_to: localhost
+          become: false
+          register: _first_boot_dropbear_fingerprint_actual
+          changed_when: false
+
+        - name: Require the generated Dropbear fingerprint
+          ansible.builtin.assert:
+            that:
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout_lines
+                | length == 1
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout.split()
+                | length >= 2
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout.split()[1]
+                is match('^SHA256:[A-Za-z0-9+/]{43}$')
+              - >-
+                _first_boot_dropbear_fingerprint_actual.stdout.split()[1]
+                == _first_boot_dropbear_fingerprint
+            fail_msg: >-
+              The first-boot Dropbear host key is not the generated key.
+
+        - name: Pin the generated Dropbear host key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: >-
+              {{
+                '[' ~ inventory_hostname ~ ']:'
+                ~ (luks_unlock_dropbear_port | string)
+              }}
+            key: >-
+              {{
+                '[' ~ inventory_hostname ~ ']:'
+                ~ (luks_unlock_dropbear_port | string)
+                ~ ',[' ~ ansible_host ~ ']:'
+                ~ (luks_unlock_dropbear_port | string)
+                ~ ' '
+                ~ _first_boot_dropbear_keyscan.stdout.split(' ', 1)[1]
+              }}
+            state: present
+          delegate_to: localhost
+          become: false
+      always:
+        - name: Remove the temporary Dropbear key file
+          ansible.builtin.file:
+            path: "{{ _first_boot_dropbear_key_file.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+    - name: Pause for the operator-triggered no-output encrypted-root unlock
+      ansible.builtin.pause:
+        prompt: >-
+          The generated Dropbear key is verified and pinned. In a second
+          terminal run the dedicated 10-bootstrap-unlock.yml command
+          from the private operator guide for this exact host. It decrypts the
+          bootstrap escrow only in memory and supplies the passphrase through
+          SSH stdin under no_log. After it reports success, press Enter here.
+
+    - name: Wait for installed OpenSSH
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        state: started
+        connect_timeout: 5
+        timeout: 900
+      delegate_to: localhost
+      become: false
+
+    - name: Scan the generated OpenSSH host key
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - -q
+          - -T
+          - "10"
+          - -t
+          - ed25519
+          - "{{ ansible_host }}"
+      delegate_to: localhost
+      become: false
+      register: _first_boot_openssh_keyscan
+      changed_when: false
+
+    - name: Require exactly one valid generated OpenSSH key line
+      ansible.builtin.assert:
+        that:
+          - _first_boot_openssh_keyscan.rc == 0
+          - _first_boot_openssh_keyscan.stdout_lines | length == 1
+          - _first_boot_openssh_keyscan.stdout_lines[0].split() | length == 3
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[0]
+            == ansible_host
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          OpenSSH keyscan did not return exactly one valid Ed25519 host key;
+          the Rescue keys were retained and nothing was pinned.
+
+    - name: Create a temporary OpenSSH key file
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .pub
+      delegate_to: localhost
+      become: false
+      register: _first_boot_openssh_key_file
+      changed_when: false
+
+    - name: Validate and pin the generated OpenSSH key
+      block:
+        - name: Store the scanned OpenSSH key
+          ansible.builtin.copy:
+            content: "{{ _first_boot_openssh_keyscan.stdout | trim }}\n"
+            dest: "{{ _first_boot_openssh_key_file.path }}"
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+          changed_when: false
+        - name: Calculate the OpenSSH fingerprint
+          ansible.builtin.command:
+            argv:
+              - ssh-keygen
+              - -E
+              - sha256
+              - -lf
+              - "{{ _first_boot_openssh_key_file.path }}"
+          delegate_to: localhost
+          become: false
+          register: _first_boot_openssh_fingerprint_actual
+          changed_when: false
+
+        - name: Require the generated OpenSSH fingerprint
+          ansible.builtin.assert:
+            that:
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout_lines
+                | length == 1
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()
+                | length >= 2
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()[1]
+                is match('^SHA256:[A-Za-z0-9+/]{43}$')
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()[1]
+                == _first_boot_openssh_fingerprint
+            fail_msg: "The installed OpenSSH host key is not the generated key."
+
+        - name: Remove the previous Rescue hostname key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Remove the previous Rescue address key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ ansible_host }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Pin the generated installed OpenSSH host key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ inventory_hostname }}"
+            key: >-
+              {{ inventory_hostname }},{{ ansible_host }}
+              {{ _first_boot_openssh_keyscan.stdout.split(' ', 1)[1] }}
+            state: present
+          delegate_to: localhost
+          become: false
+      always:
+        - name: Remove the temporary OpenSSH key file
+          ansible.builtin.file:
+            path: "{{ _first_boot_openssh_key_file.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          changed_when: false

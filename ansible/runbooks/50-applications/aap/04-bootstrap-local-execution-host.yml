@@ -1,0 +1,19 @@
+---
+# Bootstrap an AAP host for local execution.
+# The reusable logic lives in lit.supplementary.aap_bootstrap.
+
+- name: Bootstrap AAP local-execution host substrate
+  hosts: aaps
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  tasks:
+    - name: Bootstrap local-execution host substrate
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_bootstrap
+        apply:
+          tags: [aap, aap_bootstrap]
+      tags:
+        - aap
+        - aap_bootstrap

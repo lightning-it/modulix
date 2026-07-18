@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "resource-id": "benchmark_meta",
+      "resource-type": "Command",
+      "property": "exit-status",
+      "result": 0,
+      "skipped": false,
+      "successful": true,
+      "meta": {
+        "benchmark_os": "UBUNTU24",
+        "benchmark_type": "CIS",
+        "benchmark_version": "1.0.0",
+        "host_system_type": "Server"
+      }
+    },
+    {
+      "resource-id": "cramfs_disabled",
+      "resource-type": "File",
+      "property": "contents",
+      "result": 2,
+      "skipped": true,
+      "successful": true,
+      "meta": {
+        "CIS_ID": "1.1.1.1",
+        "server": 1,
+        "workstation": 1
+      }
+    }
+  ],
+  "summary": {
+    "failed-count": 0,
+    "skipped-count": 1,
+    "test-count": 2
+  }
+}

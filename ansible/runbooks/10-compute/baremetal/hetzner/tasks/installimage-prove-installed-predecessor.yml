@@ -1,0 +1,78 @@
+---
+- name: Verify installed predecessor {{ hetzner_installimage_order_host }}
+  ansible.builtin.shell: |
+    set -euo pipefail
+    export LC_ALL=C
+
+    test "$(hostname -f)" = "${LIT_EXPECTED_HOSTNAME}"
+    if test -n "${LIT_EXPECTED_OS_ID}"; then
+      source /etc/os-release
+      test "${ID}" = "${LIT_EXPECTED_OS_ID}"
+      test "${VERSION_ID}" = "${LIT_EXPECTED_OS_VERSION_ID}"
+    fi
+
+    if test "${LIT_EXPECTED_ROOT_ENCRYPTED}" = 1; then
+      test -s /etc/crypttab
+      root_source="$(findmnt -n -o SOURCE /)"
+      test -n "${root_source}"
+      lsblk -srno TYPE -- "${root_source}" | grep -Fxq crypt
+    fi
+
+    test "$(
+      ip -4 -o address show dev "${LIT_EXPECTED_MGMT_INTERFACE}" |
+        awk '{print $4}' |
+        grep -Fxc "${LIT_EXPECTED_MGMT_ADDRESS}"
+    )" -eq 1
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ hetzner_installimage_order_host }}"
+  become: true
+  vars:
+    ansible_user: >-
+      {{ hostvars[hetzner_installimage_order_host].deploy_ssh_user }}
+    ansible_private_key_file: >-
+      {{ hostvars[hetzner_installimage_order_host].ansible_private_key_file }}
+    ansible_ssh_common_args: >-
+      {{ hostvars[hetzner_installimage_order_host].ansible_ssh_common_args }}
+    ansible_become: true
+    ansible_become_flags: "-n"
+    _hetzner_predecessor_expected_os_release: >-
+      {{
+        hostvars[hetzner_installimage_order_host]
+        .hetzner_installimage_expected_os_release
+        | default({})
+      }}
+    _hetzner_predecessor_layout: >-
+      {{
+        hostvars[hetzner_installimage_order_host]
+        .hetzner_installimage_layout
+      }}
+    _hetzner_predecessor_root_encrypted: >-
+      {{
+        _hetzner_predecessor_layout.partitions
+        | selectattr('crypt', 'defined')
+        | selectattr('crypt', 'equalto', true)
+        | list
+        | length > 0
+      }}
+  environment:
+    LIT_EXPECTED_HOSTNAME: "{{ hetzner_installimage_order_host }}"
+    LIT_EXPECTED_OS_ID: >-
+      {{ _hetzner_predecessor_expected_os_release.id | default('') }}
+    LIT_EXPECTED_OS_VERSION_ID: >-
+      {{ _hetzner_predecessor_expected_os_release.version_id | default('') }}
+    LIT_EXPECTED_ROOT_ENCRYPTED: >-
+      {{ _hetzner_predecessor_root_encrypted | ternary('1', '0') }}
+    LIT_EXPECTED_MGMT_INTERFACE: >-
+      {{ hostvars[hetzner_installimage_order_host].mgmt_network.vlan_interface }}
+    LIT_EXPECTED_MGMT_ADDRESS: >-
+      {{
+        hostvars[hetzner_installimage_order_host].mgmt_network.ipv4
+        ~ '/'
+        ~ (
+          hostvars[hetzner_installimage_order_host].mgmt_subnet.prefix_length
+          | string
+        )
+      }}
+  changed_when: false
+  check_mode: false

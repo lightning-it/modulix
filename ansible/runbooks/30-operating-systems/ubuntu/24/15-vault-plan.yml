@@ -1,0 +1,59 @@
+---
+- name: Build one immutable LIT Vault lifecycle plan
+  hosts: hetzner_baremetal
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one exact Vault host and supported operation
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_vault.host
+          - >-
+            vault_lifecycle_operation
+            in ['deploy', 'initialize', 'initialize_resume', 'initialize_finalize']
+        fail_msg: >-
+          Use --limit with the exact inventory-declared Vault host and set
+          vault_lifecycle_operation to deploy, initialize, initialize_resume,
+          or initialize_finalize.
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Build the lifecycle plan through an ephemeral Vault transport
+      block:
+        - name: Establish the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
+        - name: Build and persist the fresh immutable Vault lifecycle plan
+          ansible.builtin.include_tasks: tasks/build-vault-lifecycle-plan.yml
+
+        - name: Report the reviewed Vault lifecycle plan identity
+          ansible.builtin.debug:
+            msg:
+              - "operation={{ vault_lifecycle_operation }}"
+              - "target={{ inventory_hostname }}"
+              - "plan_sha256={{ _vault_lifecycle_plan_sha256 }}"
+              - "plan_path={{ _vault_lifecycle_plan_path }}"
+              - >-
+                confirmation={{
+                  {
+                    'deploy': 'DEPLOY_VAULT',
+                    'initialize': 'INITIALIZE_VAULT',
+                    'initialize_resume': 'RESUME_VAULT_INITIALIZATION',
+                    'initialize_finalize': 'FINALIZE_VAULT_INITIALIZATION'
+                  }[vault_lifecycle_operation]
+                }}:{{ inventory_hostname }}:{{ _vault_lifecycle_plan_sha256 }}
+
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]

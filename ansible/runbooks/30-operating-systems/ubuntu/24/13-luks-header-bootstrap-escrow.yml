@@ -1,0 +1,59 @@
+---
+# Guard the Ubuntu 24 bootstrap phase, then delegate distribution-neutral
+# LUKS2 header capture and immutable controller escrow to lit.foundational.
+- name: PreCheck (require one enabled Ubuntu header-escrow target)
+  hosts: ubuntu24
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require one exact enabled target and bootstrap backend
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - (luks_header_escrow_enabled | default(false)) is boolean
+          - luks_header_escrow_enabled | default(false)
+          - >-
+            luks_header_escrow_secret_backend | default('')
+            == 'ansible_vault_bootstrap'
+          - lookup('ansible.builtin.env', 'PWD') | length > 0
+          - not ansible_check_mode
+        fail_msg: >-
+          Use --limit with one exact Ubuntu 24 inventory FQDN that explicitly
+          enables LUKS-header escrow while ansible_vault_bootstrap is selected.
+          This runbook does not operate in check mode because it must inspect a
+          real LUKS2 header.
+        quiet: true
+      tags: [always]
+
+    - name: Validate the controller escrow contract before host access
+      ansible.builtin.include_role:
+        name: lit.foundational.luks_header_escrow
+        tasks_from: preflight
+      tags: [always]
+
+- name: Back up one Ubuntu 24.04 LUKS2 header to immutable ciphertext
+  hosts: ubuntu24
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one enabled Ubuntu 24.04 target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - (luks_header_escrow_enabled | default(false)) is boolean
+          - luks_header_escrow_enabled | default(false)
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '24.04'
+        fail_msg: "This runbook supports one explicitly enabled Ubuntu 24.04 target only."
+        quiet: true
+      tags: [always]
+
+  roles:
+    - role: lit.foundational.luks_header_escrow

@@ -1,0 +1,35 @@
+---
+# AAP prepared host baseline controller.
+# The reusable logic lives in lit.supplementary.aap_baseline.
+
+- name: Build AAP baseline target from local inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Build baseline target
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_baseline
+        tasks_from: controller
+        apply:
+          tags: [aap, aap_baseline]
+      tags:
+        - aap
+        - aap_baseline
+
+- name: Verify and prepare AAP customer baseline host
+  hosts: aap_baseline_targets
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Verify and prepare baseline host
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_baseline
+        tasks_from: target
+        apply:
+          tags: [aap, aap_baseline]
+      tags:
+        - aap
+        - aap_baseline

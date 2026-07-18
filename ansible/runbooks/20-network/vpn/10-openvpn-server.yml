@@ -1,0 +1,17 @@
+---
+- name: Setup OpenVPN server
+  hosts: all
+  gather_facts: true
+  become: true
+  roles:
+    - role: openvpn
+      vars:
+        openvpn_server: true
+        openvpn_sync_certs: true
+        openvpn_client_config: "{{ ovpn_client_config | default(false) }}"
+        clients: "{{ ovpn_clients | default('') }}"
+        openvpn_client_configs: "{{ ovpn_client_configs | default({}) }}"
+        openvpn_addl_client_options: "{{ ovpn_addl_client_options | default([]) }}"
+        openvpn_server_routes: "{{ ovpn_server_routes | default('') }}"
+        openvpn_proto: "{{ ovpn_proto | default('udp') }}"
+        openvpn_server_hostname: "{{ ovpn_server_hostname | default(inventory_hostname) }}"

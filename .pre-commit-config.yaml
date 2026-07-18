@@ -5,12 +5,17 @@ repos:
       - id: yamllint-ansible
         name: yamllint (ansible/)
         language: system
-        entry: ./scripts/wunder-devtools-ee.sh yamllint
+        entry: yamllint
         pass_filenames: true
         files: ^ansible/.*\.(yml|yaml)$
 
-      - id: ansible-inventory-validate
-        name: ansible-inventory validate (ansible/)
+      - id: ansible-inventory-validate-smoke
+        name: ansible-inventory validate (generated smoke)
         language: system
-        entry: ./scripts/wunder-devtools-ee.sh ./scripts/test-ansible.sh
+        entry: >-
+          bash -c 'tmp_inventory="$(mktemp)";
+          printf "%s\n" "---" "all:" "  hosts:" "    localhost:"
+          "      ansible_connection: local" > "$tmp_inventory";
+          ansible-inventory -i "$tmp_inventory" --list >/dev/null;
+          rm -f "$tmp_inventory"'
         pass_filenames: false

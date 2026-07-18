@@ -1,0 +1,80 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu Workbenches - baseline + GUI + RDP + developer tooling
+#
+# Purpose:
+# - Prepare Ubuntu workbench hosts with OS baseline and update policy
+# - Configure local users and network policy from inventory
+# - Install Podman, developer tools, VS Code, Firefox, GUI, and XRDP
+#
+# Notes:
+# - Keep environment values in inventory.
+# - Cloudflare WARP is intentionally not included here because the current
+#   lit.supplementary.cloudflare_warp role supports RedHat-family hosts only.
+# -----------------------------------------------------------------------------
+
+- name: Configure Ubuntu workbenches
+  hosts: workbenches
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Ensure the Ubuntu workbench runbook only runs on Ubuntu
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+        fail_msg: >-
+          This runbook is for Ubuntu workbenches only. Use
+          runbooks/50-applications/workbench/10-rhel-setup.yml for the RHEL
+          workbench path.
+      tags: [always]
+
+  roles:
+    - role: lit.ubuntu.repos
+      tags: [repos, baseline]
+
+    - role: lit.ubuntu.baseline
+      tags: [baseline]
+
+    - role: lit.ubuntu.users
+      tags: [users, hardening]
+
+    - role: lit.ubuntu.automatic_updates
+      tags: [updates, hardening]
+
+    - role: lit.ubuntu.netplan
+      tags: [networking, netplan, baseline]
+
+    - role: lit.ubuntu.podman
+      vars:
+        podman_user_socket_enabled: true
+        podman_user_socket_users: >-
+          {{ developer_tools_ssh_agent_users | default([]) }}
+      tags: [packages, podman, containers]
+
+    - role: lit.ubuntu.incus
+      when: incus_enabled | default(true) | bool
+      tags: [incus, virtualization]
+
+    - role: lit.ubuntu.developer_tools
+      vars:
+        developer_tools_packer_enabled: true
+      tags: [packages, developer_tools]
+
+    - role: lit.ubuntu.vscode_deploy
+      tags: [packages, vscode, vscode_deploy]
+
+    - role: lit.ubuntu.vscode_config
+      tags: [vscode, vscode_config]
+
+    - role: lit.ubuntu.firefox_deploy
+      tags: [packages, firefox, firefox_deploy]
+
+    - role: lit.ubuntu.firefox_config
+      tags: [firefox, firefox_config]
+
+    - role: lit.ubuntu.gui
+      tags: [gui]
+
+    - role: lit.ubuntu.xrdp
+      tags: [xrdp]

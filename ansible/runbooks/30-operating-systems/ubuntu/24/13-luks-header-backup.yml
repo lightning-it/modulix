@@ -1,0 +1,802 @@
+---
+# Back up the installed root LUKS2 header into the inventory-declared Vault KV
+# document before any Clevis/Tang keyslot is added.
+- name: PreCheck (require one exact installed host)
+  hosts: ubuntu24
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require one exact host limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - not ansible_check_mode
+        fail_msg: >-
+          This runbook requires --limit with one exact inventory FQDN and does
+          not operate in check mode because it must verify a real LUKS2 backup.
+      tags: [always]
+
+    - name: Require the HashiCorp Vault secret backend
+      ansible.builtin.assert:
+        that:
+          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+        fail_msg: >-
+          LUKS-header backup requires the hashicorp_vault backend after
+          verified bootstrap-secret migration.
+        quiet: true
+      tags: [always]
+
+- name: Back up LUKS headers to Vault
+  hosts: ubuntu24
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _luks_header_vault_mount: >-
+      {{ hetzner_baremetal_vault.engine_mount_point }}
+    _luks_header_safe_raw_max_bytes: 20971520
+    _luks_header_chunk_raw_bytes: >-
+      {{ hetzner_baremetal_vault.luks_header_chunk_raw_bytes | int }}
+    _luks_header_chunk_b64_chars: >-
+      {{ (_luks_header_chunk_raw_bytes | int // 3) * 4 }}
+    _luks_header_chunk_path_prefix: >-
+      {{
+        hetzner_baremetal_vault_secret_path
+        ~ '/'
+        ~ hetzner_baremetal_vault.luks_header_chunk_path_suffix
+      }}
+    _luks_header_manifest_field_names:
+      - "{{ hetzner_baremetal_vault.luks_header_format_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_path_prefix_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_count_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_chunk_sha256s_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_sha256_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_raw_sha256_field }}"
+      - "{{ hetzner_baremetal_vault.luks_header_raw_size_field }}"
+      - "{{ hetzner_baremetal_vault.luks_uuid_field }}"
+
+  pre_tasks:
+    - name: Require Ubuntu 24.04 and the bounded header contract
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('24.04', '>=')
+          - ansible_facts['distribution_version'] is version('25.04', '<')
+          - hetzner_baremetal_ansible_vault is mapping
+          - >-
+            hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+            | default(0) | int > 0
+          - >-
+            hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+            | int <= _luks_header_safe_raw_max_bytes
+          - >-
+            [
+              hetzner_baremetal_vault.luks_header_format_field,
+              hetzner_baremetal_vault.luks_header_chunk_path_prefix_field,
+              hetzner_baremetal_vault.luks_header_chunk_count_field,
+              hetzner_baremetal_vault.luks_header_chunk_raw_bytes_field,
+              hetzner_baremetal_vault.luks_header_chunk_sha256s_field,
+              hetzner_baremetal_vault.luks_header_sha256_field,
+              hetzner_baremetal_vault.luks_header_raw_sha256_field,
+              hetzner_baremetal_vault.luks_header_raw_size_field,
+              hetzner_baremetal_vault.luks_uuid_field
+            ] | select('string') | reject('equalto', '') | unique | list
+            | length == 9
+          - >-
+            hetzner_baremetal_vault.luks_header_storage_format
+            == 'raw-base64-chunks-v1'
+          - _luks_header_chunk_raw_bytes | int == 393216
+          - _luks_header_chunk_raw_bytes | int % 3 == 0
+          - _luks_header_chunk_b64_chars | int == 524288
+          - >-
+            hetzner_baremetal_vault.luks_header_chunk_path_suffix
+            is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+          - >-
+            _luks_header_chunk_path_prefix
+            is match('^[A-Za-z0-9][A-Za-z0-9/_.-]*$')
+        fail_msg: >-
+          This runbook supports Ubuntu 24.04 only and requires a positive
+          inventory header ceiling no larger than 20 MiB and the fixed
+          Vault-safe 384 KiB raw chunk contract.
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Discover the single crypttab source device
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk '!/^#/ && NF >= 2 {print $2}' /etc/crypttab | xargs -r -n1 findfs
+      args:
+        executable: /bin/bash
+      register: _luks_header_devices
+      changed_when: false
+
+    - name: Require exactly one encrypted root source
+      ansible.builtin.assert:
+        that:
+          - _luks_header_devices.stdout_lines | length == 1
+          - _luks_header_devices.stdout_lines[0] is match('^/dev/')
+        fail_msg: "Expected exactly one resolvable crypttab source device."
+
+    - name: Read the installed LUKS UUID
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksUUID
+          - "{{ _luks_header_devices.stdout_lines[0] }}"
+      register: _luks_header_uuid
+      changed_when: false
+      no_log: true
+
+    - name: Require installed LUKS2 JSON metadata
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksDump
+          - --dump-json-metadata
+          - "{{ _luks_header_devices.stdout_lines[0] }}"
+      changed_when: false
+      no_log: true
+
+    - name: Create, validate, and persist the LUKS header backup
+      block:
+        - name: Resolve the migrated recovery document and Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/resolve-recovery-secret.yml
+          no_log: true
+
+        - name: Allocate a protected remote header directory
+          ansible.builtin.tempfile:
+            state: directory
+            path: /run
+            prefix: lit-vault-
+          register: _luks_header_temp
+          no_log: true
+
+        - name: Resolve the initially absent raw header path
+          ansible.builtin.set_fact:
+            _luks_header_raw_path: "{{ _luks_header_temp.path }}/header.luks"
+          no_log: true
+
+        - name: Back up the LUKS header
+          ansible.builtin.command:
+            argv:
+              - /bin/bash
+              - -c
+              - >-
+                umask 077;
+                exec cryptsetup luksHeaderBackup "$1"
+                --header-backup-file "$2"
+              - lit-luks-header-backup
+              - "{{ _luks_header_devices.stdout_lines[0] }}"
+              - "{{ _luks_header_raw_path }}"
+          changed_when: true
+          no_log: true
+
+        - name: Require backup LUKS2 JSON metadata
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksDump
+              - --dump-json-metadata
+              - "{{ _luks_header_raw_path }}"
+          changed_when: false
+          no_log: true
+
+        - name: Read the backup LUKS UUID
+          ansible.builtin.command:
+            argv:
+              - cryptsetup
+              - luksUUID
+              - "{{ _luks_header_raw_path }}"
+          register: _luks_header_backup_uuid
+          changed_when: false
+          no_log: true
+
+        - name: Require the backup to match the installed LUKS2 UUID
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_header_backup_uuid.stdout | trim
+                == _luks_header_uuid.stdout | trim
+            fail_msg: "The remote LUKS-header backup UUID does not match."
+            quiet: true
+          no_log: true
+
+        - name: Calculate protected raw header metadata on the managed host
+          ansible.builtin.stat:
+            path: "{{ _luks_header_raw_path }}"
+            get_checksum: true
+            checksum_algorithm: sha256
+          register: _luks_header_raw_stat
+          changed_when: false
+          no_log: true
+
+        - name: Require a protected raw header below the safe ceiling
+          ansible.builtin.assert:
+            that:
+              - _luks_header_raw_stat.stat.exists | default(false)
+              - _luks_header_raw_stat.stat.isreg | default(false)
+              - not (_luks_header_raw_stat.stat.islnk | default(false))
+              - _luks_header_raw_stat.stat.mode | default('') == '0400'
+              - _luks_header_raw_stat.stat.uid | default(-1) | int == 0
+              - _luks_header_raw_stat.stat.nlink | default(0) | int == 1
+              - _luks_header_raw_stat.stat.size | default(0) | int > 0
+              - >-
+                _luks_header_raw_stat.stat.size | int
+                <=
+                hetzner_baremetal_ansible_vault.luks_header_max_raw_bytes
+                | int
+              - >-
+                _luks_header_raw_stat.stat.checksum
+                | default('') is match('^[0-9a-f]{64}$')
+            fail_msg: >-
+              The raw LUKS-header backup is absent, unprotected, invalid, or
+              larger than the inventory-approved encrypted envelope.
+            quiet: true
+          no_log: true
+
+        - name: Read the protected header backup
+          ansible.builtin.slurp:
+            src: "{{ _luks_header_raw_path }}"
+          register: _luks_header_slurp
+          no_log: true
+
+        - name: Calculate metadata from the exact slurped header bytes
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -c
+              - >-
+                import base64, hashlib, sys;
+                raw = base64.b64decode(sys.stdin.buffer.read(), validate=True);
+                print(len(raw)); print(hashlib.sha256(raw).hexdigest())
+            stdin: "{{ _luks_header_slurp.content }}"
+            stdin_add_newline: false
+          register: _luks_header_slurped_raw_metadata
+          delegate_to: localhost
+          become: false
+          changed_when: false
+          check_mode: false
+          no_log: true
+
+        - name: Require the slurped bytes to match the protected raw file
+          ansible.builtin.assert:
+            that:
+              - _luks_header_slurped_raw_metadata.stdout_lines | length == 2
+              - >-
+                _luks_header_slurped_raw_metadata.stdout_lines[0] | int
+                == _luks_header_raw_stat.stat.size | int
+              - >-
+                _luks_header_slurped_raw_metadata.stdout_lines[1]
+                == _luks_header_raw_stat.stat.checksum
+            fail_msg: >-
+              The protected LUKS-header file changed while its exact bytes
+              were being read; refusing to construct or publish a record.
+            quiet: true
+          no_log: true
+
+        - name: Resolve the immutable LUKS-header chunk count
+          ansible.builtin.set_fact:
+            _luks_header_chunk_count: >-
+              {{
+                (
+                  (_luks_header_raw_stat.stat.size | int)
+                  + (_luks_header_chunk_raw_bytes | int)
+                  - 1
+                )
+                // (_luks_header_chunk_raw_bytes | int)
+              }}
+            _luks_header_chunks: []
+          no_log: true
+
+        - name: Build the protected immutable LUKS-header chunks
+          ansible.builtin.set_fact:
+            _luks_header_chunks: >-
+              {{
+                _luks_header_chunks
+                + [
+                    {
+                      'index': item,
+                      'path': (
+                        _luks_header_chunk_path_prefix
+                        ~ '/chunk-'
+                        ~ ('%04d' | format(item))
+                      ),
+                      'data': {
+                        'schema_version': 1,
+                        'subject': inventory_hostname,
+                        'format': (
+                          hetzner_baremetal_vault
+                          .luks_header_storage_format
+                        ),
+                        'chunk_index': item,
+                        'chunk_count': _luks_header_chunk_count | int,
+                        'raw_offset_bytes': (
+                          item * (_luks_header_chunk_raw_bytes | int)
+                        ),
+                        'raw_size_bytes': (
+                          [
+                            _luks_header_chunk_raw_bytes | int,
+                            (_luks_header_raw_stat.stat.size | int)
+                            - (
+                                item
+                                * (_luks_header_chunk_raw_bytes | int)
+                              )
+                          ] | min
+                        ),
+                        'chunk_b64': (
+                          _luks_header_slurp.content[
+                            item * (_luks_header_chunk_b64_chars | int):
+                            [
+                              (
+                                (item + 1)
+                                * (_luks_header_chunk_b64_chars | int)
+                              ),
+                              _luks_header_slurp.content | length
+                            ] | min
+                          ]
+                        ),
+                        'chunk_b64_sha256': (
+                          _luks_header_slurp.content[
+                            item * (_luks_header_chunk_b64_chars | int):
+                            [
+                              (
+                                (item + 1)
+                                * (_luks_header_chunk_b64_chars | int)
+                              ),
+                              _luks_header_slurp.content | length
+                            ] | min
+                          ] | hash('sha256')
+                        ),
+                        'header_raw_sha256': (
+                          _luks_header_raw_stat.stat.checksum
+                        ),
+                        'luks_uuid': _luks_header_uuid.stdout | trim
+                      }
+                    }
+                  ]
+              }}
+          loop: "{{ range(0, _luks_header_chunk_count | int) | list }}"
+          no_log: true
+
+        - name: Validate every protected immutable LUKS-header chunk
+          ansible.builtin.assert:
+            that:
+              - item.index | type_debug == 'int'
+              - item.index == ansible_loop.index0
+              - >-
+                item.path
+                ==
+                _luks_header_chunk_path_prefix
+                ~ '/chunk-'
+                ~ ('%04d' | format(ansible_loop.index0))
+              - item.data.schema_version | type_debug == 'int'
+              - item.data.schema_version == 1
+              - item.data.subject == inventory_hostname
+              - >-
+                item.data.format
+                == hetzner_baremetal_vault.luks_header_storage_format
+              - item.data.chunk_index | type_debug == 'int'
+              - item.data.chunk_index == ansible_loop.index0
+              - item.data.chunk_count | type_debug == 'int'
+              - item.data.chunk_count == _luks_header_chunk_count | int
+              - item.data.raw_offset_bytes | type_debug == 'int'
+              - >-
+                item.data.raw_offset_bytes
+                ==
+                ansible_loop.index0 * (_luks_header_chunk_raw_bytes | int)
+              - item.data.raw_size_bytes | type_debug == 'int'
+              - item.data.raw_size_bytes > 0
+              - >-
+                item.data.raw_size_bytes
+                ==
+                [
+                  _luks_header_chunk_raw_bytes | int,
+                  (_luks_header_raw_stat.stat.size | int)
+                  - item.data.raw_offset_bytes
+                ] | min
+              - item.data.chunk_b64 is string
+              - >-
+                item.data.chunk_b64 | length
+                == ((item.data.raw_size_bytes + 2) // 3) * 4
+              - >-
+                item.data.chunk_b64 | hash('sha256')
+                == item.data.chunk_b64_sha256
+              - >-
+                item.data.chunk_b64_sha256 is match('^[0-9a-f]{64}$')
+              - >-
+                item.data.header_raw_sha256
+                == _luks_header_raw_stat.stat.checksum
+              - item.data.luks_uuid == _luks_header_uuid.stdout | trim
+            fail_msg: "A protected immutable LUKS-header chunk is invalid."
+            quiet: true
+          loop: "{{ _luks_header_chunks }}"
+          loop_control:
+            extended: true
+            label: "protected-luks-header-chunk"
+          no_log: true
+
+        - name: Require complete ordered LUKS-header chunk coverage
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_header_chunks | length
+                == _luks_header_chunk_count | int
+              - >-
+                _luks_header_chunks
+                | map(attribute='data.raw_size_bytes') | sum
+                == _luks_header_raw_stat.stat.size | int
+              - >-
+                _luks_header_chunks
+                | map(attribute='data.chunk_b64') | join('')
+                == _luks_header_slurp.content
+            fail_msg: >-
+              The immutable LUKS-header chunks do not provide exact ordered
+              coverage of the protected raw header.
+            quiet: true
+          no_log: true
+
+        - name: Read the current Vault document
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: >-
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ _luks_header_vault_mount }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _luks_header_vault_current
+          no_log: true
+
+        - name: Build the updated Vault document
+          ansible.builtin.set_fact:
+            _luks_header_sha256: >-
+              {{ _luks_header_slurp.content | hash('sha256') }}
+            _luks_header_raw_sha256: >-
+              {{ _luks_header_slurped_raw_metadata.stdout_lines[1] }}
+            _luks_header_raw_size: >-
+              {{ _luks_header_slurped_raw_metadata.stdout_lines[0] | int }}
+            _luks_header_vault_data: >-
+              {{
+                _luks_header_vault_current.secret
+                | combine(
+                    {
+                      hetzner_baremetal_vault.luks_header_format_field:
+                        hetzner_baremetal_vault.luks_header_storage_format,
+                      hetzner_baremetal_vault
+                      .luks_header_chunk_path_prefix_field:
+                        _luks_header_chunk_path_prefix,
+                      hetzner_baremetal_vault.luks_header_chunk_count_field:
+                        (_luks_header_chunk_count | int),
+                      hetzner_baremetal_vault
+                      .luks_header_chunk_raw_bytes_field:
+                        (_luks_header_chunk_raw_bytes | int),
+                      hetzner_baremetal_vault
+                      .luks_header_chunk_sha256s_field:
+                        (
+                          _luks_header_chunks
+                          | map(attribute='data.chunk_b64_sha256') | list
+                        ),
+                      hetzner_baremetal_vault.luks_header_sha256_field:
+                        (_luks_header_slurp.content | hash('sha256')),
+                      hetzner_baremetal_vault.luks_header_raw_sha256_field:
+                        _luks_header_slurped_raw_metadata.stdout_lines[1],
+                      hetzner_baremetal_vault.luks_header_raw_size_field:
+                        (_luks_header_slurped_raw_metadata.stdout_lines[0] | int),
+                      hetzner_baremetal_vault.luks_uuid_field:
+                        (_luks_header_uuid.stdout | trim)
+                    }
+                  )
+              }}
+          no_log: true
+
+        - name: Classify existing LUKS-header manifest field presence
+          ansible.builtin.set_fact:
+            _luks_header_vault_header_fields_absent: >-
+              {{
+                _luks_header_manifest_field_names
+                | intersect(_luks_header_vault_current.secret.keys() | list)
+                | length == 0
+              }}
+            _luks_header_vault_header_fields_complete: >-
+              {{
+                _luks_header_manifest_field_names
+                | intersect(_luks_header_vault_current.secret.keys() | list)
+                | length
+                == _luks_header_manifest_field_names | length
+              }}
+          no_log: true
+
+        - name: Refuse incomplete existing LUKS-header metadata
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_header_vault_header_fields_absent
+                or _luks_header_vault_header_fields_complete
+              - >-
+                'luks_header_b64'
+                not in _luks_header_vault_current.secret
+            fail_msg: >-
+              HashiCorp Vault contains incomplete LUKS-header metadata. It
+              will not be treated as absent or overwritten.
+            quiet: true
+          no_log: true
+
+        - name: Refuse malformed or different existing LUKS-header metadata
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_format_field
+                ] == hetzner_baremetal_vault.luks_header_storage_format
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault
+                  .luks_header_chunk_path_prefix_field
+                ] == _luks_header_chunk_path_prefix
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ] | type_debug == 'int'
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ] == _luks_header_chunk_count | int
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault
+                  .luks_header_chunk_raw_bytes_field
+                ] | type_debug == 'int'
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault
+                  .luks_header_chunk_raw_bytes_field
+                ] == _luks_header_chunk_raw_bytes | int
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+                ] | type_debug == 'list'
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+                ]
+                ==
+                _luks_header_chunks
+                | map(attribute='data.chunk_b64_sha256') | list
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_sha256_field
+                ] == _luks_header_sha256
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_raw_sha256_field
+                ] == _luks_header_raw_sha256
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] == _luks_header_raw_size | int
+              - >-
+                _luks_header_vault_current.secret[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ] == _luks_header_uuid.stdout | trim
+            fail_msg: >-
+              HashiCorp Vault already contains malformed or different LUKS
+              header material. It will not be overwritten.
+            quiet: true
+          when: _luks_header_vault_header_fields_complete
+          no_log: true
+
+        - name: Persist or verify every immutable Vault LUKS-header chunk
+          ansible.builtin.include_tasks: >-
+            tasks/persist-vault-luks-header-chunk.yml
+          vars:
+            _luks_header_chunk_allow_create: >-
+              {{ _luks_header_vault_header_fields_absent }}
+          loop: "{{ _luks_header_chunks }}"
+          loop_control:
+            loop_var: _luks_header_chunk
+            label: "protected-luks-header-chunk"
+          no_log: true
+
+        - name: Persist the absent header fields with exact Vault CAS
+          when: _luks_header_vault_header_fields_absent
+          no_log: true
+          block:
+            - name: Write the absent header fields at the read version
+              community.hashi_vault.vault_kv2_write:
+                url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+                namespace: >-
+                  {{
+                    _hetzner_hashicorp_vault_auth.namespace
+                    if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                    else omit
+                  }}
+                validate_certs: >-
+                  {{ _hetzner_hashicorp_vault_auth.validate_certs }}
+                ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+                timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+                retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+                auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+                mount_point: >-
+                  {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+                role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+                secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+                engine_mount_point: "{{ _luks_header_vault_mount }}"
+                path: "{{ hetzner_baremetal_vault_secret_path }}"
+                cas: >-
+                  {{ _luks_header_vault_current.metadata.version | int }}
+                data: "{{ _luks_header_vault_data }}"
+              delegate_to: localhost
+              become: false
+          rescue:
+            - name: Re-read the document after a possible CAS race
+              community.hashi_vault.vault_kv2_get:
+                url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+                namespace: >-
+                  {{
+                    _hetzner_hashicorp_vault_auth.namespace
+                    if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                    else omit
+                  }}
+                validate_certs: >-
+                  {{ _hetzner_hashicorp_vault_auth.validate_certs }}
+                ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+                timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+                retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+                auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+                mount_point: >-
+                  {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+                role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+                secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+                engine_mount_point: "{{ _luks_header_vault_mount }}"
+                path: "{{ hetzner_baremetal_vault_secret_path }}"
+              delegate_to: localhost
+              become: false
+              register: _luks_header_vault_race_read
+
+            - name: Accept a CAS race only for an identical full document
+              ansible.builtin.assert:
+                that:
+                  - >-
+                    _luks_header_vault_race_read.secret
+                    == _luks_header_vault_data
+                fail_msg: >-
+                  The Vault CAS write lost a race and the winner is not the
+                  exact expected recovery and LUKS-header document.
+                quiet: true
+
+        - name: Read back the persisted Vault document
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: >-
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: "{{ _luks_header_vault_mount }}"
+            path: "{{ hetzner_baremetal_vault_secret_path }}"
+          delegate_to: localhost
+          become: false
+          register: _luks_header_vault_verified
+          no_log: true
+        - name: Require matching persisted header metadata
+          ansible.builtin.assert:
+            that:
+              - >-
+                _luks_header_vault_verified.secret
+                == _luks_header_vault_data
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_format_field
+                ] == hetzner_baremetal_vault.luks_header_storage_format
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault
+                  .luks_header_chunk_path_prefix_field
+                ] == _luks_header_chunk_path_prefix
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_chunk_count_field
+                ] == _luks_header_chunk_count | int
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault
+                  .luks_header_chunk_raw_bytes_field
+                ] == _luks_header_chunk_raw_bytes | int
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_chunk_sha256s_field
+                ]
+                ==
+                _luks_header_chunks
+                | map(attribute='data.chunk_b64_sha256') | list
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_sha256_field
+                ] == _luks_header_sha256
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_uuid_field
+                ] == _luks_header_uuid.stdout | trim
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_raw_sha256_field
+                ] == _luks_header_raw_sha256
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] | type_debug == 'int'
+              - >-
+                _luks_header_vault_verified.secret[
+                  hetzner_baremetal_vault.luks_header_raw_size_field
+                ] == _luks_header_raw_size | int
+            fail_msg: "Vault header-backup verification failed."
+          no_log: true
+
+        - name: Show the secret-free Tang-binding approval hash
+          ansible.builtin.debug:
+            msg: >-
+              LUKS_HEADER_BACKUP_SHA256_RAW={{ _luks_header_raw_sha256 }}
+      always:
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
+
+        - name: Remove the remote header-backup directory
+          ansible.builtin.file:
+            path: "{{ _luks_header_temp.path }}"
+            state: absent
+          when:
+            - _luks_header_temp is defined
+            - _luks_header_temp.path is defined
+          no_log: true
+
+        - name: Clear in-memory LUKS-header and Vault secret material
+          ansible.builtin.set_fact:
+            _hetzner_baremetal_recovery_document: null
+            _hetzner_baremetal_recovery_passphrase: null
+            _hetzner_hashicorp_vault_auth: null
+            _luks_header_backup_uuid: null
+            _luks_header_chunk: null
+            _luks_header_chunks: null
+            _luks_header_chunk_race_read: null
+            _luks_header_chunk_verified: null
+            _luks_header_raw_stat: null
+            _luks_header_slurp: null
+            _luks_header_slurped_raw_metadata: null
+            _luks_header_vault_current: null
+            _luks_header_vault_data: null
+            _luks_header_vault_race_read: null
+            _luks_header_vault_verified: null
+          no_log: true

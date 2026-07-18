@@ -1,0 +1,13 @@
+---
+- name: strongSwan setup
+  hosts: all
+  become: true
+  roles:
+    - role: strongswan
+      vars:
+        strongwan__con_name: lit-mhb
+        strongswan__left: 91.107.204.220
+        strongswan__right: 178.15.45.53
+        strongswan__leftsubnet: 10.10.30.2/32
+        strongswan__rightsubnet: 192.168.253.64/32
+        strongswan__psk: PSH1R238EagTTKQLLLwm

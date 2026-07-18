@@ -1,0 +1,89 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - exact-host OpenSSH hardening and safe port transition
+#
+# The first pass intentionally keeps the inventory-declared bootstrap listener
+# while enabling and proving the hardened listener. Robot TCP 22 removal and a
+# single-port final state are separate reviewed phases.
+# -----------------------------------------------------------------------------
+
+- name: PreCheck (require one exact Hetzner Ubuntu host)
+  hosts: hetzner_baremetal
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require an exact single-host limit for OpenSSH transition
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname in groups['ubuntu24']
+        fail_msg: >-
+          OpenSSH transition requires --limit with one exact inventory FQDN
+          that belongs to both hetzner_baremetal and ubuntu24.
+      tags: [always]
+
+    - name: Require the safe dual-port transition contract
+      ansible.builtin.assert:
+        that:
+          - openssh_server_primary_port | int == 1905
+          - openssh_server_transition_bootstrap_port | int == 22
+          - openssh_server_ports | map('int') | list | sort == [22, 1905]
+          - ansible_port | default(22) | int == 22
+        fail_msg: >-
+          The first OpenSSH transition pass must retain TCP 22, add TCP 1905,
+          and connect through the still-declared bootstrap port.
+        quiet: true
+      tags: [always]
+
+- name: Harden OpenSSH and prove the transition listener
+  hosts: hetzner_baremetal
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('24.04', '>=')
+          - ansible_facts['distribution_version'] is version('25.04', '<')
+        fail_msg: "The OpenSSH transition runbook supports Ubuntu 24.04 only."
+      tags: [always]
+
+  roles:
+    - role: lit.ubuntu.openssh_server
+      tags: [openssh, hardening]
+
+  post_tasks:
+    - name: Prove the hardened OpenSSH port from the controller
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ openssh_server_primary_port | int }}"
+        state: started
+        connect_timeout: 5
+        timeout: 20
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode
+      tags: [openssh, verify]
+
+    - name: Reset the managed SSH connection before the alternate-port proof
+      ansible.builtin.meta: reset_connection
+
+    - name: Prove managed-user Ansible connectivity through hardened OpenSSH
+      ansible.builtin.ping:
+      vars:
+        ansible_port: "{{ openssh_server_primary_port | int }}"
+        ansible_ssh_common_args: >-
+          -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+          -o StrictHostKeyChecking=yes
+          -o IdentitiesOnly=yes
+          -o HostKeyAlias={{ inventory_hostname }}
+      become: false
+      when: not ansible_check_mode
+      tags: [openssh, verify]

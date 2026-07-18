@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
+SOURCE_ROOT="${SOURCE_ROOT:-${SOURCE_ROOT_DEFAULT}}"
+TARGET_PATH="${TARGET_PATH:-${REPO_ROOT}/collections}"
+ANSIBLE_NAV="${REPO_ROOT}/scripts/ansible-nav"
+INSTALL_DEPS="${INSTALL_DEPS:-true}"
+REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements.yml}"
+
+build_dir=""
+staging_dir=""
+repo_root_abs=""
+filtered_requirements_file=""
+
+cleanup() {
+  if [[ -n "${build_dir}" && -d "${build_dir}" ]]; then
+    rm -rf "${build_dir}"
+  fi
+  if [[ -n "${staging_dir}" && -d "${staging_dir}" ]]; then
+    rm -rf "${staging_dir}"
+  fi
+  if [[ -n "${filtered_requirements_file}" && -f "${filtered_requirements_file}" ]]; then
+    rm -f "${filtered_requirements_file}"
+  fi
+}
+
+host_path_to_runner() {
+  local path="$1"
+  local abs=""
+
+  abs="$(readlink -f -- "${path}" 2>/dev/null || true)"
+  if [[ -z "${abs}" ]]; then
+    echo "Unable to resolve path: ${path}" >&2
+    return 1
+  fi
+
+  if [[ "${abs}" != "${repo_root_abs}"* ]]; then
+    echo "Path must be under ${REPO_ROOT} when ansible-galaxy fallback is active: ${abs}" >&2
+    return 1
+  fi
+
+  echo "/runner/project${abs#${repo_root_abs}}"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/install-local-collections [options] [collection ...]
+
+Build local ansible collection tarballs and install them into collections
+without interactive prompts.
+
+Collection arguments:
+  - short name: foundational, rhel, ocp, supplementary
+  - absolute/relative path to a collection repo containing galaxy.yml
+
+Options:
+  --source-root <path>   Root containing collection repos in one of these layouts:
+                           - ansible-collection-*
+                           - ansible-collections/<name>
+                           - <name> (direct repo dirs with galaxy.yml)
+                         (default: ../../ from modulix/ansible)
+  --target-path <path>   Install path for collections
+                         (default: ./collections)
+  --requirements-file <path>
+                         Optional workspace requirements overlay file.
+                         Local lit.* entries are ignored by this script.
+                         (default: ./collections/requirements.yml)
+  -h, --help             Show this help
+
+Environment overrides:
+  SOURCE_ROOT, TARGET_PATH, INSTALL_DEPS, REQUIREMENTS_FILE
+EOF
+}
+
+resolve_collection_repo() {
+  local source_root="$1"
+  local item="$2"
+  local candidate=""
+
+  if [[ -d "${item}" && -f "${item}/galaxy.yml" ]]; then
+    cd -- "${item}" && pwd
+    return 0
+  fi
+
+  for candidate in \
+    "${source_root}/${item}" \
+    "${source_root}/ansible-collection-${item}" \
+    "${source_root}/ansible-collections/${item}"
+  do
+    if [[ -d "${candidate}" && -f "${candidate}/galaxy.yml" ]]; then
+      cd -- "${candidate}" && pwd
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+discover_collection_repos() {
+  local source_root="$1"
+  find "${source_root}" -maxdepth 1 -mindepth 1 -type d -exec test -f '{}/galaxy.yml' ';' -print | sort
+  find "${source_root}" -maxdepth 1 -mindepth 1 -type d -name 'ansible-collection-*' | sort
+  if [[ -d "${source_root}/ansible-collections" ]]; then
+    find "${source_root}/ansible-collections" -maxdepth 1 -mindepth 1 -type d -exec test -f '{}/galaxy.yml' ';' -print | sort
+  fi
+}
+
+declare -a requested=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source-root)
+      SOURCE_ROOT="$2"
+      shift 2
+      ;;
+    --target-path)
+      TARGET_PATH="$2"
+      shift 2
+      ;;
+    --requirements-file)
+      REQUIREMENTS_FILE="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        requested+=("$1")
+        shift
+      done
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
+    *)
+      requested+=("$1")
+      shift
+      ;;
+  esac
+done
+
+declare -a collection_dirs=()
+if [[ ${#requested[@]} -eq 0 ]]; then
+  while IFS= read -r d; do
+    [[ -n "${d}" ]] || continue
+    already_present=false
+    for existing in "${collection_dirs[@]}"; do
+      if [[ "${existing}" == "${d}" ]]; then
+        already_present=true
+        break
+      fi
+    done
+    if [[ "${already_present}" == "false" ]]; then
+      collection_dirs+=("$d")
+    fi
+  done < <(discover_collection_repos "${SOURCE_ROOT}")
+else
+  for item in "${requested[@]}"; do
+    if candidate="$(resolve_collection_repo "${SOURCE_ROOT}" "${item}")"; then
+      collection_dirs+=("${candidate}")
+      continue
+    fi
+
+    echo "Collection repo not found for '${item}'" >&2
+    exit 1
+  done
+fi
+
+if [[ ${#collection_dirs[@]} -eq 0 ]]; then
+  echo "No collection repos found under ${SOURCE_ROOT}" >&2
+  exit 1
+fi
+
+if [[ "${INSTALL_DEPS}" == "true" ]]; then
+  # Auto-include local lit.* dependencies from galaxy.yml so installation
+  # with dependency resolution remains self-contained in local development.
+  added=true
+  while [[ "${added}" == "true" ]]; do
+    added=false
+    for dir in "${collection_dirs[@]}"; do
+      while IFS= read -r dep; do
+        [[ -n "${dep}" ]] || continue
+        dep_short="${dep#lit.}"
+        if dep_repo="$(resolve_collection_repo "${SOURCE_ROOT}" "${dep_short}")"; then
+          already_present=false
+          for existing in "${collection_dirs[@]}"; do
+            if [[ "${existing}" == "${dep_repo}" ]]; then
+              already_present=true
+              break
+            fi
+          done
+          if [[ "${already_present}" == "false" ]]; then
+            collection_dirs+=("${dep_repo}")
+            echo "Including local dependency collection: ${dep}"
+            added=true
+          fi
+        fi
+      done < <(
+        awk -F': *' '
+          $1=="dependencies" { in_deps=1; next }
+          in_deps && /^[^[:space:]]/ { in_deps=0 }
+          in_deps && $1 ~ /^[[:space:]]+lit\.[a-zA-Z0-9_]+$/ {
+            dep=$1
+            gsub(/^[[:space:]]+/, "", dep)
+            print dep
+          }
+        ' "${dir}/galaxy.yml"
+      )
+    done
+  done
+fi
+
+repo_root_abs="$(readlink -f -- "${REPO_ROOT}")"
+
+declare -a galaxy_exec=()
+use_nav_fallback=false
+if command -v ansible-galaxy >/dev/null 2>&1; then
+  galaxy_exec=(ansible-galaxy)
+else
+  if [[ ! -x "${ANSIBLE_NAV}" ]]; then
+    echo "ansible-galaxy not found in PATH and ${ANSIBLE_NAV} is unavailable" >&2
+    exit 1
+  fi
+  use_nav_fallback=true
+  galaxy_exec=("${ANSIBLE_NAV}" exec -- env ANSIBLE_HOME=/tmp/.ansible ansible-galaxy)
+  echo "ansible-galaxy not found in PATH, using ${ANSIBLE_NAV} fallback"
+fi
+
+mkdir -p "${TARGET_PATH}"
+if [[ "${use_nav_fallback}" == true ]]; then
+  target_abs="$(readlink -f -- "${TARGET_PATH}")"
+  if [[ "${target_abs}" != "${repo_root_abs}"* ]]; then
+    echo "--target-path must be under ${REPO_ROOT} when using ${ANSIBLE_NAV} fallback" >&2
+    echo "Current target path: ${target_abs}" >&2
+    exit 1
+  fi
+  mkdir -p "${REPO_ROOT}/.tmp"
+  build_dir="$(mktemp -d "${REPO_ROOT}/.tmp/local-collections.build.XXXXXX")"
+  staging_dir="$(mktemp -d "${REPO_ROOT}/.tmp/local-collections.stage.XXXXXX")"
+else
+  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/local-collections.XXXXXX")"
+fi
+trap cleanup EXIT
+
+declare -a artifacts=()
+for dir in "${collection_dirs[@]}"; do
+  if [[ ! -f "${dir}/galaxy.yml" ]]; then
+    echo "Missing galaxy.yml in ${dir}" >&2
+    exit 1
+  fi
+
+  namespace="$(awk -F': *' '$1=="namespace"{print $2; exit}' "${dir}/galaxy.yml")"
+  name="$(awk -F': *' '$1=="name"{print $2; exit}' "${dir}/galaxy.yml")"
+  version="$(awk -F': *' '$1=="version"{print $2; exit}' "${dir}/galaxy.yml")"
+
+  echo "Building ${namespace}.${name} (${version}) from ${dir}"
+  build_source="${dir}"
+  if [[ "${use_nav_fallback}" == true ]]; then
+    build_source="${staging_dir}/${namespace}-${name}-${version}"
+    cp -a "${dir}" "${build_source}"
+    build_source="$(host_path_to_runner "${build_source}")"
+    build_output="$(host_path_to_runner "${build_dir}")"
+  else
+    build_output="${build_dir}"
+  fi
+
+  "${galaxy_exec[@]}" collection build --force --output-path "${build_output}" "${build_source}" >/dev/null
+
+  artifact="${build_dir}/${namespace}-${name}-${version}.tar.gz"
+  if [[ ! -f "${artifact}" ]]; then
+    echo "Expected artifact not found: ${artifact}" >&2
+    exit 1
+  fi
+  artifacts+=("${artifact}")
+done
+
+if [[ "${use_nav_fallback}" == true ]]; then
+  install_target="$(host_path_to_runner "${TARGET_PATH}")"
+else
+  install_target="${TARGET_PATH}"
+fi
+
+if [[ "${INSTALL_DEPS}" != "true" ]]; then
+  echo "Skipping dependency install (INSTALL_DEPS=${INSTALL_DEPS})"
+fi
+
+if [[ "${INSTALL_DEPS}" == "true" && -n "${REQUIREMENTS_FILE}" && -f "${REQUIREMENTS_FILE}" ]]; then
+  if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    echo "python3 with PyYAML is required to process ${REQUIREMENTS_FILE}" >&2
+    echo "Install PyYAML or set REQUIREMENTS_FILE to an empty value to skip workspace overlays." >&2
+    exit 1
+  fi
+  filtered_requirements_file="$(mktemp "${TMPDIR:-/tmp}/local-collections.requirements.XXXXXX.yml")"
+  filtered_count="$(
+    python3 - "$REQUIREMENTS_FILE" "$filtered_requirements_file" <<'PY'
+import sys
+import yaml
+
+src_path, dst_path = sys.argv[1], sys.argv[2]
+with open(src_path, "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+
+collections = data.get("collections") or []
+filtered = []
+for item in collections:
+    if not isinstance(item, dict):
+        continue
+    name = str(item.get("name", "")).strip()
+    if not name:
+        continue
+    if name.startswith("lit."):
+        continue
+    filtered.append(item)
+
+with open(dst_path, "w", encoding="utf-8") as f:
+    yaml.safe_dump({"collections": filtered}, f, sort_keys=False)
+
+print(len(filtered))
+PY
+  )"
+
+  if [[ "${filtered_count}" != "0" ]]; then
+    if [[ "${use_nav_fallback}" == true ]]; then
+      staged_req="${staging_dir}/requirements.workspace.yml"
+      cp "${filtered_requirements_file}" "${staged_req}"
+      req_for_install="$(host_path_to_runner "${staged_req}")"
+    else
+      req_for_install="${filtered_requirements_file}"
+    fi
+    echo "Installing workspace overlay dependencies from ${REQUIREMENTS_FILE} (excluding lit.* entries)"
+    "${galaxy_exec[@]}" collection install --force --no-deps --collections-path "${install_target}" -r "${req_for_install}"
+  fi
+elif [[ "${INSTALL_DEPS}" == "true" && -n "${REQUIREMENTS_FILE}" ]]; then
+  echo "Workspace overlay requirements file not found: ${REQUIREMENTS_FILE}; skipping overlays."
+fi
+
+if [[ "${INSTALL_DEPS}" == "true" ]]; then
+  install_cmd=("${galaxy_exec[@]}" collection install --force --collections-path "${install_target}")
+  echo "Installing local artifacts and resolving dependencies from collection galaxy.yml"
+else
+  install_cmd=("${galaxy_exec[@]}" collection install --force --offline --no-deps --collections-path "${install_target}")
+  echo "Installing local artifacts only (offline, no deps)"
+fi
+
+declare -a artifact_install_args=()
+if [[ "${use_nav_fallback}" == true ]]; then
+  for artifact in "${artifacts[@]}"; do
+    artifact_install_args+=("$(host_path_to_runner "${artifact}")")
+  done
+else
+  artifact_install_args+=("${artifacts[@]}")
+fi
+
+install_cmd+=("${artifact_install_args[@]}")
+
+if [[ "${INSTALL_DEPS}" == "true" ]]; then
+  if ! "${install_cmd[@]}"; then
+    echo "WARNING: dependency resolution failed while installing local artifacts." >&2
+    echo "WARNING: Retrying local artifact install without dependency resolution (--offline --no-deps)." >&2
+    fallback_cmd=("${galaxy_exec[@]}" collection install --force --offline --no-deps --collections-path "${install_target}")
+    fallback_cmd+=("${artifact_install_args[@]}")
+    "${fallback_cmd[@]}"
+    echo "NOTE: Local collections are installed, but unresolved galaxy.yml dependencies were skipped in fallback mode." >&2
+    echo "NOTE: Provide required dependencies via requirements overlay or EE image when needed." >&2
+  fi
+else
+  "${install_cmd[@]}"
+fi
+
+echo
+echo "Installed ${#artifacts[@]} collection(s) into ${TARGET_PATH}"
+for artifact in "${artifacts[@]}"; do
+  echo "- $(basename "${artifact}")"
+done

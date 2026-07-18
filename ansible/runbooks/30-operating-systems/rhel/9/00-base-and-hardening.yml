@@ -1,0 +1,14 @@
+---
+# -----------------------------------------------------------------------------
+# RHEL9 - Base Setup and CIS Hardening
+#
+# Purpose:
+# - Run the RHEL9 base setup first
+# - Run ansible-lockdown CIS hardening afterwards through the lit.rhel wrapper
+#
+# Use --limit to target the intended host or group.
+# -----------------------------------------------------------------------------
+- name: RHEL9 base setup
+  ansible.builtin.import_playbook: 01-base-setup.yml
+- name: RHEL9 CIS hardening
+  ansible.builtin.import_playbook: 90-cis-hardening.yml

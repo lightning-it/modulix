@@ -1,0 +1,586 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
+nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
+nav_container_engine="${ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE:-podman}"
+nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
+nav_pull_policy="${ANSIBLE_TOOLBOX_NAV_PULL_POLICY:-}"
+nav_skip_auth="${ANSIBLE_TOOLBOX_NAV_SKIP_AUTH:-false}"
+nav_skip_cert_check="${ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK:-false}"
+ee_only_collections="${ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS:-false}"
+ssh_private_key_file="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE:-}"
+ssh_known_hosts_file="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE:-}"
+ssh_agent_forwarding="${ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING:-false}"
+nav_ee_container_options="${ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS:-}"
+nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
+nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
+if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS+x}" ]]; then
+  auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS}"
+elif [[ "${REPO_ROOT}" == "/opt/modulix/ansible" ]]; then
+  # RPM/container-in runtime is expected to be self-contained and offline-safe.
+  auto_collections="false"
+else
+  auto_collections="true"
+fi
+default_collections_requirements="${REPO_ROOT}/collections/requirements.yml"
+default_collections_requirements_rh="${REPO_ROOT}/collections/requirements-rh.yml"
+collections_requirements="${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}"
+collections_install_path="${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH:-${REPO_ROOT}/collections}"
+collections_stamp_file="${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-}"
+automation_hub_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL:-}"
+automation_hub_url_published="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED:-https://console.redhat.com/api/automation-hub/content/published/}"
+automation_hub_url_validated="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED:-https://console.redhat.com/api/automation-hub/content/validated/}"
+automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
+cleanup_files=()
+cleanup_dirs=()
+ee_identity_mapping_added=false
+
+cleanup() {
+  local file
+  local dir
+  for file in "${cleanup_files[@]}"; do
+    rm -f -- "${file}" 2>/dev/null || true
+  done
+  for dir in "${cleanup_dirs[@]}"; do
+    chmod -R u+w -- "${dir}" 2>/dev/null || true
+    rm -rf -- "${dir}" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ansible-nav-local run <runbook.yml> [ansible-navigator run args...]
+  ansible-nav-local exec -- <command> [args...]
+
+Environment:
+  ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
+  ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
+  ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman      (default: podman)
+  ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>         (default: ansible-navigator config/env)
+  ANSIBLE_TOOLBOX_NAV_PULL_POLICY=always|missing|never|tag (default: ansible-navigator config/env)
+  ANSIBLE_TOOLBOX_NAV_SKIP_AUTH=true|false         (default: false)
+  ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true|false   (default: false)
+  ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true|false   (default: false; ignore project collection trees)
+  ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only file> (optional; requires known_hosts)
+  ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<trusted file> (required for key or agent use)
+  ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING=true|false (default: false; forwards only SSH_AUTH_SOCK)
+  ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
+  ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
+  ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+  ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
+  ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
+  ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
+  ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
+  ANSIBLE_VAULT_PASSWORD_FILE=<owner-only file>    (EE transport requires Podman and mode 0400 or 0600)
+  RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, required for certified collections)
+  ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL=<url>         (optional legacy single Automation Hub server URL)
+  ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED=<url> (optional published server URL)
+  ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED=<url> (optional validated server URL)
+EOF
+}
+
+validate_choice() {
+  local name="$1"
+  local value="$2"
+  local allowed="$3"
+
+  case " ${allowed} " in
+    *" ${value} "*)
+      ;;
+    *)
+      echo "Invalid ${name}='${value}' (use: ${allowed// /|})." >&2
+      exit 1
+      ;;
+  esac
+}
+
+add_ee_volume_if_present() {
+  local source="$1"
+  local target="${2:-${source}}"
+  local kind="${3:-file}"
+
+  if [[ "${nav_ee_enabled}" != "true" || -z "${source}" ]]; then
+    return 0
+  fi
+
+  case "${kind}" in
+    dir)
+      [[ -d "${source}" ]] || return 0
+      ;;
+    file)
+      [[ -f "${source}" ]] || return 0
+      ;;
+    *)
+      echo "Invalid EE volume kind '${kind}'." >&2
+      exit 1
+      ;;
+  esac
+
+  cmd+=(--eev "${source}:${target}:ro")
+}
+
+validate_owner_only_secret_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" || ! -s "${path}" ]]; then
+    echo "${label} must reference a nonempty regular, non-symlink file." >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' -- "${path}")"
+  owner="$(stat -c '%u' -- "${path}")"
+  case "${mode}" in
+    400|600) ;;
+    *)
+      echo "${label} must have mode 0400 or 0600 (found ${mode})." >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${owner}" != "$(id -u)" ]]; then
+    echo "${label} must be owned by the effective user." >&2
+    return 1
+  fi
+}
+
+validate_trusted_ssh_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" || ! -s "${path}" || ! -r "${path}" ]]; then
+    echo "${label} must reference a readable, nonempty regular, non-symlink file." >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' -- "${path}")"
+  owner="$(stat -c '%u' -- "${path}")"
+  if (( (8#${mode} & 0022) != 0 )); then
+    echo "${label} must not be group- or world-writable (found ${mode})." >&2
+    return 1
+  fi
+  if [[ "${owner}" != "$(id -u)" && "${owner}" != "0" ]]; then
+    echo "${label} must be owned by the effective user or root." >&2
+    return 1
+  fi
+}
+
+ensure_ee_identity_mapping() {
+  if [[ "${ee_identity_mapping_added}" == "true" ]]; then
+    return 0
+  fi
+  if [[ "${nav_ee_container_options}" =~ (^|[[:space:]])--(user|userns|uidmap|gidmap)(=|[[:space:]]|$) ]]; then
+    echo "Secure EE file transport cannot be combined with user-namespace or user-ID container overrides." >&2
+    exit 1
+  fi
+  if [[ "$(id -u)" == "0" ]]; then
+    # The outer rootless toolbox maps its root user to the invoking host user.
+    # A second keep-id namespace cannot be created reliably in that restricted
+    # mapping, so keep the nested controller at the already-matching root UID.
+    cmd+=("--co=--user=0:0")
+  else
+    cmd+=("--co=--userns=keep-id")
+    cmd+=("--co=--user=$(id -u):$(id -g)")
+  fi
+  ee_identity_mapping_added=true
+}
+
+stage_secret_file_for_ee() {
+  local var_name="$1"
+  local source="${!var_name:-}"
+  local staged_dir=""
+  local staged_file=""
+
+  if [[ -z "${source}" ]]; then
+    return 0
+  fi
+
+  validate_owner_only_secret_file "${source}" "${var_name}"
+  if [[ "${nav_ee_enabled}" != "true" ]]; then
+    return 0
+  fi
+  if [[ "${nav_container_engine}" != "podman" ]]; then
+    echo "Secure ${var_name} transport into an execution environment is supported only with Podman." >&2
+    exit 1
+  fi
+
+  staged_dir="$(mktemp -d "${ANSIBLE_HOME}/ee-secrets.XXXXXX")"
+  cleanup_dirs+=("${staged_dir}")
+  chmod 0700 "${staged_dir}"
+  staged_file="${staged_dir}/ansible-vault-pass.txt"
+  install -m 0400 "${source}" "${staged_file}"
+  validate_owner_only_secret_file "${staged_file}" "staged ${var_name}"
+  export "${var_name}=${staged_file}"
+  cmd+=(--eev "${staged_dir}:${staged_dir}:ro")
+  ensure_ee_identity_mapping
+}
+
+configure_ssh_transport() {
+  local staged_dir=""
+  local staged_key=""
+  local staged_known_hosts=""
+  local ssh_common_args=""
+
+  if [[ -n "${ssh_private_key_file}" && "${ssh_agent_forwarding}" == "true" ]]; then
+    echo "Select either an explicit SSH private key or SSH agent forwarding, not both." >&2
+    exit 1
+  fi
+  if [[ -z "${ssh_private_key_file}" && "${ssh_agent_forwarding}" == "false" ]]; then
+    if [[ -n "${ssh_known_hosts_file}" ]]; then
+      echo "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE requires an explicit key or agent forwarding." >&2
+      exit 1
+    fi
+    return 0
+  fi
+  if [[ -z "${ssh_known_hosts_file}" ]]; then
+    echo "Explicit SSH transport requires ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE." >&2
+    exit 1
+  fi
+
+  validate_trusted_ssh_file \
+    "${ssh_known_hosts_file}" \
+    "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE"
+  if [[ -n "${ssh_private_key_file}" ]]; then
+    validate_owner_only_secret_file \
+      "${ssh_private_key_file}" \
+      "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE"
+  else
+    if [[ -z "${SSH_AUTH_SOCK:-}" || -L "${SSH_AUTH_SOCK}" || ! -S "${SSH_AUTH_SOCK}" ]]; then
+      echo "SSH agent forwarding requires SSH_AUTH_SOCK to be a real Unix socket." >&2
+      exit 1
+    fi
+    if [[ "$(stat -c '%u' -- "${SSH_AUTH_SOCK}")" != "$(id -u)" ]]; then
+      echo "SSH_AUTH_SOCK must be owned by the effective user." >&2
+      exit 1
+    fi
+  fi
+
+  export ANSIBLE_HOST_KEY_CHECKING=True
+  ssh_common_args="-o UserKnownHostsFile=${ssh_known_hosts_file} -o StrictHostKeyChecking=yes"
+  export ANSIBLE_SSH_COMMON_ARGS="${ssh_common_args}"
+  if [[ -n "${ssh_private_key_file}" ]]; then
+    export ANSIBLE_PRIVATE_KEY_FILE="${ssh_private_key_file}"
+  fi
+
+  if [[ "${nav_ee_enabled}" != "true" ]]; then
+    return 0
+  fi
+  if [[ "${nav_container_engine}" != "podman" ]]; then
+    echo "Secure SSH transport into an execution environment is supported only with Podman." >&2
+    exit 1
+  fi
+
+  staged_dir="$(mktemp -d "${ANSIBLE_HOME}/ee-ssh.XXXXXX")"
+  cleanup_dirs+=("${staged_dir}")
+  chmod 0700 "${staged_dir}"
+  staged_known_hosts="${staged_dir}/known_hosts"
+  install -m 0400 "${ssh_known_hosts_file}" "${staged_known_hosts}"
+  if [[ -n "${ssh_private_key_file}" ]]; then
+    staged_key="${staged_dir}/id_selected"
+    install -m 0400 "${ssh_private_key_file}" "${staged_key}"
+    validate_owner_only_secret_file "${staged_key}" "staged SSH private key"
+    cmd+=(--senv "ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected")
+  else
+    cmd+=(--eev "${SSH_AUTH_SOCK}:/runner/ssh-agent.sock:rw")
+    cmd+=(--senv "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
+  fi
+  cmd+=(--eev "${staged_dir}:/runner/.ssh:ro")
+  cmd+=(--senv "ANSIBLE_HOST_KEY_CHECKING=True")
+  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-o UserKnownHostsFile=/runner/.ssh/known_hosts -o StrictHostKeyChecking=yes")
+  ensure_ee_identity_mapping
+}
+
+validate_choice "ANSIBLE_TOOLBOX_NAV_MODE" "${nav_mode}" "stdout interactive"
+validate_choice "ANSIBLE_TOOLBOX_NAV_EE_ENABLED" "${nav_ee_enabled}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_AUTH" "${nav_skip_auth}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK" "${nav_skip_cert_check}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS" "${ee_only_collections}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING" "${ssh_agent_forwarding}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_AUTO_COLLECTIONS" "${auto_collections}" "auto true false"
+validate_choice "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE" "${nav_container_engine}" "auto podman docker"
+
+if [[ -n "${nav_pull_policy}" ]]; then
+  validate_choice "ANSIBLE_TOOLBOX_NAV_PULL_POLICY" "${nav_pull_policy}" "always missing never tag"
+fi
+
+if [[ "${ee_only_collections}" == "true" ]]; then
+  auto_collections="false"
+fi
+
+if [[ "${nav_skip_auth}" == "true" ]]; then
+  unset REGISTRY_AUTH_FILE
+fi
+
+hash_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${file}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "${file}" | awk '{print $NF}'
+    return 0
+  fi
+  cksum "${file}" | awk '{print $1":"$2}'
+}
+
+build_galaxy_config_for_certified() {
+  local token="$1"
+  local config_file=""
+  config_file="$(mktemp /tmp/ansible-galaxy.auto.XXXXXX.cfg)"
+  if [[ -n "${automation_hub_url}" ]]; then
+    cat > "${config_file}" <<EOF
+[galaxy]
+server_list = automation_hub,galaxy
+
+[galaxy_server.automation_hub]
+url = ${automation_hub_url}
+auth_url = ${automation_hub_auth_url}
+token = ${token}
+
+[galaxy_server.galaxy]
+url = https://galaxy.ansible.com/
+EOF
+  else
+    cat > "${config_file}" <<EOF
+[galaxy]
+server_list = automation_hub_published,automation_hub_validated,galaxy
+
+[galaxy_server.automation_hub_published]
+url = ${automation_hub_url_published}
+auth_url = ${automation_hub_auth_url}
+token = ${token}
+
+[galaxy_server.automation_hub_validated]
+url = ${automation_hub_url_validated}
+auth_url = ${automation_hub_auth_url}
+token = ${token}
+
+[galaxy_server.galaxy]
+url = https://galaxy.ansible.com/
+EOF
+  fi
+  printf '%s\n' "${config_file}"
+}
+
+ensure_base_collections() {
+  local mode="$1"
+  local requirements_file="$2"
+  local target_path="$3"
+  local stamp_file="$4"
+  local install_reason=""
+  local current_hash=""
+  local stored_hash=""
+  local needs_certified_collections=false
+  local galaxy_config_file=""
+
+  case "${mode}" in
+    false)
+      return 0
+      ;;
+    true)
+      if [[ ! -f "${requirements_file}" ]]; then
+        echo "Missing collections requirements file: ${requirements_file}" >&2
+        return 1
+      fi
+      install_reason="forced by ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true"
+      ;;
+    auto)
+      if [[ ! -f "${requirements_file}" ]]; then
+        return 0
+      fi
+      if [[ ! -d "${target_path}/ansible_collections" ]]; then
+        install_reason="collections cache is missing"
+      else
+        current_hash="$(hash_file "${requirements_file}")"
+        if [[ ! -f "${stamp_file}" ]]; then
+          install_reason="requirements stamp is missing"
+        else
+          stored_hash="$(< "${stamp_file}")"
+          if [[ "${stored_hash}" != "${current_hash}" ]]; then
+            install_reason="requirements changed"
+          fi
+        fi
+      fi
+      ;;
+  esac
+
+  if [[ -z "${install_reason}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${target_path}"
+  echo "Installing base collections (${install_reason})."
+
+  if grep -Eq "name:[[:space:]]*(ansible\\.controller|ansible\\.eda|ansible\\.hub|infra\\.|redhat\\.satellite)" "${requirements_file}" 2>/dev/null; then
+    needs_certified_collections=true
+  fi
+
+  if [[ "${needs_certified_collections}" == true ]]; then
+    if [[ -z "${RH_AUTOMATION_HUB_TOKEN:-}" ]]; then
+      echo "Warning: certified collections detected in ${requirements_file} but RH_AUTOMATION_HUB_TOKEN is not set." >&2
+      echo "Warning: collection install may fail unless Automation Hub auth is configured elsewhere." >&2
+    else
+      galaxy_config_file="$(build_galaxy_config_for_certified "${RH_AUTOMATION_HUB_TOKEN}")"
+    fi
+  fi
+
+  if [[ -n "${galaxy_config_file}" ]]; then
+    ANSIBLE_CONFIG="${galaxy_config_file}" ansible-galaxy collection install \
+      -r "${requirements_file}" \
+      -p "${target_path}" \
+      --force
+    rm -f "${galaxy_config_file}"
+  else
+    ansible-galaxy collection install \
+      -r "${requirements_file}" \
+      -p "${target_path}" \
+      --force
+  fi
+
+  current_hash="${current_hash:-$(hash_file "${requirements_file}")}"
+  printf '%s\n' "${current_hash}" > "${stamp_file}"
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  usage
+  exit 0
+fi
+
+default_ansible_config="${REPO_ROOT}/ansible.cfg"
+if [[ -f "/runner/project/ansible.cfg" ]]; then
+  default_ansible_config="/runner/project/ansible.cfg"
+fi
+
+export HOME="${HOME:-/runner}"
+export ANSIBLE_HOME="${ANSIBLE_HOME:-/tmp/.ansible}"
+export ANSIBLE_GALAXY_CACHE_DIR="${ANSIBLE_GALAXY_CACHE_DIR:-${ANSIBLE_HOME}/galaxy_cache}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
+export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
+export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
+export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
+collections_path_without_overlays="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+if [[ "${ee_only_collections}" == "true" ]]; then
+  collections_path_without_overlays="/usr/share/ansible/collections:/usr/share/automation-controller/collections"
+  export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
+elif [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
+  export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
+else
+  export ANSIBLE_COLLECTIONS_PATH
+fi
+mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}" "${ANSIBLE_LOCAL_TEMP}"
+if [[ -z "${collections_stamp_file}" ]]; then
+  collections_stamp_file="${ANSIBLE_HOME}/collections.requirements.sha256"
+fi
+
+subcommand="$1"
+shift
+
+if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
+  validate_owner_only_secret_file \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "ANSIBLE_VAULT_PASSWORD_FILE"
+fi
+
+case "${subcommand}" in
+  run)
+    if [[ $# -lt 1 ]]; then
+      echo "Missing runbook path for 'run'." >&2
+      usage
+      exit 1
+    fi
+    effective_collections_requirements="${collections_requirements}"
+    if [[ -z "${effective_collections_requirements}" ]]; then
+      effective_collections_requirements="${default_collections_requirements}"
+      if [[ -n "${RH_AUTOMATION_HUB_TOKEN:-}" && -f "${default_collections_requirements_rh}" ]]; then
+        effective_collections_requirements="${default_collections_requirements_rh}"
+      fi
+    fi
+    echo "Using collections requirements: ${effective_collections_requirements}"
+    ensure_base_collections \
+      "${auto_collections}" \
+      "${effective_collections_requirements}" \
+      "${collections_install_path}" \
+      "${collections_stamp_file}"
+    if [[ "${nav_pull_policy}" != "never" && "${nav_skip_cert_check}" == "true" && -n "${nav_ee_image}" && "${nav_ee_image}" != localhost/* ]]; then
+      if [[ "${nav_container_engine}" == "docker" ]]; then
+        echo "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true is only supported with podman engine." >&2
+        exit 1
+      fi
+      pre_pull_args=( --tls-verify=false )
+      if [[ "${nav_skip_auth}" == "true" ]]; then
+        echo "Pre-pulling EE image with TLS verification disabled (anonymous): ${nav_ee_image}" >&2
+        env -u REGISTRY_AUTH_FILE podman pull "${pre_pull_args[@]}" "${nav_ee_image}" >/dev/null
+      else
+        echo "Pre-pulling EE image with TLS verification disabled: ${nav_ee_image}" >&2
+        podman pull "${pre_pull_args[@]}" "${nav_ee_image}" >/dev/null
+      fi
+    fi
+    cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
+    cmd+=(--ce "${nav_container_engine}")
+    cmd+=(--senv "ANSIBLE_COLLECTIONS_PATH=${ANSIBLE_COLLECTIONS_PATH}")
+    # In RPM/runtime mode, runbooks live under /opt/modulix. Mirror that path
+    # into the nested EE so imported runbooks resolve correctly.
+    if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
+      cmd+=(--eev "/opt/modulix:/opt/modulix:Z")
+    fi
+    stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
+    configure_ssh_transport
+    add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
+    if [[ -n "${nav_ee_image}" ]]; then
+      cmd+=(--eei "${nav_ee_image}")
+    fi
+    if [[ -n "${nav_ee_container_options}" ]]; then
+      cmd+=("--co=${nav_ee_container_options}")
+    fi
+    if [[ -n "${nav_pull_policy}" ]]; then
+      cmd+=(--pp "${nav_pull_policy}")
+    fi
+    if [[ "${nav_ee_enabled}" == "false" ]]; then
+      cmd+=(--ee false)
+    fi
+    cmd+=(run "$@")
+    if (( ${#cleanup_dirs[@]} > 0 )); then
+      "${cmd[@]}"
+    else
+      exec "${cmd[@]}"
+    fi
+    ;;
+  exec)
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+    if [[ $# -eq 0 ]]; then
+      exec /bin/bash
+    fi
+    exec "$@"
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unsupported subcommand '${subcommand}'. Use 'run' or 'exec'." >&2
+    usage
+    exit 1
+    ;;
+esac

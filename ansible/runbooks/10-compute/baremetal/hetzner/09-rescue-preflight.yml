@@ -1,0 +1,256 @@
+---
+# Fleet orchestration only. Robot API policy, controller trust, Rescue hardware,
+# SMART, egress, and the temporary vSwitch data-plane probe are implemented by
+# reusable lit.foundational roles.
+- name: Validate controller and Hetzner Robot prerequisites
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Require the complete bare-metal fleet limit  # noqa run-once[task]
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+          - ansible_play_hosts_all | sort == groups['hetzner_baremetal'] | sort
+        fail_msg: >-
+          Use --limit selecting the complete hetzner_baremetal group. Partial
+          preflight cannot prove exact vSwitch membership or peer reachability.
+        quiet: true
+      run_once: true
+      tags: [always]
+
+    - name: Resolve encrypted Robot API credentials
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      tasks_from: inventory_contract
+      hetzner_rescue_validate_inventory_contract:
+        selected_hosts: "{{ ansible_play_hosts_all }}"
+        expected_fleet: "{{ groups['hetzner_baremetal'] }}"
+        install_order: "{{ hetzner_baremetal_install_order }}"
+        prerequisite_hosts: >-
+          {{ hetzner_baremetal_install_prerequisite_hosts }}
+        host:
+          inventory_hostname: "{{ inventory_hostname }}"
+          public_ipv4: "{{ ansible_host }}"
+        installimage:
+          hostname: "{{ hetzner_installimage_hostname }}"
+          public_ipv4: >-
+            {{ hetzner_installimage_expected_identity.public_ipv4 }}
+          action: "{{ hetzner_installimage_action }}"
+        ssh_public_keys:
+          deploy: "{{ deploy_ssh_public_keys }}"
+          breakglass: "{{ breakglass_public_keys }}"
+        service_hosts:
+          tang: "{{ hetzner_baremetal_tang_host }}"
+          vault: "{{ hetzner_baremetal_vault.host }}"
+        robot_firewall:
+          enabled: "{{ hetzner_baremetal_robot_firewall.enabled }}"
+          dropbear_port: "{{ luks_unlock_dropbear_port }}"
+          input_rules: >-
+            {{
+              hetzner_baremetal_robot_firewall.common_input_rules
+              + hetzner_baremetal_robot_firewall_extra_input_rules
+            }}
+          output_rules: >-
+            {{ hetzner_baremetal_robot_firewall.output_rules }}
+        mgmt:
+          transport:
+            provider: "{{ mgmt_transport.provider }}"
+            state: "{{ mgmt_transport.deployment_state }}"
+            name: "{{ mgmt_transport.name }}"
+            vlan_id: "{{ mgmt_transport.vlan_id }}"
+            mtu: "{{ mgmt_transport.mtu }}"
+          network:
+            state: "{{ mgmt_network.allocation_state }}"
+            parent_interface: "{{ mgmt_network.parent_interface }}"
+            vlan_interface: "{{ mgmt_network.vlan_interface }}"
+            ipv4: "{{ mgmt_network.ipv4 }}"
+          subnet:
+            prefix_length: "{{ mgmt_subnet.prefix_length }}"
+            gateway: "{{ mgmt_subnet.gateway | default('', true) }}"
+          netplan_vlan:
+            name: "{{ mgmt_network.vlan_interface }}"
+            id: >-
+              {{ netplan_vlans[mgmt_network.vlan_interface].id }}
+            link: >-
+              {{ netplan_vlans[mgmt_network.vlan_interface].link }}
+            mtu: >-
+              {{ netplan_vlans[mgmt_network.vlan_interface].mtu }}
+            addresses: >-
+              {{ netplan_vlans[mgmt_network.vlan_interface].addresses }}
+
+    - role: lit.foundational.hetzner_rescue_validate
+      tasks_from: controller_preflight
+      hetzner_rescue_validate_known_hosts_path: >-
+        {{ hetzner_baremetal_rescue_known_hosts_path }}
+      hetzner_rescue_validate_public_ipv4: "{{ ansible_host }}"
+      hetzner_rescue_validate_ssh_ed25519_sha256: >-
+        {{ hetzner_rescue_ssh_ed25519_sha256 }}
+      hetzner_rescue_validate_controller_required_ssh_public_keys: >-
+        {{ deploy_ssh_public_keys + breakglass_public_keys }}
+      hetzner_rescue_validate_controller_dns_resolver: >-
+        {{ hetzner_baremetal_dns_resolver }}
+      hetzner_rescue_validate_controller_dns_records: >-
+        {{
+          [
+            {
+              'name': inventory_hostname,
+              'type': 'A',
+              'value': ansible_host
+            },
+            {
+              'name': ansible_host,
+              'type': 'PTR',
+              'value': inventory_hostname ~ '.'
+            }
+          ]
+          + (
+              [
+                {
+                  'name': hetzner_baremetal_tang_fqdn,
+                  'type': 'CNAME',
+                  'value': hetzner_baremetal_tang_host ~ '.'
+                }
+              ]
+              if inventory_hostname == hetzner_baremetal_tang_host
+              else []
+            )
+          + (
+              [
+                {
+                  'name': hetzner_baremetal_vault.endpoint_fqdn,
+                  'type': 'CNAME',
+                  'value': hetzner_baremetal_vault.host ~ '.'
+                }
+              ]
+              if inventory_hostname == hetzner_baremetal_vault.host
+              else []
+            )
+        }}
+
+    - role: lit.foundational.hetzner_robot_cac
+      tasks_from: audit
+      hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+      hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+      hetzner_robot_cac_audit_servers:
+        - server_ip: "{{ ansible_host }}"
+          server_name: "{{ inventory_hostname }}"
+          status: ready
+          cancelled: false
+          firewall:
+            status: active
+            port: "{{ hetzner_baremetal_robot_firewall.port }}"
+            filter_ipv6: >-
+              {{ hetzner_baremetal_robot_firewall.filter_ipv6 }}
+            allowlist_hos: >-
+              {{ hetzner_baremetal_robot_firewall.allowlist_hos }}
+            rules:
+              input: >-
+                {{
+                  hetzner_baremetal_robot_firewall.common_input_rules
+                  + hetzner_baremetal_robot_firewall_extra_input_rules
+                }}
+              output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
+      hetzner_robot_cac_audit_vswitches:
+        - name: "{{ mgmt_transport.name }}"
+          vlan: "{{ mgmt_transport.vlan_id }}"
+          servers: >-
+            {{
+              ansible_play_hosts_all
+              | map('extract', hostvars, 'ansible_host')
+              | map('string')
+              | sort
+              | list
+            }}
+
+- name: Validate Rescue identity hardware SMART and egress
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      hetzner_rescue_validate_expected_disks: >-
+        {{ hetzner_installimage_expected_disks }}
+      hetzner_rescue_validate_deploy_ssh_public_keys: >-
+        {{ deploy_ssh_public_keys }}
+      hetzner_rescue_validate_robot_user_keys_max_bytes: >-
+        {{ hetzner_baremetal_rescue_robot_user_keys_max_bytes }}
+      hetzner_rescue_validate_rescue_marker_path: >-
+        {{ hetzner_installimage_binary }}
+      hetzner_rescue_validate_smart_policy: >-
+        {{ hetzner_baremetal_smart_policy }}
+      hetzner_rescue_validate_smart_overrides: >-
+        {{ hetzner_baremetal_smart_overrides | default({}) }}
+
+- name: Validate the concurrent Rescue vSwitch data plane
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  strategy: linear
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      tasks_from: data_plane
+      hetzner_rescue_validate_data_plane:
+        enabled: true
+        parent_interface: "{{ mgmt_network.parent_interface }}"
+        vlan_interface: "litv{{ mgmt_transport.vlan_id }}"
+        vlan_id: "{{ mgmt_transport.vlan_id }}"
+        mtu: "{{ mgmt_transport.mtu }}"
+        address: "{{ mgmt_network.ipv4 }}"
+        prefix_length: "{{ mgmt_subnet.prefix_length }}"
+        gateway: "{{ mgmt_subnet.gateway | default('', true) }}"
+        peer_ipv4_addresses: >-
+          {{
+            ansible_play_hosts_all
+            | reject('equalto', inventory_hostname)
+            | map('extract', hostvars)
+            | map(attribute='mgmt_network.ipv4')
+            | unique
+            | sort
+            | list
+          }}

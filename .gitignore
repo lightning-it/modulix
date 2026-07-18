@@ -1,8 +1,36 @@
 infra/
 ansible-navigator.log
 ansible_collections/
+<<<<<<< HEAD
+=======
+venv*
+>>>>>>> origin/develop
 
 # Ansible Collections Development
 collections-dev/ansible_collections/**
 !collections-dev/.gitkeep
 ansible/.vault-pass.txt
+<<<<<<< HEAD
+=======
+ansible/.secrets/
+
+# AAP containerized installer archive (if stored in the repository for deployment).
+ansible/*.tar.gz
+
+# RPM packaging outputs
+packaging/rpm/.rpmbuild/
+packaging/rpm/dist/
+ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz
+ansible/.artifacts/
+ansible/.tmp/
+ansible/.runtime/
+ansible/.ansible-runner/
+ansible/.toolbox-podman/
+
+# Python
+venv*
+.venv*
+.artifacts/
+__pycache__/
+*.py[cod]
+>>>>>>> origin/develop

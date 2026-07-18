@@ -1,0 +1,240 @@
+---
+- name: Check host CA trust directory for execution environment
+  ansible.builtin.stat:
+    path: "{{ aap_host_ca_trust_dir_effective }}"
+    follow: false
+  register: aap_host_ca_trust_dir
+
+- name: Validate host CA trust directory for execution environment
+  ansible.builtin.assert:
+    that:
+      - aap_host_ca_trust_dir.stat.exists | default(false)
+      - aap_host_ca_trust_dir.stat.isdir | default(false)
+      - not (aap_host_ca_trust_dir.stat.islnk | default(false))
+      - aap_host_ca_trust_dir.stat.pw_name | default('') == 'root'
+      - aap_host_ca_trust_dir.stat.gr_name | default('') == 'root'
+      - aap_host_ca_trust_dir.stat.mode | default('') in ['0555', '0755']
+    fail_msg: >-
+      The host CA trust bind-mount source must be a canonical root-owned
+      directory with mode 0555 or 0755: {{ aap_host_ca_trust_dir_effective }}.
+    quiet: true
+
+- name: Check host CA bundle for execution environment
+  ansible.builtin.stat:
+    path: "{{ aap_requests_ca_bundle_effective }}"
+    follow: false
+  register: aap_host_ca_bundle
+
+- name: Validate host CA bundle for execution environment
+  ansible.builtin.assert:
+    that:
+      - aap_host_ca_bundle.stat.exists | default(false)
+      - aap_host_ca_bundle.stat.isreg | default(false)
+      - not (aap_host_ca_bundle.stat.islnk | default(false))
+      - aap_host_ca_bundle.stat.nlink | default(0) | int == 1
+      - aap_host_ca_bundle.stat.readable | default(false)
+      - aap_host_ca_bundle.stat.pw_name | default('') == 'root'
+      - aap_host_ca_bundle.stat.gr_name | default('') == 'root'
+      - aap_host_ca_bundle.stat.mode | default('') in ['0444', '0644']
+    fail_msg: >-
+      The RHEL host CA bundle must be a readable, single-link, root-owned
+      regular file with mode 0444 or 0644: {{ aap_requests_ca_bundle_effective }}.
+    quiet: true
+
+- name: Check secrets bind-mount source for execution environment
+  ansible.builtin.stat:
+    path: "{{ aap_effective_secrets_dir }}"
+    follow: false
+  register: aap_secrets_dir
+
+- name: Validate secrets bind-mount source for execution environment
+  ansible.builtin.assert:
+    that:
+      - aap_secrets_dir.stat.exists | default(false)
+      - aap_secrets_dir.stat.isdir | default(false)
+      - not (aap_secrets_dir.stat.islnk | default(false))
+      - aap_secrets_dir.stat.pw_name | default('') == aap_effective_setup_user
+      - aap_secrets_dir.stat.mode | default('') == '0750'
+    fail_msg: >-
+      The secrets bind-mount source must be a canonical directory owned by
+      {{ aap_effective_setup_user }} with mode 0750: {{ aap_effective_secrets_dir }}.
+    quiet: true
+
+- name: Check verified SSH known hosts file for execution environment
+  ansible.builtin.stat:
+    path: "{{ aap_effective_known_hosts_file }}"
+    follow: false
+  register: aap_known_hosts_file
+
+- name: Validate verified SSH known hosts file for execution environment
+  ansible.builtin.assert:
+    that:
+      - aap_known_hosts_file.stat.exists | default(false)
+      - aap_known_hosts_file.stat.isreg | default(false)
+      - not (aap_known_hosts_file.stat.islnk | default(false))
+      - aap_known_hosts_file.stat.nlink | default(0) | int == 1
+      - aap_known_hosts_file.stat.size | default(0) | int > 0
+      - aap_known_hosts_file.stat.pw_name | default('') == aap_effective_setup_user
+      - >-
+        aap_known_hosts_file.stat.gr_name | default('') ==
+        aap_secrets_dir.stat.gr_name | default('')
+      - aap_known_hosts_file.stat.mode | default('') == '0600'
+    fail_msg: >-
+      The verified SSH known hosts file must be a non-empty, single-link
+      regular file owned by {{ aap_effective_setup_user }} with mode 0600:
+      {{ aap_effective_known_hosts_file }}.
+    quiet: true
+
+- name: Resolve canonical execution environment bind-mount paths
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/readlink
+      - --canonicalize-existing
+      - --
+      - "{{ item }}"
+  loop:
+    - "{{ aap_host_ca_trust_dir_effective }}"
+    - "{{ aap_requests_ca_bundle_effective }}"
+    - "{{ aap_effective_secrets_dir }}"
+    - "{{ aap_effective_known_hosts_file }}"
+  register: aap_bind_mount_realpaths
+  changed_when: false
+
+- name: Validate canonical execution environment bind-mount paths
+  vars:
+    aap_host_ca_trust_dir_realpath: "{{ aap_bind_mount_realpaths.results[0].stdout }}"
+    aap_host_ca_bundle_realpath: "{{ aap_bind_mount_realpaths.results[1].stdout }}"
+    aap_secrets_dir_realpath: "{{ aap_bind_mount_realpaths.results[2].stdout }}"
+    aap_known_hosts_realpath: "{{ aap_bind_mount_realpaths.results[3].stdout }}"
+  ansible.builtin.assert:
+    that:
+      - >-
+        aap_host_ca_trust_dir_realpath ==
+        (aap_host_ca_trust_dir_effective | regex_replace('/+$', ''))
+      - >-
+        aap_host_ca_bundle_realpath ==
+        (aap_requests_ca_bundle_effective | regex_replace('/+$', ''))
+      - aap_host_ca_bundle_realpath | dirname == aap_host_ca_trust_dir_realpath or
+        aap_host_ca_bundle_realpath.startswith(aap_host_ca_trust_dir_realpath ~ '/')
+      - aap_secrets_dir_realpath == (aap_effective_secrets_dir | regex_replace('/+$', ''))
+      - >-
+        aap_known_hosts_realpath ==
+        (aap_effective_known_hosts_file | regex_replace('/+$', ''))
+      - aap_known_hosts_realpath | dirname == aap_secrets_dir_realpath
+      - aap_known_hosts_realpath | basename == aap_known_hosts_container | basename
+    fail_msg: >-
+      Execution environment bind-mount sources must use canonical paths. The
+      CA bundle must remain below its trust root, and the known-hosts file must
+      be the expected direct child of the secrets directory.
+    quiet: true
+
+- name: Check dedicated AAP Ansible config
+  ansible.builtin.stat:
+    path: "{{ aap_effective_automation_ansible_dir }}/aap-local.cfg"
+  register: aap_local_ansible_config
+
+- name: Validate dedicated AAP Ansible config
+  ansible.builtin.assert:
+    that:
+      - aap_local_ansible_config.stat.exists
+      - aap_local_ansible_config.stat.isreg
+      - aap_local_ansible_config.stat.readable
+    fail_msg: >-
+      The dedicated AAP Ansible config must be readable before starting the
+      execution environment: {{ aap_effective_automation_ansible_dir }}/aap-local.cfg.
+    quiet: true
+
+- name: Read remote SSH_AUTH_SOCK
+  ansible.builtin.command:
+    argv:
+      - printenv
+      - SSH_AUTH_SOCK
+  register: aap_remote_ssh_auth_sock
+  changed_when: false
+  failed_when: false
+
+- name: Check remote SSH agent socket
+  ansible.builtin.stat:
+    path: "{{ aap_remote_ssh_auth_sock.stdout }}"
+  register: aap_remote_ssh_auth_sock_stat
+  when: aap_remote_ssh_auth_sock.stdout | default('', true) | trim | length > 0
+
+- name: Build execution environment command
+  ansible.builtin.set_fact:
+    aap_ee_command_argv: >-
+      {{
+        [
+          'podman', 'run', '--rm',
+          '--network=host',
+          '--security-opt', 'label=disable',
+          '--user', '0',
+          '-e', 'ANSIBLE_CONFIG=/runner/project/aap-local.cfg',
+          '-e', 'ANSIBLE_HOST_KEY_CHECKING=true',
+          '-e', 'ANSIBLE_LOCAL_TEMP=/appl/tmp/.ansible/tmp',
+          '-e', 'ANSIBLE_REMOTE_TEMP',
+          '-e', 'ANSIBLE_TOOLBOX_RUNTIME_MODE',
+          '-e', 'ANSIBLE_COLLECTIONS_PATH'
+        ]
+        + (
+          ['-e', 'ANSIBLE_VAULT_PASSWORD_FILE=/runner/secrets/.vault-pass.txt']
+          if (aap_effective_secret_backend == 'ansible_vault')
+          else []
+        )
+        + [
+          '-e', 'VAULT_ADDR',
+          '-e', 'VAULT_SKIP_VERIFY',
+          '-e', 'VAULT_VALIDATE_CERTS',
+          '-e', 'VAULT_TOKEN',
+          '-e', 'VAULT_ENGINE_MOUNT_POINT',
+          '-e', 'AAP_VAULT_HOST_KEY',
+          '-e', 'AAP_VAULT_ADMIN_PASSWORDS_KV_PATH',
+          '-e', 'AAP_VAULT_DEFAULTS_KV_PATH',
+          '-e', 'AAP_ARTIFACT_DIR',
+          '-e', 'AAP_BUNDLE_REMOTE_SRC',
+          '-e', 'AAP_MANIFEST_REMOTE_SRC',
+          '-e', 'REQUESTS_CA_BUNDLE',
+          '-v', aap_effective_automation_ansible_dir ~ ':/runner/project',
+          '-v', aap_effective_secrets_dir ~ ':/runner/secrets:ro',
+          '-v', aap_host_ca_trust_dir_effective ~ ':' ~ aap_host_ca_trust_dir_effective ~ ':ro',
+          '-v', '/appl/tmp:/appl/tmp'
+        ]
+        + (
+          [
+            '-e', 'SSH_AUTH_SOCK=/runner/ssh-agent',
+            '-v', aap_remote_ssh_auth_sock.stdout ~ ':/runner/ssh-agent'
+          ]
+          if (aap_remote_ssh_auth_sock_stat.stat.issock | default(false))
+          else []
+        )
+        + [
+          '-w', '/runner/project',
+          modulix_run_ee_runtime_image
+        ]
+        + aap_ee_command
+      }}
+  no_log: true
+
+- name: Run command in execution environment
+  ansible.builtin.command:
+    argv: "{{ aap_ee_command_argv }}"
+  environment:
+    ANSIBLE_TOOLBOX_RUNTIME_MODE: "{{ ansible_toolbox_runtime_mode_effective }}"
+    ANSIBLE_COLLECTIONS_PATH: "{{ ansible_collections_path_effective }}"
+    ANSIBLE_REMOTE_TEMP: "{{ ansible_remote_tmp | default('/appl/ansible-tmp', true) }}"
+    VAULT_ADDR: "{{ vault_addr | default('', true) }}"
+    VAULT_SKIP_VERIFY: "{{ (not (vault_validate_certs_effective | bool)) | ternary('true', 'false') }}"
+    VAULT_VALIDATE_CERTS: "{{ vault_validate_certs_effective | bool | ternary('true', 'false') }}"
+    VAULT_TOKEN: "{{ vault_token_effective }}"
+    VAULT_ENGINE_MOUNT_POINT: "{{ vault_engine_mount_point | default('', true) }}"
+    AAP_VAULT_HOST_KEY: "{{ aap_vault_host_key | default(aap_effective_shortname, true) }}"
+    AAP_VAULT_ADMIN_PASSWORDS_KV_PATH: "{{ aap_vault_admin_passwords_kv_path }}"
+    AAP_VAULT_DEFAULTS_KV_PATH: "{{ aap_vault_defaults_kv_path }}"
+    AAP_ARTIFACT_DIR: "{{ aap_effective_artifact_dir }}"
+    AAP_BUNDLE_REMOTE_SRC: "{{ aap_bundle_remote_src | default('', true) }}"
+    AAP_MANIFEST_REMOTE_SRC: "{{ aap_manifest_remote_src | default('', true) }}"
+    REQUESTS_CA_BUNDLE: "{{ aap_requests_ca_bundle_effective }}"
+    CONTAINERS_STORAGE_CONF: "{{ aap_podman_storage_conf_effective }}"
+    TMPDIR: "{{ aap_podman_tmpdir_effective }}"
+  register: aap_ee_command_result
+  changed_when: false
+  no_log: true

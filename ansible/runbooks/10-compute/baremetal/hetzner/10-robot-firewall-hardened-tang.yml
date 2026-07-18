@@ -1,0 +1,170 @@
+---
+# Remove the temporary TCP 22 rule only after every installed host proves its
+# inventory-declared managed OpenSSH path on TCP 1905. Reconcile the complete
+# Robot firewall fleet, then audit exact normalized readback from Robot.
+- name: Prove managed SSH before the hardened Tang firewall transition
+  hosts: hetzner_baremetal
+  gather_facts: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Require the complete bare-metal fleet and final firewall phase
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | sort == groups['hetzner_baremetal'] | sort
+          - hetzner_baremetal_robot_firewall_phase == 'hardened_tang'
+          - ansible_port | int == openssh_server_primary_port | int
+          - ansible_port | int == 1905
+          - >-
+            hetzner_baremetal_robot_firewall.common_input_rules
+            | selectattr('dst_port', 'defined')
+            | map(attribute='dst_port')
+            | map('string')
+            | select('equalto', '22')
+            | list
+            | length == 0
+          - >-
+            hetzner_baremetal_robot_firewall.common_input_rules
+            | selectattr('dst_port', 'defined')
+            | map(attribute='dst_port')
+            | map('string')
+            | select('equalto', '1905')
+            | list
+            | length == 1
+          - >-
+            hetzner_baremetal_robot_firewall.common_input_rules
+            | selectattr('dst_port', 'defined')
+            | map(attribute='dst_port')
+            | map('string')
+            | select('equalto', '2222')
+            | list
+            | length == 1
+          - >-
+            (
+              hetzner_baremetal_robot_firewall.common_input_rules
+              + hetzner_baremetal_robot_firewall_extra_input_rules
+            ) | length <= 10
+          - >-
+            inventory_hostname != hetzner_baremetal_tang_host
+            or hetzner_baremetal_robot_firewall_extra_input_rules
+               == hetzner_baremetal_robot_firewall_deferred_tang_input_rules
+          - >-
+            inventory_hostname == hetzner_baremetal_tang_host
+            or hetzner_baremetal_robot_firewall_extra_input_rules | length == 0
+        fail_msg: >-
+          The hardened_tang inventory must remove TCP 22, retain TCP 1905 and
+          Dropbear TCP 2222, and promote Tang rules only on the Tang host.
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Prove Ansible connectivity through hardened OpenSSH
+      ansible.builtin.ping:
+
+- name: Reconcile the complete hardened Tang Robot firewall fleet
+  hosts: wunderboxes
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Require the exact inventory-declared Vault and Tang host
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == hetzner_baremetal_vault.host
+          - inventory_hostname == hetzner_baremetal_tang_host
+        fail_msg: "The firewall reconciler must run through the one Vault and Tang host."
+        quiet: true
+      tags: [always]
+
+    - name: Resolve encrypted Robot API credentials
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+    - name: Initialize the exact Robot firewall declaration list
+      ansible.builtin.set_fact:
+        _hetzner_hardened_tang_firewalls: []
+      changed_when: false
+
+    - name: Build one exact Robot firewall declaration per inventory host
+      ansible.builtin.set_fact:
+        _hetzner_hardened_tang_firewalls: >-
+          {{
+            _hetzner_hardened_tang_firewalls
+            + [
+                {
+                  'server_ip': hostvars[item].ansible_host,
+                  'port': hostvars[item].hetzner_baremetal_robot_firewall.port,
+                  'filter_ipv6': (
+                    hostvars[item].hetzner_baremetal_robot_firewall.filter_ipv6
+                  ),
+                  'allowlist_hos': (
+                    hostvars[item].hetzner_baremetal_robot_firewall.allowlist_hos
+                  ),
+                  'rules': {
+                    'input': (
+                      hostvars[item].hetzner_baremetal_robot_firewall.common_input_rules
+                      + hostvars[item].hetzner_baremetal_robot_firewall_extra_input_rules
+                    ),
+                    'output': (
+                      hostvars[item].hetzner_baremetal_robot_firewall.output_rules
+                    )
+                  },
+                  'state': 'present'
+                }
+              ]
+          }}
+      loop: "{{ groups['hetzner_baremetal'] }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+      no_log: true
+
+  roles:
+    - role: lit.foundational.hetzner_robot_cac
+      hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+      hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+      hetzner_robot_cac_firewalls: "{{ _hetzner_hardened_tang_firewalls }}"
+
+- name: Audit the complete hardened Tang Robot firewall fleet
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Resolve encrypted Robot API credentials for exact audit
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+  tasks:
+    - name: Audit exact hardened Tang Robot firewall state
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+        tasks_from: audit
+      vars:
+        hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+        hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+        hetzner_robot_cac_audit_servers:
+          - server_ip: "{{ ansible_host }}"
+            server_name: "{{ inventory_hostname }}"
+            status: ready
+            cancelled: false
+            firewall:
+              status: active
+              port: "{{ hetzner_baremetal_robot_firewall.port }}"
+              filter_ipv6: "{{ hetzner_baremetal_robot_firewall.filter_ipv6 }}"
+              allowlist_hos: "{{ hetzner_baremetal_robot_firewall.allowlist_hos }}"
+              rules:
+                input: >-
+                  {{
+                    hetzner_baremetal_robot_firewall.common_input_rules
+                    + hetzner_baremetal_robot_firewall_extra_input_rules
+                  }}
+                output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"

@@ -1,0 +1,48 @@
+---
+- name: PreCheck
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Verify that a limit is set
+      ansible.builtin.fail:
+        msg: "This runbook cannot be run without --limit. Please use --limit <host-or-group>."
+      run_once: true
+      when: ansible_limit is not defined
+      tags:
+        - always
+
+    - name: Show limit
+      ansible.builtin.debug:
+        msg: "Limit is {{ ansible_limit }}, continuing."
+      run_once: true
+      when: ansible_limit is defined
+      tags:
+        - always
+
+- name: Teardown RHEL host
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Bootstrap custom Ansible remote tmp when configured
+      ansible.builtin.include_role:
+        name: lit.foundational.ansible_remote_tmp
+        apply:
+          tags: [always]
+      tags:
+        - always
+
+  tasks:
+    - name: Unregister RHEL host from RHSM
+      ansible.builtin.include_role:
+        name: lit.rhel.rhsm
+        apply:
+          tags: [rhsm, teardown]
+      vars:
+        rhsm_state: absent
+      when: rhsm_method | default('none') != 'none'
+      tags:
+        - rhsm
+        - teardown

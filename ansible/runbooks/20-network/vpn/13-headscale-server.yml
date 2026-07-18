@@ -1,0 +1,11 @@
+---
+- name: headscale
+  hosts: vpn_headsacle_server
+  gather_facts: false
+  become: true
+  roles:
+    - name: Setup headscale server
+      role: headscale
+      vars:
+        headscale_type: server
+        headscale_login_server: "{{ headscale_node_login_server }}"

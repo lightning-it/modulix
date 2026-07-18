@@ -1,0 +1,19 @@
+---
+# -----------------------------------------------------------------------------
+# RHEL10 - CIS Hardening
+#
+# Purpose:
+# - Apply CIS baseline via lit.rhel.cis_rhel10
+# - Keep upstream ansible-lockdown wiring behind the lit.rhel wrapper contract
+# -----------------------------------------------------------------------------
+- name: CIS hardening (RHEL10)
+  hosts: rhel10_cis_targets
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+
+  tasks:
+    - name: CIS hardening
+      ansible.builtin.import_role:
+        name: lit.rhel.cis_rhel10
+      tags: [cis, compliance]

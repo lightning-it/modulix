@@ -1,0 +1,18 @@
+---
+# Temporary AAP self-signed TLS generation.
+# The reusable logic lives in lit.supplementary.aap_tls.
+
+- name: Generate temporary AAP self-signed TLS files
+  hosts: aaps
+  gather_facts: false
+
+  tasks:
+    - name: Generate temporary TLS assets
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_tls
+        apply:
+          tags: [aap, aap_tls, tls]
+      tags:
+        - aap
+        - aap_tls
+        - tls

@@ -1,0 +1,9 @@
+[storage]
+driver = "overlay"
+graphroot = "{{ aap_podman_root_graphroot_effective }}"
+runroot = "{{ aap_podman_root_runroot_effective }}"
+
+[storage.options]
+{% if aap_podman_fuse_overlayfs.stat.exists | default(false) %}
+mount_program = "/usr/bin/fuse-overlayfs"
+{% endif %}

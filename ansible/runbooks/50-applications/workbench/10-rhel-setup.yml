@@ -1,0 +1,57 @@
+---
+# -----------------------------------------------------------------------------
+# RHEL Workbenches - GUI + RDP
+#
+# Purpose:
+# - Install Podman container tooling
+# - Install a GUI stack (GNOME or XFCE) via lit.rhel.gui
+# - Enable RDP access via XRDP (lit.rhel.xrdp) for remote administration
+#
+# Notes:
+# - Select GUI via vars: `gui_variant: gnome|xfce` (default: gnome)
+# - Control XRDP via vars: `xrdp_firewalld_zone`, `xrdp_listen_port`, TLS options, etc.
+# -----------------------------------------------------------------------------
+
+- name: Configure RHEL workbenches
+  hosts: workbenches
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Ensure the RHEL workbench runbook only runs on RedHat-family systems
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "RedHat"
+        fail_msg: >-
+          This runbook is for RHEL workbenches only. Use
+          runbooks/50-applications/workbench/20-ubuntu-setup.yml for the Ubuntu
+          workbench path.
+      tags: [always]
+
+  roles:
+    - role: lit.rhel.podman
+      tags: [packages, podman, containers]
+
+    - role: lit.rhel.developer_tools
+      vars:
+        developer_tools_packer_enabled: true
+      tags: [packages, developer_tools]
+
+    - role: lit.rhel.vscode_deploy
+      tags: [packages, vscode, vscode_deploy]
+
+    - role: lit.rhel.vscode_config
+      tags: [vscode, vscode_config]
+
+    # GUI stack (GNOME or XFCE)
+    - role: lit.rhel.gui
+      tags: [gui]
+
+    # XRDP server (RDP)
+    - role: lit.rhel.xrdp
+      tags: [xrdp]
+
+    # Optional Cloudflare Zero Trust client for private/admin connectivity.
+    # Inventory controls whether a given workbench enrolls and connects.
+    - role: lit.supplementary.cloudflare_warp
+      tags: [cloudflare, warp, networking]

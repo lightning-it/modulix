@@ -1,0 +1,11 @@
+---
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+      ansible_become: false
+
+  children:
+    aaps:
+      hosts:
+        {{ aap_effective_inventory_host }}: {}

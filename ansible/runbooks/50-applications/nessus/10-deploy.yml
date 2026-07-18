@@ -1,0 +1,16 @@
+---
+- name: Deploy Nessus
+  become: true
+  hosts: "{{ nessus_target | default('nessus') }}"
+  gather_facts: true
+  roles:
+    - role: lit.supplementary.nessus_deploy
+      tags:
+        - nessus
+        - nessus_deploy
+
+    - role: lit.supplementary.nessus_cac
+      when: nessus_cac_enabled | default(true) | bool
+      tags:
+        - nessus
+        - nessus_cac

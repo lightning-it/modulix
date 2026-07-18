@@ -1,0 +1,13 @@
+---
+# -----------------------------------------------------------------------------
+# RHEL - CIS Hardening
+#
+# Purpose:
+# - Run all supported RHEL ansible-lockdown CIS hardening runbooks
+# - Keep version selection in inventory opt-in groups such as rhel9_cis_targets
+#   and rhel10_cis_targets
+# -----------------------------------------------------------------------------
+- name: RHEL9 CIS hardening
+  ansible.builtin.import_playbook: 9/90-cis-hardening.yml
+- name: RHEL10 CIS hardening
+  ansible.builtin.import_playbook: 10/90-cis-hardening.yml

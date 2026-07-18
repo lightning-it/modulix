@@ -1,0 +1,21 @@
+---
+- name: Stage and prepare nested ESXi Incus image
+  hosts: "{{ incus_esxi_image_target | default('incus_hosts') }}"
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: lit.supplementary.artifacts
+      tags:
+        - artifacts
+        - incus
+        - esxi
+        - incus_images
+        - incus_esxi_image
+
+    - role: lit.supplementary.incus_esxi_image
+      tags:
+        - incus
+        - esxi
+        - incus_images
+        - incus_esxi_image

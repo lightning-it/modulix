@@ -1,0 +1,232 @@
+---
+- name: Deploy LIT Atlas observability appliances
+  hosts: atlas
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Ensure Atlas is enabled
+      ansible.builtin.meta: end_play
+      when: not _lit_atlas_enabled | bool
+      tags: always
+
+    - name: Ensure Atlas base directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ _lit_atlas_data_dir }}"
+        - "{{ _lit_atlas_config_dir }}"
+        - "{{ _lit_atlas_state_dir }}"
+        - "{{ _lit_atlas_quadlet_dir }}"
+        - "{{ _lit_atlas_backup_dir }}"
+      tags: [atlas, atlas_prepare]
+
+    - name: Prepare Ubuntu baseline
+      ansible.builtin.include_role:
+        name: lit.ubuntu.baseline
+        apply:
+          tags: [atlas, atlas_prepare, ubuntu]
+      when: _lit_atlas_prepare_ubuntu_enabled | bool
+      tags: [atlas, atlas_prepare, ubuntu]
+
+    - name: Install and configure Podman
+      ansible.builtin.include_role:
+        name: lit.ubuntu.podman
+        apply:
+          tags: [atlas, podman]
+      when: _lit_atlas_podman_enabled | bool
+      tags: [atlas, podman]
+
+    - name: Apply Atlas firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [atlas, firewall]
+      vars:
+        firewall:
+          - port: "{{ _lit_atlas_grafana_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_prometheus_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_alertmanager_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_loki_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_rsyslog_tcp_port }}/tcp"
+            state: enabled
+          - port: "{{ _lit_atlas_rsyslog_udp_port }}/udp"
+            state: enabled
+          - port: "{{ _lit_atlas_checkmk_port }}/tcp"
+            state: enabled
+      when: _lit_atlas_firewall_enabled | bool
+      tags: [atlas, firewall]
+
+    - name: Deploy Loki
+      ansible.builtin.include_role:
+        name: lit.supplementary.loki_deploy
+        apply:
+          tags: [atlas, loki, loki_deploy]
+      vars:
+        loki_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        loki_deploy_port: "{{ _lit_atlas_loki_port }}"
+        loki_deploy_host_data_dir: "{{ _lit_atlas_state_dir }}/loki"
+        loki_deploy_config_dir: "{{ _lit_atlas_config_dir }}/loki"
+        loki_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/loki.yml"
+      when: >-
+        (
+          _atlas_services_cfg.loki
+          | default(_atlas_services_cfg.loki_deploy | default(_lit_atlas_loki_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, loki, loki_deploy]
+
+    - name: Deploy Alertmanager
+      ansible.builtin.include_role:
+        name: lit.supplementary.alertmanager_deploy
+        apply:
+          tags: [atlas, alertmanager, alertmanager_deploy]
+      vars:
+        alertmanager_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        alertmanager_deploy_port: "{{ _lit_atlas_alertmanager_port }}"
+        alertmanager_deploy_config_dir: "{{ _lit_atlas_config_dir }}/alertmanager"
+        alertmanager_deploy_data_dir: "{{ _lit_atlas_state_dir }}/alertmanager"
+        alertmanager_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/alertmanager.yml"
+        alertmanager_deploy_quadlet_dir: "{{ _lit_atlas_quadlet_dir }}"
+      when: >-
+        (
+          _atlas_services_cfg.alertmanager
+          | default(_atlas_services_cfg.alertmanager_deploy | default(_lit_atlas_alertmanager_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, alertmanager, alertmanager_deploy]
+
+    - name: Deploy Prometheus
+      ansible.builtin.include_role:
+        name: lit.supplementary.prometheus_deploy
+        apply:
+          tags: [atlas, prometheus, prometheus_deploy]
+      vars:
+        prometheus_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        prometheus_deploy_port: "{{ _lit_atlas_prometheus_port }}"
+        prometheus_deploy_config_dir: "{{ _lit_atlas_config_dir }}/prometheus"
+        prometheus_deploy_data_dir: "{{ _lit_atlas_state_dir }}/prometheus"
+        prometheus_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/prometheus.yml"
+        prometheus_deploy_quadlet_dir: "{{ _lit_atlas_quadlet_dir }}"
+        prometheus_deploy_alertmanager_targets:
+          - "{{ _lit_atlas_bind_address }}:{{ _lit_atlas_alertmanager_port }}"
+        prometheus_deploy_scrape_configs:
+          - job_name: prometheus
+            static_configs:
+              - targets:
+                  - "{{ _lit_atlas_bind_address }}:{{ _lit_atlas_prometheus_port }}"
+          - job_name: alloy
+            metrics_path: "/metrics"
+            static_configs:
+              - targets:
+                  - "{{ _lit_atlas_bind_address }}:{{ _lit_atlas_alloy_port }}"
+      when: >-
+        (
+          _atlas_services_cfg.prometheus
+          | default(_atlas_services_cfg.prometheus_deploy | default(_lit_atlas_prometheus_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, prometheus, prometheus_deploy]
+
+    - name: Deploy rsyslog
+      ansible.builtin.include_role:
+        name: lit.supplementary.rsyslog_deploy
+        apply:
+          tags: [atlas, rsyslog, rsyslog_deploy]
+      vars:
+        rsyslog_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        rsyslog_deploy_tcp_port: "{{ _lit_atlas_rsyslog_tcp_port }}"
+        rsyslog_deploy_udp_port: "{{ _lit_atlas_rsyslog_udp_port }}"
+        rsyslog_deploy_config_dir: "{{ _lit_atlas_config_dir }}/rsyslog"
+        rsyslog_deploy_log_dir: "{{ _lit_atlas_state_dir }}/rsyslog/log"
+        rsyslog_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/rsyslog.yml"
+        rsyslog_deploy_quadlet_dir: "{{ _lit_atlas_quadlet_dir }}"
+      when: >-
+        (
+          _atlas_services_cfg.rsyslog
+          | default(_atlas_services_cfg.rsyslog_deploy | default(_lit_atlas_rsyslog_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, rsyslog, rsyslog_deploy]
+
+    - name: Deploy Alloy
+      ansible.builtin.include_role:
+        name: lit.supplementary.alloy_deploy
+        apply:
+          tags: [atlas, alloy, alloy_deploy]
+      vars:
+        alloy_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        alloy_deploy_port: "{{ _lit_atlas_alloy_port }}"
+        alloy_deploy_config_dir: "{{ _lit_atlas_config_dir }}/alloy"
+        alloy_deploy_data_dir: "{{ _lit_atlas_state_dir }}/alloy"
+        alloy_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/alloy.yml"
+        alloy_deploy_loki_url: "http://{{ _lit_atlas_bind_address }}:{{ _lit_atlas_loki_port }}/loki/api/v1/push"
+        alloy_deploy_collect_nginx_logs: false
+        alloy_deploy_collect_vault_logs: false
+        alloy_deploy_collect_keycloak_logs: false
+        alloy_deploy_collect_nexus_logs: false
+        alloy_deploy_collect_forgejo_logs: false
+        alloy_deploy_extra_log_paths:
+          - name: atlas_rsyslog
+            enabled: "{{ _lit_atlas_rsyslog_enabled }}"
+            service: rsyslog
+            paths:
+              - "{{ _lit_atlas_state_dir }}/rsyslog/log/*.log"
+      when: >-
+        (
+          _atlas_services_cfg.alloy
+          | default(_atlas_services_cfg.alloy_deploy | default(_lit_atlas_alloy_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, alloy, alloy_deploy]
+
+    - name: Deploy Grafana
+      ansible.builtin.include_role:
+        name: lit.supplementary.grafana_deploy
+        apply:
+          tags: [atlas, grafana, grafana_deploy]
+      vars:
+        grafana_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        grafana_deploy_port: "{{ _lit_atlas_grafana_port }}"
+        grafana_deploy_host_data_dir: "{{ _lit_atlas_state_dir }}/grafana"
+        grafana_deploy_config_dir: "{{ _lit_atlas_config_dir }}/grafana"
+        grafana_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/grafana.yml"
+        grafana_deploy_public_fqdn: "grafana.{{ _lit_atlas_domain }}"
+        grafana_deploy_root_url: "https://grafana.{{ _lit_atlas_domain }}"
+        grafana_deploy_loki_url: "http://{{ _lit_atlas_bind_address }}:{{ _lit_atlas_loki_port }}"
+      when: >-
+        (
+          _atlas_services_cfg.grafana
+          | default(_atlas_services_cfg.grafana_deploy | default(_lit_atlas_grafana_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, grafana, grafana_deploy]
+
+    - name: Deploy Checkmk
+      ansible.builtin.include_role:
+        name: lit.supplementary.checkmk_deploy
+        apply:
+          tags: [atlas, checkmk, checkmk_deploy]
+      vars:
+        checkmk_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
+        checkmk_deploy_port: "{{ _lit_atlas_checkmk_port }}"
+        checkmk_deploy_host_data_dir: "{{ _lit_atlas_state_dir }}/checkmk"
+        checkmk_deploy_config_dir: "{{ _lit_atlas_config_dir }}/checkmk"
+        checkmk_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/checkmk.yml"
+        checkmk_deploy_public_fqdn: "checkmk.{{ _lit_atlas_domain }}"
+        checkmk_deploy_public_url: "https://checkmk.{{ _lit_atlas_domain }}"
+      when: >-
+        (
+          _atlas_services_cfg.checkmk
+          | default(_atlas_services_cfg.checkmk_deploy | default(_lit_atlas_checkmk_enabled))
+          | string | lower
+        ) in _enabled_values
+      tags: [atlas, checkmk, checkmk_deploy]

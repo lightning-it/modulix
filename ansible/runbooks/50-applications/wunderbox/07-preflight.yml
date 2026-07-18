@@ -1,0 +1,80 @@
+---
+- name: Run Wunderbox deployment preflight
+  hosts: wunderboxes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    _wunderbox_services_cfg: >-
+      {{
+        (
+          services.wunderbox
+          if (
+            services is defined and
+            services is mapping and
+            services.wunderbox is defined and
+            services.wunderbox is mapping
+          )
+          else
+          (wunderbox_services | default({}))
+        )
+      }}
+    _enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']
+    _wunderbox_dhcp_requested: >-
+      {{
+        (
+          wunderbox_service_dhcp_deploy
+          | default(
+              _wunderbox_services_cfg.dhcp_deploy
+              | default(_wunderbox_services_cfg.dhcp | default('disabled'))
+            )
+          | string
+          | lower
+        ) in _enabled_values
+      }}
+
+  tasks:
+    - name: Validate Wunderbox service map
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_services_cfg is mapping
+        fail_msg: >-
+          Wunderbox inventory must provide services.wunderbox or
+          wunderbox_services as a mapping.
+        quiet: true
+      tags: [wunderbox, wunderbox_preflight]
+
+    - name: Require DHCP production validation before enabling DHCP
+      ansible.builtin.assert:
+        that:
+          - >-
+            dhcp_deploy_production_ready
+            | default(wunderbox_dhcp_production_validated | default(false))
+            | bool
+          - dhcp_deploy_production_evidence.rhel_first_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.ubuntu_target_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.l2_broadcast_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.lease_persistence_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.reboot_recovery_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.renewal_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.backup_failover_validated | default(false) | bool
+          - dhcp_deploy_production_evidence.no_rogue_dhcp_validated | default(false) | bool
+          - dhcp_deploy_production_evidence_reference | default('', true) | trim | length > 0
+        fail_msg: >-
+          Wunderbox DHCP requires explicit production network validation first:
+          RHEL-first validation, target Ubuntu validation, L2/broadcast,
+          lease persistence, reboot recovery, renewal, backup/failover, and
+          no-rogue-DHCP evidence.
+        quiet: true
+      when: _wunderbox_dhcp_requested | bool
+      tags: [wunderbox, wunderbox_preflight, dhcp, dhcp_deploy]
+
+    - name: Verify required runtime commands are available
+      ansible.builtin.command:
+        argv:
+          - "{{ item }}"
+          - --version
+      changed_when: false
+      loop:
+        - podman
+      tags: [wunderbox, wunderbox_preflight]

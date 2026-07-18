@@ -1,0 +1,36 @@
+---
+# Deliberately separate from configuration reconciliation and Rescue
+# validation. The role requires server-specific BOOT/RESET confirmations and
+# performs no action by default.
+- name: Run one explicitly gated Hetzner Robot operation
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one exact bare-metal inventory target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname in groups['hetzner_baremetal']
+        fail_msg: >-
+          Use --limit with one exact bare-metal inventory FQDN. Robot boot and
+          reset operations never accept a fleet target.
+        quiet: true
+      tags: [always]
+
+    - name: Resolve encrypted Robot API credentials
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+  roles:
+    - role: lit.foundational.hetzner_robot_ops
+      hetzner_robot_ops_hetzner_user: "{{ _hetzner_robot_user }}"
+      hetzner_robot_ops_hetzner_password: "{{ _hetzner_robot_password }}"
+      hetzner_robot_ops_server_ip: "{{ ansible_host }}"

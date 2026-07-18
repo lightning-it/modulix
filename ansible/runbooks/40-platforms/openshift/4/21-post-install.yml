@@ -1,0 +1,17 @@
+---
+- name: Setup gitops
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Get kubeconfig for OCP cluster
+      ansible.builtin.include_role:
+        name: lit.foundation_services.ocp_install
+        tasks_from: cluster_login.yml
+      tags: always
+  roles:
+    - role: lit.foundation_services.gitops
+      tags:
+        - gitops
+      vars:
+        gitops_operator_approve: "{{ approve_all | default(false) }}"
+- name: Setup gitops

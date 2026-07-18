@@ -1,0 +1,48 @@
+---
+- name: Prepare Wunderbox hosts
+  hosts: wunderboxes
+  become: true
+  gather_facts: true
+  vars:
+    _wunderbox_services_cfg: >-
+      {{
+        (
+          services.wunderbox
+          if (
+            services is defined and
+            services is mapping and
+            services.wunderbox is defined and
+            services.wunderbox is mapping
+          )
+          else
+          (wunderbox_services | default({}))
+        )
+      }}
+    _enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']
+
+  tasks:
+    - name: Enable required repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [wunderbox, wunderbox_prepare, repos]
+      when: >-
+        (
+          wunderbox_service_repos
+          | default(_wunderbox_services_cfg.repos | default('disabled'))
+          | string | lower
+        ) in _enabled_values
+      tags: [wunderbox, wunderbox_prepare, repos]
+
+    - name: Apply firewall policy
+      ansible.builtin.include_role:
+        name: fedora.linux_system_roles.firewall
+        apply:
+          tags: [wunderbox, wunderbox_prepare, firewall]
+      when: >-
+        (
+          wunderbox_service_firewall
+          | default('disabled')
+          | string | lower
+        ) in _enabled_values
+      tags: [wunderbox, wunderbox_prepare, firewall]

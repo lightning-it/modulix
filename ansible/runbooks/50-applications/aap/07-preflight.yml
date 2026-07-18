@@ -1,0 +1,26 @@
+---
+# -----------------------------------------------------------------------------
+# Ansible Automation Platform (AAP) preflight
+#
+# Purpose:
+# - Keep the runbook thin and put reusable validation logic in
+#   lit.supplementary.aap_preflight.
+# -----------------------------------------------------------------------------
+
+- name: Run AAP deployment preflight
+  hosts: aaps
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  roles:
+    - role: lit.supplementary.aap_preflight
+      tags:
+        - aap
+        - aap_preflight
+
+  post_tasks:
+    - name: Report AAP base OS preparation and preflight success
+      ansible.builtin.debug:
+        msg: AAP_BASE_OS_AND_PREFLIGHT_OK
+      changed_when: false

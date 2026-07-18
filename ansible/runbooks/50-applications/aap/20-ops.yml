@@ -1,0 +1,23 @@
+---
+# AAP day-2 operations.
+# The reusable logic lives in lit.supplementary.aap_ops.
+
+- name: Operate AAP hosts
+  hosts: aaps
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Run AAP operation
+      ansible.builtin.include_role:
+        name: lit.supplementary.aap_ops
+        apply:
+          tags: [aap, aap_ops]
+      tags:
+        - aap
+        - aap_ops
+
+    - name: Report AAP operations success
+      ansible.builtin.debug:
+        msg: AAP_OPERATIONS_STATUS_OK
+      changed_when: false

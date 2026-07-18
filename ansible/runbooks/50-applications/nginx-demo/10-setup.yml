@@ -1,0 +1,9 @@
+---
+- name: Setup nginx demo app
+  hosts: all
+  gather_facts: true
+  become: true
+  roles:
+    - name: Setup ngin
+      role: nginx
+      vars:

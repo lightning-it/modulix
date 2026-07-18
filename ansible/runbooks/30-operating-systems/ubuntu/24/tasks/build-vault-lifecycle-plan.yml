@@ -1,0 +1,777 @@
+---
+- name: Validate the immutable Vault architecture contract
+  ansible.builtin.assert:
+    that:
+      - >-
+        vault_lifecycle_operation
+        in ['deploy', 'initialize', 'initialize_resume', 'initialize_finalize']
+      - inventory_hostname == hetzner_baremetal_vault.host
+      - inventory_hostname == hetzner_baremetal_tang_host
+      - ansible_play_hosts_all | length == 1
+      - ansible_limit | string | trim == inventory_hostname
+      - hetzner_baremetal_vault.schema_version | int == 1
+      - hetzner_baremetal_vault.image.require_immutable_digest is sameas true
+      - >-
+        hetzner_baremetal_vault.image.reference
+        is match('^[^@\s]+@sha256:[0-9a-f]{64}$')
+      - hetzner_baremetal_vault.storage.backend == 'raft'
+      - hetzner_baremetal_vault.storage.node_id | length > 0
+      - hetzner_baremetal_vault.network.host_bind_address == '127.0.0.1'
+      - >-
+        hetzner_baremetal_vault.network.firewall_exposure
+        == 'loopback_only_over_managed_ssh'
+      - >-
+        hetzner_baremetal_vault.network.controller_api_addr
+        == hetzner_baremetal_vault.api_addr
+      - >-
+        hetzner_baremetal_vault.network.container_api_addr
+        == 'https://127.0.0.1:'
+        ~ (hetzner_baremetal_vault.network.api_port | string)
+      - >-
+        hetzner_baremetal_vault.network.advertised_api_addr
+        == 'https://' ~ hetzner_baremetal_vault.endpoint_fqdn ~ ':'
+        ~ (hetzner_baremetal_vault.network.api_port | string)
+      - >-
+        hetzner_baremetal_vault.network.advertised_cluster_addr
+        == 'https://127.0.0.1:'
+        ~ (hetzner_baremetal_vault.network.cluster_port | string)
+      - hetzner_baremetal_vault.validate_certs is sameas true
+      - >-
+        hetzner_baremetal_vault.tls.issuer_model
+        == 'target_self_signed_leaf_pinned_as_ca'
+      - "'IP:127.0.0.1' in hetzner_baremetal_vault.tls.required_subject_alt_names"
+      - >-
+        'DNS:' ~ hetzner_baremetal_vault.endpoint_fqdn
+        in hetzner_baremetal_vault.tls.required_subject_alt_names
+      - >-
+        'DNS:' ~ inventory_hostname
+        in hetzner_baremetal_vault.tls.required_subject_alt_names
+      - hetzner_baremetal_vault.runtime.run_as_non_root is sameas true
+      - hetzner_baremetal_vault.runtime.add_ipc_lock_cap is sameas true
+      - hetzner_baremetal_vault.runtime.disable_mlock is sameas false
+      - hetzner_baremetal_vault.seal.model == 'shamir'
+      - hetzner_baremetal_vault.seal.key_shares | int == 5
+      - hetzner_baremetal_vault.seal.key_threshold | int == 3
+      - >-
+        hetzner_baremetal_vault.seal.key_threshold | int
+        < hetzner_baremetal_vault.seal.key_shares | int
+      - >-
+        hetzner_baremetal_vault.seal.controller_init_file_path
+        is match('^/')
+      - >-
+        hetzner_baremetal_vault.seal.controller_init_file_path.startswith(
+          hetzner_baremetal_vault.seal.controller_init_escrow_root_path ~ '/'
+        )
+      - hetzner_baremetal_vault.controller_auth.auth_method == 'approle'
+      - hetzner_baremetal_vault.controller_auth.token_type == 'batch'
+      - hetzner_baremetal_ansible_vault is mapping
+      - hetzner_baremetal_ansible_vault.vault_id is string
+      - >-
+        hetzner_baremetal_ansible_vault.vault_id
+        is match('^[A-Za-z0-9_.-]+$')
+      - hetzner_baremetal_vault.controller_auth.policy | trim | length > 0
+      - hetzner_baremetal_vault.controller_auth.capability_probes | length > 0
+      - hetzner_baremetal_vault.backup.backend == 'raft_snapshot'
+      - hetzner_baremetal_vault.backup.max_raw_bytes | int > 0
+      - hetzner_baremetal_vault.backup.max_raw_bytes | int <= 67108864
+      - hetzner_baremetal_robot_firewall_phase == 'bootstrap'
+      - hetzner_baremetal_robot_firewall.common_input_rules | length == 8
+      - >-
+        '8200' not in (
+          hetzner_baremetal_robot_firewall.common_input_rules
+          | selectattr('dst_port', 'defined')
+          | map(attribute='dst_port')
+          | map('string')
+          | list
+        )
+      - lookup('ansible.builtin.env', 'VAULT_ADDR') | length == 0
+      - lookup('ansible.builtin.env', 'VAULT_TOKEN') | length == 0
+      - lookup('ansible.builtin.env', 'VAULT_SKIP_VERIFY') | length == 0
+    fail_msg: >-
+      The inventory does not describe the reviewed digest-pinned, loopback-only,
+      single-node Raft, target-key TLS, Shamir 5-of-3 Vault architecture.
+    quiet: true
+
+- name: Inspect Vault target paths for immutable plan state
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - "{{ hetzner_baremetal_vault.storage.host_data_dir }}"
+    - "{{ hetzner_baremetal_vault.tls.target_cert_dir }}"
+    - "{{ hetzner_baremetal_vault.runtime.config_dir }}"
+    - "{{ hetzner_baremetal_vault.runtime.pod_manifest_path }}"
+    - "{{ hetzner_baremetal_vault.seal.target_ciphertext_path }}"
+  register: _vault_lifecycle_target_paths
+  changed_when: false
+
+- name: Inspect any existing Vault container image
+  ansible.builtin.command:
+    argv:
+      - podman
+      - inspect
+      - "{{ hetzner_baremetal_vault.runtime.pod_name }}-vault"
+      - --format
+      - "{% raw %}{{.ImageName}}{% endraw %}"
+  register: _vault_lifecycle_container_image
+  changed_when: false
+  failed_when: false
+
+- name: Inspect target TCP listeners for Vault plan state
+  ansible.builtin.command:
+    argv:
+      - ss
+      - -H
+      - -ltn
+  register: _vault_lifecycle_target_listeners
+  changed_when: false
+
+- name: Inspect controller Vault lifecycle paths
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    get_attributes: false
+    get_checksum: "{{ item.checksum }}"
+    checksum_algorithm: sha256
+    get_mime: false
+  loop:
+    - path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+      checksum: true
+    - path: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+      checksum: true
+    - path: "{{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}"
+      checksum: true
+    - path: "{{ hetzner_baremetal_vault.backup.controller_snapshot_dir }}"
+      checksum: false
+    - path: >-
+        {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}.schema-v1-repair
+      checksum: true
+  register: _vault_lifecycle_controller_paths
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Inspect the target init ciphertext for immutable recovery planning
+  ansible.builtin.stat:
+    path: "{{ hetzner_baremetal_vault.seal.target_ciphertext_path }}"
+    follow: false
+    get_attributes: false
+    get_checksum: true
+    checksum_algorithm: sha256
+    get_mime: false
+  register: _vault_lifecycle_target_init_ciphertext
+  changed_when: false
+
+- name: Inspect the controller process identity for immutable recovery planning
+  ansible.builtin.stat:
+    path: /proc/self
+    follow: true
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  register: _vault_lifecycle_controller_process
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: vault_lifecycle_operation in ['initialize_resume', 'initialize_finalize']
+
+- name: Read the controller init ciphertext signature for immutable recovery planning
+  ansible.builtin.command:
+    argv:
+      - head
+      - -n
+      - "1"
+      - "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+  register: _vault_lifecycle_controller_init_signature
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  when: vault_lifecycle_operation in ['initialize_resume', 'initialize_finalize']
+  no_log: true
+
+- name: Read the target init ciphertext signature for immutable recovery planning
+  ansible.builtin.command:
+    argv:
+      - head
+      - -n
+      - "1"
+      - "{{ hetzner_baremetal_vault.seal.target_ciphertext_path }}"
+  register: _vault_lifecycle_target_init_signature
+  changed_when: false
+  failed_when: false
+  when: vault_lifecycle_operation in ['initialize_resume', 'initialize_finalize']
+  no_log: true
+
+- name: Read any AppRole repair-stage ciphertext signature
+  ansible.builtin.command:
+    argv:
+      - head
+      - -n
+      - "1"
+      - >-
+        {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}.schema-v1-repair
+  register: _vault_lifecycle_approle_repair_signature
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_lifecycle_operation == 'initialize_finalize'
+    - _vault_lifecycle_controller_paths.results[4].stat.exists | default(false)
+  no_log: true
+
+- name: Ensure the protected off-host Raft snapshot target exists
+  ansible.builtin.file:
+    path: "{{ hetzner_baremetal_vault.backup.controller_snapshot_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: vault_lifecycle_operation == 'initialize'
+
+- name: Re-inspect the protected off-host Raft snapshot target
+  ansible.builtin.stat:
+    path: "{{ hetzner_baremetal_vault.backup.controller_snapshot_dir }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  register: _vault_lifecycle_backup_target
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: >-
+    vault_lifecycle_operation
+    in ['initialize', 'initialize_resume', 'initialize_finalize']
+
+- name: Require no conflicting Vault listener before initial deployment
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_lifecycle_container_image.rc == 0
+        or (
+          (':' ~ (hetzner_baremetal_vault.network.api_port | string) ~ ' ')
+          not in (_vault_lifecycle_target_listeners.stdout ~ ' ')
+          and
+          (':' ~ (hetzner_baremetal_vault.network.cluster_port | string) ~ ' ')
+          not in (_vault_lifecycle_target_listeners.stdout ~ ' ')
+        )
+    fail_msg: >-
+      A Vault API or cluster port is already listening without the declared
+      Vault container identity. Deployment will not replace an unknown service.
+    quiet: true
+  when: vault_lifecycle_operation == 'deploy'
+
+- name: Validate deployed Vault TLS identity for initialization planning
+  community.crypto.x509_certificate_info:
+    path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+  register: _vault_lifecycle_controller_ca_info
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: >-
+    vault_lifecycle_operation
+    in ['initialize', 'initialize_resume', 'initialize_finalize']
+
+- name: Read Vault initialization state for initialization planning
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/init"
+    method: GET
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_init_state
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: >-
+    vault_lifecycle_operation
+    in ['initialize', 'initialize_resume', 'initialize_finalize']
+
+- name: Read Vault seal state for initialization recovery planning
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/seal-status"
+    method: GET
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_lifecycle_seal_state
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: vault_lifecycle_operation in ['initialize_resume', 'initialize_finalize']
+
+- name: Require safe controller ciphertexts before loading finalization secrets
+  ansible.builtin.assert:
+    that:
+      - _vault_lifecycle_controller_paths.results[1].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[1].stat.isreg | default(false)
+      - not (_vault_lifecycle_controller_paths.results[1].stat.islnk | default(false))
+      - _vault_lifecycle_controller_paths.results[1].stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_controller_paths.results[1].stat.mode | default('') in ['0400', '0600']
+      - >-
+        _vault_lifecycle_controller_paths.results[1].stat.uid | default(-1) | int
+        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+      - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int > 0
+      - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int <= 67108864
+      - >-
+        _vault_lifecycle_controller_paths.results[1].stat.checksum | default('')
+        is match('^[0-9a-f]{64}$')
+      - _vault_lifecycle_controller_init_signature.rc | default(1) | int == 0
+      - _vault_lifecycle_controller_init_signature.stdout | default('') is match('^\\$ANSIBLE_VAULT;')
+      - _vault_lifecycle_controller_paths.results[2].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[2].stat.isreg | default(false)
+      - not (_vault_lifecycle_controller_paths.results[2].stat.islnk | default(false))
+      - _vault_lifecycle_controller_paths.results[2].stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_controller_paths.results[2].stat.mode | default('') in ['0400', '0600']
+      - >-
+        _vault_lifecycle_controller_paths.results[2].stat.uid | default(-1) | int
+        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+      - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int > 0
+      - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int <= 1048576
+      - >-
+        _vault_lifecycle_controller_paths.results[2].stat.checksum | default('')
+        is match('^[0-9a-f]{64}$')
+      - >-
+        not (_vault_lifecycle_controller_paths.results[4].stat.exists | default(false))
+        or (
+          _vault_lifecycle_controller_paths.results[4].stat.isreg | default(false)
+          and not (_vault_lifecycle_controller_paths.results[4].stat.islnk | default(false))
+          and _vault_lifecycle_controller_paths.results[4].stat.nlink | default(0) | int == 1
+          and _vault_lifecycle_controller_paths.results[4].stat.mode | default('') in ['0400', '0600']
+          and _vault_lifecycle_controller_paths.results[4].stat.uid | default(-1) | int
+              == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+          and _vault_lifecycle_controller_paths.results[4].stat.size | default(0) | int > 0
+          and _vault_lifecycle_controller_paths.results[4].stat.size | default(0) | int <= 1048576
+          and _vault_lifecycle_controller_paths.results[4].stat.checksum | default('')
+              is match('^[0-9a-f]{64}$')
+          and _vault_lifecycle_approle_repair_signature.rc | default(1) | int == 0
+          and _vault_lifecycle_approle_repair_signature.stdout | default('')
+              is match('^\\$ANSIBLE_VAULT;')
+        )
+    fail_msg: >-
+      Finalization will not decrypt unsafe init/AppRole ciphertexts or reuse an
+      existing repair staging path.
+    quiet: true
+  when: vault_lifecycle_operation == 'initialize_finalize'
+  no_log: true
+
+- name: Inspect exact initialization finalization state
+  ansible.builtin.include_tasks: inspect-vault-initialize-finalize-state.yml
+  when: vault_lifecycle_operation == 'initialize_finalize'
+
+- name: Require uninitialized Vault and ready independent controller targets
+  ansible.builtin.assert:
+    that:
+      - _vault_lifecycle_container_image.rc == 0
+      - >-
+        _vault_lifecycle_container_image.stdout | trim
+        == hetzner_baremetal_vault.image.reference
+      - _vault_lifecycle_controller_paths.results[0].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[0].stat.isreg | default(false)
+      - >-
+        hetzner_baremetal_vault.tls.required_subject_alt_names
+        | difference(_vault_lifecycle_controller_ca_info.subject_alt_name)
+        | length == 0
+      - >-
+        _vault_lifecycle_controller_ca_info.subject_alt_name
+        | difference(hetzner_baremetal_vault.tls.required_subject_alt_names)
+        | length == 0
+      - not (_vault_lifecycle_init_state.json.initialized | default(true) | bool)
+      - not (_vault_lifecycle_controller_paths.results[1].stat.exists | default(false))
+      - not (_vault_lifecycle_controller_paths.results[2].stat.exists | default(false))
+      - _vault_lifecycle_backup_target.stat.exists | default(false)
+      - _vault_lifecycle_backup_target.stat.isdir | default(false)
+      - not (_vault_lifecycle_backup_target.stat.islnk | default(false))
+      - _vault_lifecycle_backup_target.stat.mode | default('') == '0700'
+      - lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') | length > 0
+    fail_msg: >-
+      Initialization planning requires the exact deployed image and TLS identity,
+      an uninitialized API, and absent controller init/AppRole escrows.
+    quiet: true
+  when: vault_lifecycle_operation == 'initialize'
+  no_log: true
+
+- name: Require an initialized Vault and exact recovery escrows before resuming
+  ansible.builtin.assert:
+    that:
+      - _vault_lifecycle_container_image.rc == 0
+      - >-
+        _vault_lifecycle_container_image.stdout | trim
+        == hetzner_baremetal_vault.image.reference
+      - _vault_lifecycle_controller_paths.results[0].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[0].stat.isreg | default(false)
+      - >-
+        hetzner_baremetal_vault.tls.required_subject_alt_names
+        | difference(_vault_lifecycle_controller_ca_info.subject_alt_name)
+        | length == 0
+      - >-
+        _vault_lifecycle_controller_ca_info.subject_alt_name
+        | difference(hetzner_baremetal_vault.tls.required_subject_alt_names)
+        | length == 0
+      - _vault_lifecycle_init_state.json.initialized | default(false) | bool
+      - _vault_lifecycle_seal_state.json.initialized | default(false) | bool
+      - _vault_lifecycle_seal_state.json.sealed is boolean
+      - >-
+        _vault_lifecycle_seal_state.json.t | default(0) | int
+        == hetzner_baremetal_vault.seal.key_threshold | int
+      - >-
+        _vault_lifecycle_seal_state.json.n | default(0) | int
+        == hetzner_baremetal_vault.seal.key_shares | int
+      - _vault_lifecycle_seal_state.json.progress | default(-1) | int == 0
+      - _vault_lifecycle_seal_state.json.storage_type | default('') == 'raft'
+      - _vault_lifecycle_controller_paths.results[1].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[1].stat.isreg | default(false)
+      - not (_vault_lifecycle_controller_paths.results[1].stat.islnk | default(false))
+      - _vault_lifecycle_controller_paths.results[1].stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_controller_paths.results[1].stat.mode | default('') in ['0400', '0600']
+      - >-
+        _vault_lifecycle_controller_paths.results[1].stat.uid | default(-1) | int
+        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+      - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int > 0
+      - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int <= 67108864
+      - >-
+        _vault_lifecycle_controller_paths.results[1].stat.checksum | default('')
+        is match('^[0-9a-f]{64}$')
+      - _vault_lifecycle_controller_init_signature.rc | default(1) | int == 0
+      - _vault_lifecycle_controller_init_signature.stdout | default('') is match('^\\$ANSIBLE_VAULT;')
+      - _vault_lifecycle_target_init_ciphertext.stat.exists | default(false)
+      - _vault_lifecycle_target_init_ciphertext.stat.isreg | default(false)
+      - not (_vault_lifecycle_target_init_ciphertext.stat.islnk | default(false))
+      - _vault_lifecycle_target_init_ciphertext.stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_target_init_ciphertext.stat.mode | default('') == '0600'
+      - _vault_lifecycle_target_init_ciphertext.stat.uid | default(-1) | int == 0
+      - _vault_lifecycle_target_init_ciphertext.stat.gid | default(-1) | int == 0
+      - _vault_lifecycle_target_init_ciphertext.stat.size | default(0) | int > 0
+      - _vault_lifecycle_target_init_ciphertext.stat.size | default(0) | int <= 67108864
+      - >-
+        _vault_lifecycle_target_init_ciphertext.stat.checksum | default('')
+        == _vault_lifecycle_controller_paths.results[1].stat.checksum | default('')
+      - _vault_lifecycle_target_init_signature.rc | default(1) | int == 0
+      - _vault_lifecycle_target_init_signature.stdout | default('') is match('^\\$ANSIBLE_VAULT;')
+      - not (_vault_lifecycle_controller_paths.results[2].stat.exists | default(false))
+      - _vault_lifecycle_backup_target.stat.exists | default(false)
+      - _vault_lifecycle_backup_target.stat.isdir | default(false)
+      - not (_vault_lifecycle_backup_target.stat.islnk | default(false))
+      - _vault_lifecycle_backup_target.stat.mode | default('') == '0700'
+      - lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') | length > 0
+    fail_msg: >-
+      Initialization recovery planning requires the exact deployed image and TLS
+      identity, an initialized Shamir 5-of-3 Raft API at zero unseal progress,
+      exact secure matching controller/target init ciphertexts, an absent AppRole
+      escrow, and the protected off-host backup target.
+    quiet: true
+  when: vault_lifecycle_operation == 'initialize_resume'
+  no_log: true
+
+- name: Require exact initialized partial state before finalizing
+  ansible.builtin.assert:
+    that:
+      - _vault_lifecycle_container_image.rc == 0
+      - >-
+        _vault_lifecycle_container_image.stdout | trim
+        == hetzner_baremetal_vault.image.reference
+      - _vault_lifecycle_controller_paths.results[0].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[0].stat.isreg | default(false)
+      - >-
+        hetzner_baremetal_vault.tls.required_subject_alt_names
+        | difference(_vault_lifecycle_controller_ca_info.subject_alt_name)
+        | length == 0
+      - >-
+        _vault_lifecycle_controller_ca_info.subject_alt_name
+        | difference(hetzner_baremetal_vault.tls.required_subject_alt_names)
+        | length == 0
+      - _vault_lifecycle_init_state.json.initialized | default(false) | bool
+      - _vault_lifecycle_seal_state.json.initialized | default(false) | bool
+      - not (_vault_lifecycle_seal_state.json.sealed | default(true) | bool)
+      - >-
+        _vault_lifecycle_seal_state.json.t | default(0) | int
+        == hetzner_baremetal_vault.seal.key_threshold | int
+      - >-
+        _vault_lifecycle_seal_state.json.n | default(0) | int
+        == hetzner_baremetal_vault.seal.key_shares | int
+      - _vault_lifecycle_seal_state.json.progress | default(-1) | int == 0
+      - _vault_lifecycle_seal_state.json.storage_type | default('') == 'raft'
+      - _vault_lifecycle_controller_paths.results[1].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[1].stat.isreg | default(false)
+      - not (_vault_lifecycle_controller_paths.results[1].stat.islnk | default(false))
+      - _vault_lifecycle_controller_paths.results[1].stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_controller_paths.results[1].stat.mode | default('') in ['0400', '0600']
+      - >-
+        _vault_lifecycle_controller_paths.results[1].stat.uid | default(-1) | int
+        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+      - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int > 0
+      - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int <= 67108864
+      - >-
+        _vault_lifecycle_controller_paths.results[1].stat.checksum | default('')
+        is match('^[0-9a-f]{64}$')
+      - _vault_lifecycle_controller_init_signature.rc | default(1) | int == 0
+      - _vault_lifecycle_controller_init_signature.stdout | default('') is match('^\\$ANSIBLE_VAULT;')
+      - _vault_lifecycle_target_init_ciphertext.stat.exists | default(false)
+      - _vault_lifecycle_target_init_ciphertext.stat.isreg | default(false)
+      - not (_vault_lifecycle_target_init_ciphertext.stat.islnk | default(false))
+      - _vault_lifecycle_target_init_ciphertext.stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_target_init_ciphertext.stat.mode | default('') == '0600'
+      - _vault_lifecycle_target_init_ciphertext.stat.uid | default(-1) | int == 0
+      - _vault_lifecycle_target_init_ciphertext.stat.gid | default(-1) | int == 0
+      - _vault_lifecycle_target_init_ciphertext.stat.size | default(0) | int > 0
+      - _vault_lifecycle_target_init_ciphertext.stat.size | default(0) | int <= 67108864
+      - >-
+        _vault_lifecycle_target_init_ciphertext.stat.checksum | default('')
+        == _vault_lifecycle_controller_paths.results[1].stat.checksum | default('')
+      - _vault_lifecycle_target_init_signature.rc | default(1) | int == 0
+      - _vault_lifecycle_target_init_signature.stdout | default('') is match('^\\$ANSIBLE_VAULT;')
+      - _vault_lifecycle_controller_paths.results[2].stat.exists | default(false)
+      - _vault_lifecycle_controller_paths.results[2].stat.isreg | default(false)
+      - not (_vault_lifecycle_controller_paths.results[2].stat.islnk | default(false))
+      - _vault_lifecycle_controller_paths.results[2].stat.nlink | default(0) | int == 1
+      - _vault_lifecycle_controller_paths.results[2].stat.mode | default('') in ['0400', '0600']
+      - >-
+        _vault_lifecycle_controller_paths.results[2].stat.uid | default(-1) | int
+        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+      - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int > 0
+      - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int <= 1048576
+      - >-
+        _vault_lifecycle_controller_paths.results[2].stat.checksum | default('')
+        is match('^[0-9a-f]{64}$')
+      - _vault_lifecycle_finalize_evidence.repair_stage_valid_or_absent | bool
+      - _vault_lifecycle_backup_target.stat.exists | default(false)
+      - _vault_lifecycle_backup_target.stat.isdir | default(false)
+      - not (_vault_lifecycle_backup_target.stat.islnk | default(false))
+      - _vault_lifecycle_backup_target.stat.mode | default('') == '0700'
+      - >-
+        _vault_lifecycle_finalize_evidence.legacy_schema_repair_required | bool
+        or _vault_lifecycle_finalize_evidence.canonical_schema_ready | bool
+      - _vault_lifecycle_finalize_evidence.root_token_active | bool
+      - _vault_lifecycle_finalize_evidence.scoped_approle_exact | bool
+      - lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') | length > 0
+    fail_msg: >-
+      Initialization finalization requires the exact digest-pinned, unsealed
+      partial state, matching init escrows, one checksum-bound legacy or
+      canonically repaired AppRole ciphertext, a recoverable repair stage,
+      active initial root token, and exact live least-privilege AppRole readback.
+    quiet: true
+  when: vault_lifecycle_operation == 'initialize_finalize'
+  no_log: true
+
+- name: Build the canonical immutable Vault lifecycle plan
+  ansible.builtin.set_fact:
+    _vault_lifecycle_plan:
+      schema_version: 1
+      operation: "{{ vault_lifecycle_operation }}"
+      target: "{{ inventory_hostname }}"
+      os:
+        distribution: "{{ ansible_facts.distribution }}"
+        version: "{{ ansible_facts.distribution_version }}"
+      architecture:
+        image: "{{ hetzner_baremetal_vault.image }}"
+        storage: "{{ hetzner_baremetal_vault.storage }}"
+        network: "{{ hetzner_baremetal_vault.network }}"
+        tls: "{{ hetzner_baremetal_vault.tls }}"
+        seal: "{{ hetzner_baremetal_vault.seal }}"
+        runtime: "{{ hetzner_baremetal_vault.runtime }}"
+        backup: "{{ hetzner_baremetal_vault.backup }}"
+        controller_auth:
+          schema_version: "{{ hetzner_baremetal_vault.controller_auth.schema_version }}"
+          subject: "{{ hetzner_baremetal_vault.controller_auth.subject }}"
+          auth_method: "{{ hetzner_baremetal_vault.controller_auth.auth_method }}"
+          auth_mount_point: "{{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}"
+          role_name: "{{ hetzner_baremetal_vault.controller_auth.role_name }}"
+          policy_name: "{{ hetzner_baremetal_vault.controller_auth.policy_name }}"
+          token_type: "{{ hetzner_baremetal_vault.controller_auth.token_type }}"
+          token_ttl: "{{ hetzner_baremetal_vault.controller_auth.token_ttl }}"
+          token_max_ttl: "{{ hetzner_baremetal_vault.controller_auth.token_max_ttl }}"
+          token_num_uses: "{{ hetzner_baremetal_vault.controller_auth.token_num_uses }}"
+          secret_id_ttl: "{{ hetzner_baremetal_vault.controller_auth.secret_id_ttl }}"
+          secret_id_num_uses: "{{ hetzner_baremetal_vault.controller_auth.secret_id_num_uses }}"
+          policy_sha256: "{{ hetzner_baremetal_vault.controller_auth.policy | hash('sha256') }}"
+          capability_probes: "{{ hetzner_baremetal_vault.controller_auth.capability_probes }}"
+        initialization_finalize_repair: >-
+          {{
+            {
+              'source_path': hetzner_baremetal_vault.controller_auth.ansible_vault_path,
+              'staging_path': (
+                hetzner_baremetal_vault.controller_auth.ansible_vault_path
+                ~ '.schema-v1-repair'
+              ),
+              'expected_legacy_schema_type': 'string',
+              'expected_legacy_schema_value': '1',
+              'replacement_schema_type': 'integer',
+              'replacement_schema_value': 1,
+              'publication': 'same-directory-verified-ciphertext-atomic-rename',
+              'current_schema_state': _vault_lifecycle_finalize_evidence.current_schema_type
+            }
+            if vault_lifecycle_operation == 'initialize_finalize'
+            else {}
+          }}
+      observed:
+        target_paths: >-
+          {{
+            dict(
+              _vault_lifecycle_target_paths.results
+              | map(attribute='item')
+              | zip(
+                  _vault_lifecycle_target_paths.results
+                  | map(attribute='stat.exists')
+                )
+            )
+          }}
+        container_image: >-
+          {{
+            _vault_lifecycle_container_image.stdout | trim
+            if _vault_lifecycle_container_image.rc == 0
+            else ''
+          }}
+        controller_ca_sha256: >-
+          {{
+            _vault_lifecycle_controller_paths.results[0].stat.checksum
+            | default('')
+          }}
+        controller_init_ciphertext_sha256: >-
+          {{
+            _vault_lifecycle_controller_paths.results[1].stat.checksum
+            | default('')
+          }}
+        target_init_ciphertext_sha256: >-
+          {{
+            _vault_lifecycle_target_init_ciphertext.stat.checksum
+            | default('')
+          }}
+        controller_approle_ciphertext_sha256: >-
+          {{
+            _vault_lifecycle_controller_paths.results[2].stat.checksum
+            | default('')
+          }}
+        controller_approle_repair_ciphertext_sha256: >-
+          {{
+            _vault_lifecycle_controller_paths.results[4].stat.checksum
+            | default('')
+          }}
+        off_host_backup_target_ready: >-
+          {{
+            _vault_lifecycle_backup_target.stat.isdir | default(false) | bool
+            if vault_lifecycle_operation
+               in ['initialize', 'initialize_resume', 'initialize_finalize']
+            else false
+          }}
+        initialized: >-
+          {{
+            _vault_lifecycle_init_state.json.initialized | default(false) | bool
+            if vault_lifecycle_operation
+               in ['initialize', 'initialize_resume', 'initialize_finalize']
+            else false
+          }}
+        seal_state: >-
+          {{
+            {
+              'initialized': _vault_lifecycle_seal_state.json.initialized | default(false) | bool,
+              'sealed': _vault_lifecycle_seal_state.json.sealed | default(true) | bool,
+              'key_threshold': _vault_lifecycle_seal_state.json.t | default(0) | int,
+              'key_shares': _vault_lifecycle_seal_state.json.n | default(0) | int,
+              'progress': _vault_lifecycle_seal_state.json.progress | default(-1) | int,
+              'storage_type': _vault_lifecycle_seal_state.json.storage_type | default(''),
+              'version': _vault_lifecycle_seal_state.json.version | default('')
+            }
+            if vault_lifecycle_operation in ['initialize_resume', 'initialize_finalize']
+            else {}
+          }}
+        initialization_finalize_evidence: >-
+          {{
+            _vault_lifecycle_finalize_evidence
+            if vault_lifecycle_operation == 'initialize_finalize'
+            else {}
+          }}
+  changed_when: false
+
+- name: Serialize and hash the canonical Vault lifecycle plan
+  ansible.builtin.set_fact:
+    _vault_lifecycle_plan_json: >-
+      {{ _vault_lifecycle_plan | to_json(sort_keys=true, separators=[',', ':']) }}
+    _vault_lifecycle_plan_sha256: >-
+      {{
+        (
+          _vault_lifecycle_plan
+          | to_json(sort_keys=true, separators=[',', ':'])
+        ) | hash('sha256')
+      }}
+  changed_when: false
+
+- name: Resolve immutable Vault lifecycle plan path
+  ansible.builtin.set_fact:
+    _vault_lifecycle_plan_path: >-
+      {{
+        lookup('ansible.builtin.env', 'PWD')
+        ~ '/.tmp/vault-lifecycle-plans/'
+        ~ inventory_hostname
+        ~ '/'
+        ~ vault_lifecycle_operation
+        ~ '-'
+        ~ _vault_lifecycle_plan_sha256
+        ~ '.json'
+      }}
+  changed_when: false
+
+- name: Ensure the protected Vault lifecycle plan directory exists
+  ansible.builtin.file:
+    path: "{{ _vault_lifecycle_plan_path | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Persist the immutable Vault lifecycle plan
+  ansible.builtin.copy:
+    dest: "{{ _vault_lifecycle_plan_path }}"
+    content: "{{ _vault_lifecycle_plan_json }}"
+    mode: "0600"
+    force: false
+  delegate_to: localhost
+  become: false
+
+- name: Inspect the persisted immutable Vault lifecycle plan
+  ansible.builtin.stat:
+    path: "{{ _vault_lifecycle_plan_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+    get_attributes: false
+    get_mime: false
+  register: _vault_lifecycle_plan_stat
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Read back the immutable Vault lifecycle plan
+  ansible.builtin.slurp:
+    src: "{{ _vault_lifecycle_plan_path }}"
+  register: _vault_lifecycle_plan_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Require exact immutable Vault lifecycle plan readback
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_lifecycle_plan_readback.content | b64decode
+        == _vault_lifecycle_plan_json
+      - _vault_lifecycle_plan_sha256 is match('^[0-9a-f]{64}$')
+      - _vault_lifecycle_plan_stat.stat.exists | default(false)
+      - _vault_lifecycle_plan_stat.stat.isreg | default(false)
+      - not (_vault_lifecycle_plan_stat.stat.islnk | default(false))
+      - _vault_lifecycle_plan_stat.stat.nlink | int == 1
+      - >-
+        _vault_lifecycle_plan_stat.stat.uid | int
+        == lookup('ansible.builtin.pipe', 'id -u') | int
+      - _vault_lifecycle_plan_stat.stat.mode == '0600'
+      - >-
+        _vault_lifecycle_plan_stat.stat.checksum
+        == _vault_lifecycle_plan_sha256
+    fail_msg: "The persisted Vault lifecycle plan does not match its canonical content."
+    quiet: true

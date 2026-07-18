@@ -1,0 +1,187 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":semanticCommitType(chore)",
+    ":semanticCommitScope(deps)"
+  ],
+  "labels": [
+    "dependencies",
+    "renovate"
+  ],
+  "baseBranchPatterns": [
+    "develop"
+  ],
+  "timezone": "UTC",
+  "schedule": [],
+  "rebaseWhen": "behind-base-branch",
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "Automerge safe non-major updates into develop after CI passes",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest",
+        "pinDigest"
+      ],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Require manual approval for major updates",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Keep ansible-core on 2.18.x",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "ansible/requirements.txt"
+      ],
+      "matchPackageNames": [
+        "ansible-core"
+      ],
+      "allowedVersions": "/^2\\.18\\./"
+    },
+    {
+      "description": "Manage local controller Python pins in ansible requirements",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "ansible/requirements.txt"
+      ],
+      "matchPackageNames": [
+        "pyvmomi",
+        "requests"
+      ]
+    },
+    {
+      "description": "Keep community.general compatible with linux_system_roles and lit collections",
+      "matchDepNames": [
+        "community.general"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "allowedVersions": "/^11\\./"
+    },
+    {
+      "description": "Keep canonical ansible.posix compatible with linux_system_roles",
+      "matchDepNames": [
+        "ansible.posix"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "matchFileNames": [
+        "ansible/collections/requirements.yml"
+      ],
+      "allowedVersions": "/^2\\.1\\./"
+    },
+    {
+      "description": "Pin community.vmware for the ansible-core 2.18 collection baseline",
+      "matchDepNames": [
+        "community.vmware"
+      ],
+      "matchDatasources": [
+        "galaxy-collection"
+      ],
+      "allowedVersions": "/^5\\.10\\.0$/"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track ee-wunder-devtools-ubi9 image references in agent docs",
+      "managerFilePatterns": [
+        "/(^|.*\\/)AGENTS?\\.md$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-devtools-ubi9:v(?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-devtools-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track default toolbox image references in docs and runtime scripts",
+      "managerFilePatterns": [
+        "/^ansible\\/scripts\\/ansible-nav$/",
+        "/^ansible\\/README\\.md$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\\s`\\\"\\)\\}]+)"
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track ansible run EE image defaults",
+      "managerFilePatterns": [
+        "/^ansible\\/scripts\\/ansible-nav$/",
+        "/^ansible\\/ansible-navigator\\.yml$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-ansible-ubi9:(?<currentValue>[^\\s`]+)",
+        "run_ee_image=\"\\$\\{ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay\\.io\\/l-it\\/ee-wunder-ansible-ubi9:(?<currentValue>[^\"}]+)\\}\""
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-ansible-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the immutable lit.rhel GitHub release asset",
+      "managerFilePatterns": [
+        "/^ansible\\/collections\\/requirements\\.yml$/"
+      ],
+      "matchStrings": [
+        "  - name: https:\\/\\/github\\.com\\/lightning-it\\/ansible-collection-rhel\\/releases\\/download\\/v(?<currentValue>[0-9.]+)\\/lit-rhel-[0-9.]+\\.tar\\.gz\\n    type: url"
+      ],
+      "depNameTemplate": "lightning-it/ansible-collection-rhel",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "autoReplaceStringTemplate": "  - name: https://github.com/lightning-it/ansible-collection-rhel/releases/download/v{{{newValue}}}/lit-rhel-{{{newValue}}}.tar.gz\n    type: url"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the immutable lit.ocp GitHub release asset",
+      "managerFilePatterns": [
+        "/^ansible\\/collections\\/requirements\\.yml$/"
+      ],
+      "matchStrings": [
+        "  - name: https:\\/\\/github\\.com\\/lightning-it\\/ansible-collection-ocp\\/releases\\/download\\/v(?<currentValue>[0-9.]+)\\/lit-ocp-[0-9.]+\\.tar\\.gz\\n    type: url"
+      ],
+      "depNameTemplate": "lightning-it/ansible-collection-ocp",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "autoReplaceStringTemplate": "  - name: https://github.com/lightning-it/ansible-collection-ocp/releases/download/v{{{newValue}}}/lit-ocp-{{{newValue}}}.tar.gz\n    type: url"
+    },
+    {
+      "customType": "regex",
+      "description": "Track devtools image references in repo docs and agent guidance",
+      "managerFilePatterns": [
+        "/^AGENTS\\.md$/",
+        "/^scripts\\/README\\.md$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-devtools-ubi9:v(?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-devtools-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ]
+}

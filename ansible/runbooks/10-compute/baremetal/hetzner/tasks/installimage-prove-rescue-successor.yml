@@ -1,0 +1,67 @@
+---
+- name: Verify Rescue successor {{ hetzner_installimage_order_host }}
+  ansible.builtin.shell: |
+    set -euo pipefail
+    export LC_ALL=C
+
+    test -f "${LIT_INSTALLIMAGE_BINARY}"
+    test -x "${LIT_INSTALLIMAGE_BINARY}"
+    test "$(stat -c '%u' "${LIT_INSTALLIMAGE_BINARY}")" -eq 0
+    test -f "${LIT_INSTALLIMAGE_IMAGE}"
+    test "$(
+      sha256sum "${LIT_INSTALLIMAGE_IMAGE}" | awk '{print $1}'
+    )" = "${LIT_EXPECTED_IMAGE_SHA256}"
+
+    robot_keys=/root/.ssh/robot_user_keys
+    test -f "${robot_keys}"
+    test ! -L "${robot_keys}"
+    IFS=: read -r keys_uid keys_gid keys_nlink keys_mode keys_size < <(
+      stat -c '%u:%g:%h:%a:%s' "${robot_keys}"
+    )
+    test "${keys_uid}" -eq 0
+    test "${keys_gid}" -eq 0
+    test "${keys_nlink}" -eq 1
+    [[ "${keys_mode}" =~ ^[0-7][0145][0145]$ ]]
+    test "${keys_size}" -gt 0
+    test "${keys_size}" -le "${LIT_ROBOT_KEYS_MAX_BYTES}"
+
+    normalized_robot_keys="$(awk 'NF {$1=$1; print}' "${robot_keys}")"
+    test "${normalized_robot_keys}" = "${LIT_EXPECTED_DEPLOY_KEYS}"
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ hetzner_installimage_order_host }}"
+  become: false
+  vars:
+    ansible_user: root
+    ansible_private_key_file: >-
+      {{ hostvars[hetzner_installimage_order_host].ansible_private_key_file }}
+    ansible_ssh_common_args: >-
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+    ansible_become: false
+  environment:
+    LIT_INSTALLIMAGE_BINARY: >-
+      {{ hostvars[hetzner_installimage_order_host].hetzner_installimage_binary }}
+    LIT_INSTALLIMAGE_IMAGE: >-
+      {{ hostvars[hetzner_installimage_order_host].hetzner_installimage_image }}
+    LIT_EXPECTED_IMAGE_SHA256: >-
+      {{
+        hostvars[hetzner_installimage_order_host]
+        .hetzner_installimage_expected_image_sha256
+      }}
+    LIT_ROBOT_KEYS_MAX_BYTES: >-
+      {{
+        hostvars[hetzner_installimage_order_host]
+        .hetzner_baremetal_rescue_robot_user_keys_max_bytes
+        | string
+      }}
+    LIT_EXPECTED_DEPLOY_KEYS: >-
+      {{
+        hostvars[hetzner_installimage_order_host].deploy_ssh_public_keys
+        | map('trim')
+        | map('regex_replace', '\\s+', ' ')
+        | join('\n')
+      }}
+  changed_when: false
+  check_mode: false
