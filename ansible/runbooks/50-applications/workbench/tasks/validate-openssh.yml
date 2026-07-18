@@ -44,7 +44,7 @@
     that:
       - >-
         workbench_validation_sshd.stdout
-        is search('(?m)^allowusers .*\\b' ~ item.name ~ '\\b')
+        is search('(?m)^allowusers\\s+(?:.*\\s)?' ~ item.name ~ '(?:\\s|$)')
     fail_msg: "The effective OpenSSH AllowUsers policy omits {{ item.name }}."
     quiet: true
   loop: "{{ workbench_acceptance.users }}"
