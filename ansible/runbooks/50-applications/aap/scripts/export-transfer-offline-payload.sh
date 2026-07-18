@@ -12,7 +12,7 @@ if [[ -z "${env_file}" ]]; then
 fi
 if [[ -L "${env_file}" || ! -f "${env_file}" || ! -r "${env_file}" ||
       ! -O "${env_file}" ]]; then
-  printf 'AAP local env file not readable: %s\n' "${env_file}" >&2
+  printf 'AAP local env file is missing or unsafe (symlink/ownership/readability): %s\n' "${env_file}" >&2
   exit 1
 fi
 if [[ "$(stat -c '%a' -- "${env_file}")" != "600" ]]; then
