@@ -268,10 +268,7 @@
         workbench_incus_device_fstype.stdout | trim != 'btrfs'
         or workbench_incus_existing_pool_data.get('config', {}).get('source', '')
         == workbench_incus_storage.device
-      - >-
-        workbench_incus_device_mount.rc == 1
-        or workbench_incus_device_mount.stdout.split()[0]
-        == '/var/lib/incus/storage-pools/' ~ workbench_incus_declared_storage_pools[0].name
+        == '/var/lib/incus/storage-pools/' ~ workbench_incus_declared_storage_pools[0].get('name', '')
       - >-
         workbench_incus_device_mount.rc == 1
         or workbench_incus_device_mount.stdout.split()[1] == 'btrfs'
