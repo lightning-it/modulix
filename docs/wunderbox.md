@@ -44,7 +44,7 @@ Im Execution Environment (ansible-navigator):
 ansible-navigator exec -- \
   ansible-galaxy collection install \
   -r /runner/project/collections/requirements.yml \
-  -p /runner/project/collections --force
+  -p /runner/project/collections-dev --force
 ```
 
 > Notes:
