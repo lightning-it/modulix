@@ -41,7 +41,7 @@
       tags:
         - galaxy_roles
 
-    - name: Print warning and errors result of collection installation
+    - name: Print warnings/errors from collection installation
       ansible.builtin.debug:
-        var: _install_roles.stderr_lines
-      when: (_install_roles.stderr_lines | default([])) | length > 0
+        var: _install_collections.stderr_lines
+      when: (_install_collections.stderr_lines | default([])) | length > 0
