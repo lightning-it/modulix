@@ -55,7 +55,7 @@
       run ID, and fixed acceptance path.
     quiet: true
   changed_when: false
-  when: workbench_acceptance_workspace_marker.stat.exists
+  when: workbench_acceptance_workspace_marker.stat.isreg | default(false)
 
 - name: Remove the exact run-owned acceptance workspace
   ansible.builtin.file:
