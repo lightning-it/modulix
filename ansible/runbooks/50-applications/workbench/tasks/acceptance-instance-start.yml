@@ -202,7 +202,7 @@
   ansible.builtin.assert:
     that:
       - >-
-        (workbench_acceptance_instance_config.stdout | from_yaml).config['user.lit.managed_by']
+        ((workbench_acceptance_instance_config.stdout | from_yaml).get('config', {})).get('user.lit.managed_by', '')
         == 'modulix-automation'
       - >-
         (workbench_acceptance_instance_config.stdout | from_yaml).config['user.lit.acceptance_profile']
