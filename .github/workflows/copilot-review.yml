@@ -45,7 +45,12 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.head.ref == 'chore/sync-main-to-develop' &&
         github.event.pull_request.base.ref == 'develop' &&
-        github.event.pull_request.title == 'chore: sync main back to develop')
+        github.event.pull_request.title == 'chore: sync main back to develop') &&
+      !(github.event.pull_request.user.login == 'litreleasebot' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'develop' &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.title == 'chore(release): promote develop to main')
     permissions:
       contents: read
       pull-requests: write
@@ -111,6 +116,13 @@ jobs:
             && [ "${PR_TITLE}" = "chore: sync main back to develop" ]; then
             trusted=true
             trusted_kind=ancestry-backmerge
+          elif [ "${PR_AUTHOR}" = "litreleasebot" ] \
+            && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
+            && [ "${PR_HEAD}" = "develop" ] \
+            && [ "${PR_BASE}" = "main" ] \
+            && [ "${PR_TITLE}" = "chore(release): promote develop to main" ]; then
+            trusted=true
+            trusted_kind=release-promotion
           fi
           echo "trusted=${trusted}" >>"${GITHUB_OUTPUT}"
           echo "kind=${trusted_kind}" >>"${GITHUB_OUTPUT}"
@@ -133,10 +145,27 @@ jobs:
           git diff --quiet "origin/develop" "${HEAD_SHA}"
           echo "Verified a file-identical two-parent merge of current main and develop."
 
+      - name: Verify protected release promotion
+        if: steps.trusted-automation.outputs.kind == 'release-promotion'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git init --quiet .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --quiet --no-tags origin \
+            "${HEAD_SHA}" "refs/heads/main" "refs/heads/develop"
+          [ "$(git rev-parse origin/develop)" = "${HEAD_SHA}" ]
+          git merge-base --is-ancestor "origin/main" "${HEAD_SHA}"
+          echo "Verified current protected develop head and main ancestry."
+
       - name: Accept trusted automation exemption
         if: >-
           steps.trusted-automation.outputs.trusted == 'true' &&
-          steps.trusted-automation.outputs.kind != 'ancestry-backmerge'
+          steps.trusted-automation.outputs.kind != 'ancestry-backmerge' &&
+          steps.trusted-automation.outputs.kind != 'release-promotion'
         run: echo "Trusted automation PR; Copilot review is delegated to its required guarded-automerge policy."
 
       - name: Verify current Copilot review and resolved findings
