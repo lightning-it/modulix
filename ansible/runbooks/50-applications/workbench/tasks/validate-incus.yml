@@ -349,7 +349,7 @@
         == workbench_validation_incus_expected_instance_names
       - >-
         (
-          workbench_validation_incus_lv_row.get('lv_size', '-1') | trim | float
+          workbench_validation_incus_lv_row.get('lv_size', '-1') | trim | int
           - (workbench_acceptance.incus.storage_pool.size_gib | int * 1024 * 1024 * 1024)
         ) | abs <= 4194304
       - >-
