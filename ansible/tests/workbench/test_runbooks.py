@@ -91,6 +91,24 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         ):
             self.assertIn(f"not (workbench_components.{component} | bool)", contract)
 
+    def test_target_contract_requires_exact_ubuntu_2404_facts(self):
+        contract = (RUNBOOK_DIRECTORY / "tasks" / "target-contract.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("ansible_facts is mapping", contract)
+        self.assertIn(
+            "ansible_facts.get('distribution', '') == 'Ubuntu'", contract
+        )
+        self.assertIn(
+            "ansible_facts.get('distribution_version', '') == '24.04'", contract
+        )
+        self.assertIn(
+            "ansible_facts.get('fqdn', '') == inventory_hostname", contract
+        )
+        self.assertNotIn("version('24.04', '>=')", contract)
+        self.assertNotIn("version('25.04', '<')", contract)
+
     def test_validation_task_files_contain_no_mutating_modules(self):
         forbidden_modules = {
             "ansible.builtin.apt",

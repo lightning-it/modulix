@@ -25,10 +25,10 @@
 - name: Require the supported Workbench operating system
   ansible.builtin.assert:
     that:
-      - ansible_distribution == 'Ubuntu'
-      - ansible_distribution_version is version('24.04', '>=')
-      - ansible_distribution_version is version('25.04', '<')
-      - ansible_fqdn == inventory_hostname
+      - ansible_facts is mapping
+      - ansible_facts.get('distribution', '') == 'Ubuntu'
+      - ansible_facts.get('distribution_version', '') == '24.04'
+      - ansible_facts.get('fqdn', '') == inventory_hostname
     fail_msg: >-
       The selected host is not the inventory-named Ubuntu 24.04 Workbench.
     quiet: true
