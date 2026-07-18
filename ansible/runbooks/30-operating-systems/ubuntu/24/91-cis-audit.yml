@@ -48,13 +48,12 @@
           - >-
             (
               cis_audit_server_class_selected | bool
-              and cis_ubuntu24_profile_tag in ['level1-server', 'level2-server']
+              and cis_ubuntu24_profile_tag == 'level1-server'
             )
             or
             (
               cis_audit_workstation_class_selected | bool
-              and cis_ubuntu24_profile_tag
-                  in ['level1-workstation', 'level2-workstation']
+              and cis_ubuntu24_profile_tag == 'level1-workstation'
             )
           - (ansible_run_tags | sort) == (['setup_audit'] | sort)
           - ansible_skip_tags | length == 0
