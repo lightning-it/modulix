@@ -95,7 +95,7 @@
 
 - name: Inspect exact Heavy image owner labels
   ansible.builtin.command:
-    argv: [podman, image, inspect, --format=json, "{{ workbench_heavy_image }}"]
+    argv: [podman, image, inspect, "{{ workbench_heavy_image }}"]
   become: true
   become_user: "{{ workbench_acceptance_operator }}"
   environment:
