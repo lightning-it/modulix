@@ -215,7 +215,7 @@
         (workbench_acceptance_instance_config.stdout | from_yaml).config['limits.memory']
         == workbench_acceptance_profile_config.limits.memory | string
       - >-
-        (workbench_acceptance_instance_config.stdout | from_yaml).devices.root.size
+        ((workbench_acceptance_instance_config.stdout | from_yaml).get('devices', {})).get('root', {}).get('size', '')
         == workbench_acceptance_profile_config.limits.root_disk | string
     fail_msg: >-
       The acceptance instance does not satisfy its isolated resource and
