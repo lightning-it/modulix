@@ -40,13 +40,21 @@
       - --format=json
   register: workbench_validation_python_packages
   changed_when: false
+  failed_when: false
   check_mode: false
+
+- name: Require isolated Python environment package inventory
+  ansible.builtin.assert:
+    that:
+      - workbench_validation_python_packages.rc == 0
+    fail_msg: "Could not read the isolated Python package inventory."
+    quiet: true
+  changed_when: false
 
 - name: Initialize normalized Python package map
   ansible.builtin.set_fact:
     workbench_validation_python_package_map: {}
   changed_when: false
-
 - name: Build normalized Python package map
   ansible.builtin.set_fact:
     workbench_validation_python_package_map: >-
