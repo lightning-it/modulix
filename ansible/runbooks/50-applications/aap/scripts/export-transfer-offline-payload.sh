@@ -116,7 +116,7 @@ remote_vault_inbox_pending=false
 cleanup_remote_vault_inbox() {
   if [[ "${remote_vault_inbox_pending}" == "true" ]]; then
     ssh "${ssh_opts[@]}" "${remote}" \
-      'rm -f /appl/aap-local/inbox/.vault-pass.txt' \
+      "rm -f -- \"${AAP_APPL_ROOT}/inbox/.vault-pass.txt\"" \
       >/dev/null 2>&1 || true
   fi
 }
