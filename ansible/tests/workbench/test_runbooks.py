@@ -135,6 +135,125 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             with self.subTest(task=task):
                 self.assertIn("copy", normalized_task_module_names(task))
 
+    def test_validation_uses_read_only_sudo_policy_inspection(self):
+        tasks = load_yaml(RUNBOOK_DIRECTORY / "tasks" / "validate-user.yml")
+        policy_task = next(
+            task
+            for task in tasks
+            if task["name"].startswith("Inspect effective sudo policy")
+        )
+        decode_task = next(
+            task
+            for task in tasks
+            if task["name"].startswith("Decode effective sudo policy")
+        )
+        policy_text = (RUNBOOK_DIRECTORY / "tasks" / "validate-user.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(
+            policy_task["ansible.builtin.command"]["argv"],
+            [
+                "sudo",
+                "--non-interactive",
+                "--list",
+                "--other-user={{ workbench_validation_user.name }}",
+            ],
+        )
+        self.assertEqual(policy_task["become_user"], "root")
+        self.assertIs(policy_task["changed_when"], False)
+        self.assertIs(policy_task["no_log"], True)
+        self.assertIs(decode_task["changed_when"], False)
+        self.assertIs(decode_task["no_log"], True)
+        self.assertIn("NOPASSWD", policy_text)
+        self.assertNotIn("--reset-timestamp", policy_text)
+
+    def test_acceptance_paths_validate_contract_before_profile_resolution(self):
+        for name in ("40-acceptance.yml", "50-cleanup.yml"):
+            with self.subTest(playbook=name):
+                tasks = load_yaml(RUNBOOK_DIRECTORY / name)[0]["tasks"]
+                imports = [task.get("ansible.builtin.import_tasks") for task in tasks]
+                self.assertLess(
+                    imports.index("tasks/validate-contract.yml"),
+                    imports.index("tasks/acceptance-contract.yml"),
+                )
+
+    def test_contract_roots_are_guarded_before_nested_resolution(self):
+        acceptance_tasks = load_yaml(
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-contract.yml"
+        )
+        acceptance_names = [task["name"] for task in acceptance_tasks]
+        acceptance_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-contract.yml"
+        ).read_text(encoding="utf-8")
+        root_index = acceptance_names.index(
+            "Require the Workbench acceptance contract root before profile resolution"
+        )
+        section_index = acceptance_names.index(
+            "Require structured sections for the selected acceptance profile"
+        )
+        resolution_index = acceptance_names.index("Resolve requested acceptance profile")
+        resources_index = acceptance_names.index(
+            "Require structured resources for the selected acceptance profile"
+        )
+        identity_index = acceptance_names.index(
+            "Require a safe selected acceptance profile identity"
+        )
+        base_name_index = acceptance_names.index(
+            "Resolve requested acceptance instance base name"
+        )
+
+        self.assertLess(root_index, section_index)
+        self.assertLess(section_index, resolution_index)
+        self.assertLess(resolution_index, resources_index)
+        self.assertLess(resources_index, identity_index)
+        self.assertLess(identity_index, base_name_index)
+        self.assertIn("workbench_acceptance is defined", acceptance_text)
+        self.assertIn(
+            "workbench_acceptance.get(workbench_acceptance_profile, none) is mapping",
+            acceptance_text,
+        )
+        self.assertNotIn(
+            "workbench_acceptance[workbench_acceptance_profile]", acceptance_text
+        )
+
+        storage_tasks = load_yaml(
+            RUNBOOK_DIRECTORY / "tasks" / "incus-storage.yml"
+        )
+        storage_names = [task["name"] for task in storage_tasks]
+        storage_root_index = storage_names.index(
+            "Require the dedicated Incus storage contract root"
+        )
+        storage_resolution_index = storage_names.index(
+            "Resolve the Incus storage pool that owns the declared device"
+        )
+        storage_declaration_index = storage_names.index(
+            "Validate the dedicated Incus logical-volume declaration"
+        )
+        storage_pool_index = storage_names.index(
+            "Require one safe Incus storage-pool declaration"
+        )
+        storage_root = storage_tasks[0]["ansible.builtin.assert"]["that"]
+        storage_declaration = storage_tasks[storage_declaration_index][
+            "ansible.builtin.assert"
+        ]["that"]
+
+        self.assertLess(storage_root_index, storage_resolution_index)
+        self.assertLess(storage_resolution_index, storage_declaration_index)
+        self.assertLess(storage_declaration_index, storage_pool_index)
+        self.assertIn("workbench_incus_storage is defined", storage_root)
+        self.assertIn(
+            "workbench_incus_storage | default({}) is mapping", storage_root
+        )
+        self.assertIn(
+            "workbench_incus_declared_storage_pools | length == 1",
+            storage_declaration,
+        )
+        for task in storage_tasks[:storage_pool_index]:
+            self.assertNotIn(
+                "workbench_incus_declared_storage_pools[0]", repr(task)
+            )
+
     def test_cleanup_is_bound_to_exact_owner_profile_and_run_id(self):
         cleanup = (RUNBOOK_DIRECTORY / "tasks" / "acceptance-cleanup.yml").read_text(
             encoding="utf-8"

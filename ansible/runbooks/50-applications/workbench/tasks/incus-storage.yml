@@ -1,4 +1,15 @@
 ---
+- name: Require the dedicated Incus storage contract root
+  ansible.builtin.assert:
+    that:
+      - workbench_incus_storage is defined
+      - workbench_incus_storage | default({}) is mapping
+    fail_msg: >-
+      The selected host does not define a structured dedicated Incus storage
+      contract.
+    quiet: true
+  changed_when: false
+
 - name: Resolve the Incus storage pool that owns the declared device
   ansible.builtin.set_fact:
     workbench_incus_declared_storage_pools: >-
@@ -8,7 +19,7 @@
         | selectattr(
           'config.source',
           'equalto',
-          workbench_incus_storage.device | default('')
+          workbench_incus_storage.get('device', '')
         )
         | list
       }}
@@ -17,27 +28,42 @@
 - name: Validate the dedicated Incus logical-volume declaration
   ansible.builtin.assert:
     that:
-      - workbench_incus_storage is mapping
-      - workbench_incus_storage.volume_group | default('') is string
-      - workbench_incus_storage.volume_group | default('') is match('^[A-Za-z0-9+_.-]+$')
-      - workbench_incus_storage.logical_volume | default('') is string
-      - workbench_incus_storage.logical_volume | default('') is match('^[A-Za-z0-9+_.-]+$')
-      - workbench_incus_storage.size_gib | default(0) | int == 128
-      - workbench_incus_storage.minimum_vg_free_after_gib | default(0) | int >= 16
+      - workbench_incus_storage.get('volume_group', '') is string
       - >-
-        workbench_incus_storage.device | default('')
-        == '/dev/' ~ workbench_incus_storage.volume_group
-        ~ '/' ~ workbench_incus_storage.logical_volume
-      - workbench_incus_storage.filesystem | default('') == 'raw'
-      - workbench_incus_storage.mount | default(true) is boolean
-      - not (workbench_incus_storage.mount | bool)
+        workbench_incus_storage.get('volume_group', '')
+        is match('^[A-Za-z0-9+_.-]+$')
+      - workbench_incus_storage.get('logical_volume', '') is string
+      - >-
+        workbench_incus_storage.get('logical_volume', '')
+        is match('^[A-Za-z0-9+_.-]+$')
+      - workbench_incus_storage.get('size_gib', 0) | int == 128
+      - workbench_incus_storage.get('minimum_vg_free_after_gib', 0) | int >= 16
+      - >-
+        workbench_incus_storage.get('device', '')
+        == '/dev/' ~ workbench_incus_storage.get('volume_group', '')
+        ~ '/' ~ workbench_incus_storage.get('logical_volume', '')
+      - workbench_incus_storage.get('filesystem', '') == 'raw'
+      - workbench_incus_storage.get('mount', true) is boolean
+      - not (workbench_incus_storage.get('mount', true) | bool)
       - workbench_incus_declared_storage_pools | length == 1
-      - workbench_incus_declared_storage_pools[0].name is match('^[A-Za-z0-9+_.-]+$')
-      - workbench_incus_declared_storage_pools[0].driver == 'btrfs'
     fail_msg: >-
       Incus storage must be the explicit, unmounted 128-GiB raw LV declared by
       inventory. The Incus preseed, not this task, may initialize its Btrfs
       storage pool on that exact block device.
+    quiet: true
+  changed_when: false
+
+- name: Require one safe Incus storage-pool declaration
+  ansible.builtin.assert:
+    that:
+      - workbench_incus_declared_storage_pools[0] is mapping
+      - >-
+        workbench_incus_declared_storage_pools[0].get('name', '')
+        is match('^[A-Za-z0-9+_.-]+$')
+      - workbench_incus_declared_storage_pools[0].get('driver', '') == 'btrfs'
+    fail_msg: >-
+      The Incus preseed must declare exactly one safely named Btrfs pool for
+      the dedicated storage device.
     quiet: true
   changed_when: false
 

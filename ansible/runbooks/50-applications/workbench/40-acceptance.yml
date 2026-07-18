@@ -13,6 +13,10 @@
       ansible.builtin.import_tasks: tasks/target-contract.yml
       tags: [always]
 
+    - name: Validate the complete Workbench acceptance declaration
+      ansible.builtin.import_tasks: tasks/validate-contract.yml
+      tags: [always, acceptance]
+
     - name: Validate and resolve the requested acceptance profile
       ansible.builtin.import_tasks: tasks/acceptance-contract.yml
       tags: [always, acceptance]

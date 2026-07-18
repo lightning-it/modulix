@@ -76,27 +76,62 @@
   check_mode: false
   when: workbench_validation_authorized_keys.stat.exists
 
-- name: Invalidate cached sudo credentials for {{ workbench_validation_user.name }}
+- name: Inspect effective sudo policy for {{ workbench_validation_user.name }}
   ansible.builtin.command:
-    argv: [sudo, --reset-timestamp]
+    argv:
+      - sudo
+      - --non-interactive
+      - --list
+      - "--other-user={{ workbench_validation_user.name }}"
   become: true
-  become_user: "{{ workbench_validation_user.name }}"
+  become_user: root
   environment:
-    HOME: "{{ workbench_validation_user.home }}"
-  changed_when: false
-  check_mode: false
-
-- name: Test noninteractive sudo policy for {{ workbench_validation_user.name }}
-  ansible.builtin.command:
-    argv: [sudo, --non-interactive, --user, root, /usr/bin/true]
-  become: true
-  become_user: "{{ workbench_validation_user.name }}"
-  environment:
-    HOME: "{{ workbench_validation_user.home }}"
-  register: workbench_validation_sudo
+    LANG: C
+    LC_ALL: C
+  register: workbench_validation_sudo_policy
   changed_when: false
   failed_when: false
   check_mode: false
+  no_log: true
+
+- name: Decode effective sudo policy for {{ workbench_validation_user.name }}
+  ansible.builtin.set_fact:
+    workbench_validation_sudo_policy_valid: >-
+      {{
+        workbench_validation_sudo_policy.rc == 0
+        or (
+          workbench_validation_sudo_policy.rc == 1
+          and (
+            (workbench_validation_sudo_policy.stdout | default(''))
+            ~ '\n'
+            ~ (workbench_validation_sudo_policy.stderr | default(''))
+          )
+          is search(
+            'User ' ~ workbench_validation_user.name
+            ~ ' is not allowed to run sudo on '
+          )
+        )
+      }}
+    workbench_validation_sudo_has_nopasswd: >-
+      {{
+        (
+          (workbench_validation_sudo_policy.stdout_lines | default([]))
+          + (workbench_validation_sudo_policy.stderr_lines | default([]))
+        )
+        | select('search', '(^|\\s)NOPASSWD\\s*:')
+        | list | length > 0
+      }}
+    workbench_validation_sudo_has_unrestricted_nopasswd: >-
+      {{
+        (
+          (workbench_validation_sudo_policy.stdout_lines | default([]))
+          + (workbench_validation_sudo_policy.stderr_lines | default([]))
+        )
+        | select('search', '(^|\\s)NOPASSWD\\s*:\\s*ALL\\s*$')
+        | list | length > 0
+      }}
+  changed_when: false
+  no_log: true
 
 - name: Require declared state for {{ workbench_validation_user.name }}
   ansible.builtin.assert:
@@ -129,10 +164,16 @@
           and workbench_validation_authorized_key_count.stdout | default('-1') | int
           == workbench_validation_user.authorized_key_count | int
         )
-      - workbench_validation_sudo.rc in [0, 1]
+      - workbench_validation_sudo_policy_valid | bool
       - >-
-        (workbench_validation_sudo.rc == 0)
-        == (workbench_validation_user.passwordless_sudo | bool)
+        (
+          not (workbench_validation_user.passwordless_sudo | bool)
+          and not (workbench_validation_sudo_has_nopasswd | bool)
+        )
+        or (
+          workbench_validation_user.passwordless_sudo | bool
+          and workbench_validation_sudo_has_unrestricted_nopasswd | bool
+        )
     fail_msg: >-
       User, key count, workspace, group, password lock, or sudo drift detected
       for {{ workbench_validation_user.name }}. Authorized key content was not

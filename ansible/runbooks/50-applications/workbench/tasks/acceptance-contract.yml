@@ -9,8 +9,6 @@
       - workbench_acceptance_run_id is defined
       - workbench_acceptance_run_id is string
       - workbench_acceptance_run_id is match('^[a-z0-9][a-z0-9-]{2,23}$')
-      - workbench_acceptance is mapping
-      - workbench_acceptance.incus.cleanup.managed_name_prefix is match('^[a-z0-9][a-z0-9-]+-$')
     fail_msg: >-
       Acceptance requires normal mode plus
       workbench_acceptance_profile=tiny|heavy|application and a lowercase,
@@ -18,12 +16,77 @@
     quiet: true
   changed_when: false
 
+- name: Require the Workbench acceptance contract root before profile resolution
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance is defined
+      - workbench_acceptance | default({}) is mapping
+    fail_msg: "The selected host does not define a Workbench acceptance contract."
+    quiet: true
+  changed_when: false
+
+- name: Require structured sections for the selected acceptance profile
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance.get('incus', none) is mapping
+      - workbench_acceptance.get(workbench_acceptance_profile, none) is mapping
+    fail_msg: >-
+      The Workbench acceptance contract must define structured Incus and
+      selected-profile sections.
+    quiet: true
+  changed_when: false
+
 - name: Resolve requested acceptance profile
   ansible.builtin.set_fact:
-    workbench_acceptance_profile_config: "{{ workbench_acceptance[workbench_acceptance_profile] }}"
+    workbench_acceptance_profile_config: >-
+      {{ workbench_acceptance.get(workbench_acceptance_profile, {}) }}
+    workbench_acceptance_cleanup_config: >-
+      {{ workbench_acceptance.get('incus', {}).get('cleanup', none) }}
+    workbench_acceptance_project_config: >-
+      {{ workbench_acceptance.get('incus', {}).get('project', none) }}
+    workbench_acceptance_incus_profile_config: >-
+      {{ workbench_acceptance.get('incus', {}).get('profile', none) }}
+  changed_when: false
+
+- name: Require structured resources for the selected acceptance profile
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_cleanup_config is mapping
+      - workbench_acceptance_project_config is mapping
+      - workbench_acceptance_incus_profile_config is mapping
+      - workbench_acceptance_profile_config.get('limits', none) is mapping
+    fail_msg: >-
+      The selected acceptance profile requires structured cleanup, project,
+      profile, and resource-limit sections.
+    quiet: true
+  changed_when: false
+
+- name: Require a safe selected acceptance profile identity
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_cleanup_config.get('managed_name_prefix', '') is string
+      - >-
+        workbench_acceptance_cleanup_config.get('managed_name_prefix', '')
+        is match('^[a-z0-9][a-z0-9-]+-$')
+      - workbench_acceptance_profile_config.get('name', '') is string
+      - >-
+        workbench_acceptance_profile_config.get('name', '')
+        is match(
+          '^'
+          ~ workbench_acceptance_cleanup_config.get('managed_name_prefix', '')
+          ~ '[a-z0-9-]+$'
+        )
+    fail_msg: >-
+      The selected acceptance profile must have a safe name inside the
+      inventory-declared cleanup namespace.
+    quiet: true
+  changed_when: false
+
+- name: Resolve requested acceptance instance base name
+  ansible.builtin.set_fact:
     workbench_acceptance_base_instance_name: >-
       {{
-        workbench_acceptance[workbench_acceptance_profile].name
+        workbench_acceptance_profile_config.get('name', '')
         ~ '-' ~ workbench_acceptance_run_id
       }}
   changed_when: false
@@ -31,27 +94,35 @@
 - name: Require isolated ephemeral acceptance resources
   ansible.builtin.assert:
     that:
-      - workbench_acceptance_profile_config is mapping
       - >-
-        workbench_acceptance_profile_config.name
-        is match('^' ~ workbench_acceptance.incus.cleanup.managed_name_prefix ~ '[a-z0-9-]+$')
+        workbench_acceptance_profile_config.get('name', '')
+        is match(
+          '^'
+          ~ workbench_acceptance_cleanup_config.get('managed_name_prefix', '')
+          ~ '[a-z0-9-]+$'
+        )
       - >-
-        workbench_acceptance_profile_config.project
-        == workbench_acceptance.incus.project.name
+        workbench_acceptance_profile_config.get('project', '')
+        == workbench_acceptance_project_config.get('name', '')
       - >-
-        workbench_acceptance_profile_config.profile
-        == workbench_acceptance.incus.profile.name
-      - workbench_acceptance_profile_config.instance_type in ['container', 'virtual-machine']
-      - workbench_acceptance_profile_config.image is string
-      - workbench_acceptance_profile_config.image | trim | length > 0
-      - workbench_acceptance_profile_config.image is not search('\\s')
-      - workbench_acceptance_profile_config.image is match('^images:[0-9a-f]{64}$')
-      - workbench_acceptance_profile_config.limits is mapping
-      - workbench_acceptance_profile_config.limits.cpu | int > 0
-      - workbench_acceptance_profile_config.limits.memory is match('^[1-9][0-9]*GiB$')
-      - workbench_acceptance_profile_config.limits.root_disk is match('^[1-9][0-9]*GiB$')
-      - workbench_acceptance_profile_config.ephemeral | default(false) is boolean
-      - workbench_acceptance_profile_config.ephemeral | bool
+        workbench_acceptance_profile_config.get('profile', '')
+        == workbench_acceptance_incus_profile_config.get('name', '')
+      - >-
+        workbench_acceptance_profile_config.get('instance_type', '')
+        in ['container', 'virtual-machine']
+      - workbench_acceptance_profile_config.get('image', '') is string
+      - workbench_acceptance_profile_config.get('image', '') | trim | length > 0
+      - workbench_acceptance_profile_config.get('image', '') is not search('\\s')
+      - workbench_acceptance_profile_config.get('image', '') is match('^images:[0-9a-f]{64}$')
+      - workbench_acceptance_profile_config.get('limits', {}).get('cpu', 0) | int > 0
+      - >-
+        workbench_acceptance_profile_config.get('limits', {}).get('memory', '')
+        is match('^[1-9][0-9]*GiB$')
+      - >-
+        workbench_acceptance_profile_config.get('limits', {}).get('root_disk', '')
+        is match('^[1-9][0-9]*GiB$')
+      - workbench_acceptance_profile_config.get('ephemeral', none) is boolean
+      - workbench_acceptance_profile_config.get('ephemeral', false) | bool
     fail_msg: >-
       Acceptance profile resources must stay inside the declared Incus
       project/profile and the managed-name namespace, and must be ephemeral.
@@ -70,29 +141,54 @@
   changed_when: false
   when: workbench_acceptance_profile != 'heavy'
 
+- name: Require structured Heavy acceptance resources
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_profile_config.get('container', none) is mapping
+    fail_msg: "Heavy acceptance requires a structured container fixture."
+    quiet: true
+  changed_when: false
+  when: workbench_acceptance_profile == 'heavy'
+
+- name: Resolve structured Heavy acceptance resources
+  ansible.builtin.set_fact:
+    workbench_acceptance_container_config: >-
+      {{ workbench_acceptance_profile_config.get('container', {}) }}
+  changed_when: false
+  when: workbench_acceptance_profile == 'heavy'
+
 - name: Validate Heavy acceptance contract
   ansible.builtin.assert:
     that:
-      - workbench_acceptance_profile_config.instance_count | default(0) | int >= 2
-      - workbench_acceptance_profile_config.instance_count | int <= 4
-      - workbench_acceptance_profile_config.operator_user | default('') is match('^[a-z_][a-z0-9_-]*$')
-      - workbench_acceptance_profile_config.guest_user | default('') is match('^[a-z_][a-z0-9_-]*$')
-      - workbench_acceptance_profile_config.container | default({}) is mapping
+      - workbench_acceptance_profile_config.get('instance_count', 0) | int >= 2
+      - workbench_acceptance_profile_config.get('instance_count', 0) | int <= 4
       - >-
-        workbench_acceptance_profile_config.container.base_image | default('')
+        workbench_acceptance_profile_config.get('operator_user', '')
+        is match('^[a-z_][a-z0-9_-]*$')
+      - >-
+        workbench_acceptance_profile_config.get('guest_user', '')
+        is match('^[a-z_][a-z0-9_-]*$')
+      - >-
+        workbench_acceptance_container_config.get('base_image', '')
         is match('^[A-Za-z0-9._/:+-]+@sha256:[0-9a-f]{64}$')
       - >-
-        workbench_acceptance_profile_config.container.base_image
+        workbench_acceptance_container_config.get('base_image', '')
         == 'docker.io/library/alpine@sha256:eafc1edb577d2e9b458664a15f23ea1c370214193226069eb22921169fc7e43f'
       - >-
-        workbench_acceptance_profile_config.container.image_repository | default('')
+        workbench_acceptance_container_config.get('image_repository', '')
         is match('^localhost/[a-z0-9][a-z0-9._/-]+$')
-      - workbench_acceptance_profile_config.container.expected_stdout | default('') is string
-      - workbench_acceptance_profile_config.container.expected_stdout | length > 0
-      - workbench_acceptance_profile_config.container.expected_stdout is not search('[\\r\\n]')
+      - workbench_acceptance_container_config.get('expected_stdout', '') is string
+      - workbench_acceptance_container_config.get('expected_stdout', '') | length > 0
+      - >-
+        workbench_acceptance_container_config.get('expected_stdout', '')
+        is not search('[\\r\\n]')
       - >-
         workbench_acceptance.users
-        | selectattr('name', 'equalto', workbench_acceptance_profile_config.operator_user)
+        | selectattr(
+          'name',
+          'equalto',
+          workbench_acceptance_profile_config.get('operator_user', '')
+        )
         | list | length == 1
     fail_msg: >-
       Heavy acceptance requires at least two guests, one declared developer,
@@ -115,7 +211,7 @@
     {{
       range(
         1,
-        (workbench_acceptance_profile_config.instance_count | default(0) | int) + 1
+        (workbench_acceptance_profile_config.get('instance_count', 0) | int) + 1
       ) | list
     }}
   loop_control:
@@ -123,23 +219,44 @@
   changed_when: false
   when: workbench_acceptance_profile == 'heavy'
 
+- name: Require structured Application acceptance resources
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_profile_config.get('repository', none) is mapping
+    fail_msg: "Application acceptance requires a structured repository fixture."
+    quiet: true
+  changed_when: false
+  when: workbench_acceptance_profile == 'application'
+
+- name: Resolve structured Application acceptance resources
+  ansible.builtin.set_fact:
+    workbench_acceptance_repository_config: >-
+      {{ workbench_acceptance_profile_config.get('repository', {}) }}
+  changed_when: false
+  when: workbench_acceptance_profile == 'application'
+
 - name: Validate Application acceptance contract
   ansible.builtin.assert:
     that:
-      - workbench_acceptance_profile_config.operator_user | default('') is match('^[a-z_][a-z0-9_-]*$')
-      - workbench_acceptance_profile_config.repository | default({}) is mapping
       - >-
-        workbench_acceptance_profile_config.repository.url | default('')
+        workbench_acceptance_profile_config.get('operator_user', '')
+        is match('^[a-z_][a-z0-9_-]*$')
+      - >-
+        workbench_acceptance_repository_config.get('url', '')
         == 'https://github.com/lightning-it/ansible-collection-ubuntu.git'
       - >-
-        workbench_acceptance_profile_config.repository.commit | default('')
+        workbench_acceptance_repository_config.get('commit', '')
         is match('^[0-9a-f]{40}$')
       - >-
-        workbench_acceptance_profile_config.molecule_scenario | default('')
+        workbench_acceptance_profile_config.get('molecule_scenario', '')
         is match('^[a-z0-9][a-z0-9_-]+$')
       - >-
         workbench_acceptance.users
-        | selectattr('name', 'equalto', workbench_acceptance_profile_config.operator_user)
+        | selectattr(
+          'name',
+          'equalto',
+          workbench_acceptance_profile_config.get('operator_user', '')
+        )
         | list | length == 1
     fail_msg: >-
       Application acceptance is fail-closed without the approved public
@@ -155,7 +272,9 @@
       - item | length <= 63
       - >-
         item is match(
-          '^' ~ workbench_acceptance.incus.cleanup.managed_name_prefix ~ '[a-z0-9-]+$'
+          '^'
+          ~ workbench_acceptance_cleanup_config.get('managed_name_prefix', '')
+          ~ '[a-z0-9-]+$'
         )
     fail_msg: "A derived acceptance instance name is outside the cleanup namespace."
     quiet: true
@@ -167,7 +286,7 @@
 - name: Resolve acceptance operator and safe paths
   ansible.builtin.set_fact:
     workbench_acceptance_operator: >-
-      {{ workbench_acceptance_profile_config.operator_user | default('') }}
+      {{ workbench_acceptance_profile_config.get('operator_user', '') }}
     workbench_acceptance_operator_home: >-
       {{
         (
@@ -175,7 +294,7 @@
           | selectattr(
             'name',
             'equalto',
-            workbench_acceptance_profile_config.operator_user | default('')
+            workbench_acceptance_profile_config.get('operator_user', '')
           )
           | map(attribute='home')
           | first
@@ -193,7 +312,7 @@
           | selectattr(
             'name',
             'equalto',
-            workbench_acceptance_profile_config.operator_user | default('')
+            workbench_acceptance_profile_config.get('operator_user', '')
           )
           | map(attribute='home')
           | first
