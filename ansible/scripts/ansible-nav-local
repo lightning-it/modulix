@@ -11,6 +11,10 @@ nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
 nav_pull_policy="${ANSIBLE_TOOLBOX_NAV_PULL_POLICY:-}"
 nav_skip_auth="${ANSIBLE_TOOLBOX_NAV_SKIP_AUTH:-false}"
 nav_skip_cert_check="${ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK:-false}"
+ee_only_collections="${ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS:-false}"
+ssh_private_key_file="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE:-}"
+ssh_known_hosts_file="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE:-}"
+ssh_agent_forwarding="${ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING:-false}"
 nav_ee_container_options="${ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS:-}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
@@ -33,6 +37,7 @@ automation_hub_url_validated="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED:-ht
 automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 cleanup_files=()
 cleanup_dirs=()
+ee_identity_mapping_added=false
 
 cleanup() {
   local file
@@ -61,6 +66,10 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_PULL_POLICY=always|missing|never|tag (default: ansible-navigator config/env)
   ANSIBLE_TOOLBOX_NAV_SKIP_AUTH=true|false         (default: false)
   ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true|false   (default: false)
+  ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true|false   (default: false; ignore project collection trees)
+  ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only file> (optional; requires known_hosts)
+  ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<trusted file> (required for key or agent use)
+  ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING=true|false (default: false; forwards only SSH_AUTH_SOCK)
   ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
@@ -122,8 +131,8 @@ validate_owner_only_secret_file() {
   local mode=""
   local owner=""
 
-  if [[ -L "${path}" || ! -f "${path}" ]]; then
-    echo "${label} must reference a regular, non-symlink file." >&2
+  if [[ -L "${path}" || ! -f "${path}" || ! -s "${path}" ]]; then
+    echo "${label} must reference a nonempty regular, non-symlink file." >&2
     return 1
   fi
 
@@ -141,6 +150,49 @@ validate_owner_only_secret_file() {
     echo "${label} must be owned by the effective user." >&2
     return 1
   fi
+}
+
+validate_trusted_ssh_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" || ! -s "${path}" || ! -r "${path}" ]]; then
+    echo "${label} must reference a readable, nonempty regular, non-symlink file." >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' -- "${path}")"
+  owner="$(stat -c '%u' -- "${path}")"
+  if (( (8#${mode} & 0022) != 0 )); then
+    echo "${label} must not be group- or world-writable (found ${mode})." >&2
+    return 1
+  fi
+  if [[ "${owner}" != "$(id -u)" && "${owner}" != "0" ]]; then
+    echo "${label} must be owned by the effective user or root." >&2
+    return 1
+  fi
+}
+
+ensure_ee_identity_mapping() {
+  if [[ "${ee_identity_mapping_added}" == "true" ]]; then
+    return 0
+  fi
+  if [[ "${nav_ee_container_options}" =~ (^|[[:space:]])--(user|userns|uidmap|gidmap)(=|[[:space:]]|$) ]]; then
+    echo "Secure EE file transport cannot be combined with user-namespace or user-ID container overrides." >&2
+    exit 1
+  fi
+  if [[ "$(id -u)" == "0" ]]; then
+    # The outer rootless toolbox maps its root user to the invoking host user.
+    # A second keep-id namespace cannot be created reliably in that restricted
+    # mapping, so keep the nested controller at the already-matching root UID.
+    cmd+=("--co=--user=0:0")
+  else
+    cmd+=("--co=--userns=keep-id")
+    cmd+=("--co=--user=$(id -u):$(id -g)")
+  fi
+  ee_identity_mapping_added=true
 }
 
 stage_secret_file_for_ee() {
@@ -161,10 +213,6 @@ stage_secret_file_for_ee() {
     echo "Secure ${var_name} transport into an execution environment is supported only with Podman." >&2
     exit 1
   fi
-  if [[ "${nav_ee_container_options}" =~ (^|[[:space:]])--(user|userns|uidmap|gidmap)(=|[[:space:]]|$) ]]; then
-    echo "${var_name} transport cannot be combined with user-namespace or user-ID container overrides." >&2
-    exit 1
-  fi
 
   staged_dir="$(mktemp -d "${ANSIBLE_HOME}/ee-secrets.XXXXXX")"
   cleanup_dirs+=("${staged_dir}")
@@ -174,26 +222,99 @@ stage_secret_file_for_ee() {
   validate_owner_only_secret_file "${staged_file}" "staged ${var_name}"
   export "${var_name}=${staged_file}"
   cmd+=(--eev "${staged_dir}:${staged_dir}:ro")
-  if [[ "$(id -u)" == "0" ]]; then
-    # The outer rootless toolbox maps its root user to the invoking host user.
-    # A second keep-id namespace cannot be created reliably in that restricted
-    # mapping, so keep the nested controller at the already-matching root UID.
-    cmd+=("--co=--user=0:0")
-  else
-    cmd+=("--co=--userns=keep-id")
-    cmd+=("--co=--user=$(id -u):$(id -g)")
+  ensure_ee_identity_mapping
+}
+
+configure_ssh_transport() {
+  local staged_dir=""
+  local staged_key=""
+  local staged_known_hosts=""
+  local ssh_common_args=""
+
+  if [[ -n "${ssh_private_key_file}" && "${ssh_agent_forwarding}" == "true" ]]; then
+    echo "Select either an explicit SSH private key or SSH agent forwarding, not both." >&2
+    exit 1
   fi
+  if [[ -z "${ssh_private_key_file}" && "${ssh_agent_forwarding}" == "false" ]]; then
+    if [[ -n "${ssh_known_hosts_file}" ]]; then
+      echo "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE requires an explicit key or agent forwarding." >&2
+      exit 1
+    fi
+    return 0
+  fi
+  if [[ -z "${ssh_known_hosts_file}" ]]; then
+    echo "Explicit SSH transport requires ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE." >&2
+    exit 1
+  fi
+
+  validate_trusted_ssh_file \
+    "${ssh_known_hosts_file}" \
+    "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE"
+  if [[ -n "${ssh_private_key_file}" ]]; then
+    validate_owner_only_secret_file \
+      "${ssh_private_key_file}" \
+      "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE"
+  else
+    if [[ -z "${SSH_AUTH_SOCK:-}" || -L "${SSH_AUTH_SOCK}" || ! -S "${SSH_AUTH_SOCK}" ]]; then
+      echo "SSH agent forwarding requires SSH_AUTH_SOCK to be a real Unix socket." >&2
+      exit 1
+    fi
+    if [[ "$(stat -c '%u' -- "${SSH_AUTH_SOCK}")" != "$(id -u)" ]]; then
+      echo "SSH_AUTH_SOCK must be owned by the effective user." >&2
+      exit 1
+    fi
+  fi
+
+  export ANSIBLE_HOST_KEY_CHECKING=True
+  ssh_common_args="-o UserKnownHostsFile=${ssh_known_hosts_file} -o StrictHostKeyChecking=yes"
+  export ANSIBLE_SSH_COMMON_ARGS="${ssh_common_args}"
+  if [[ -n "${ssh_private_key_file}" ]]; then
+    export ANSIBLE_PRIVATE_KEY_FILE="${ssh_private_key_file}"
+  fi
+
+  if [[ "${nav_ee_enabled}" != "true" ]]; then
+    return 0
+  fi
+  if [[ "${nav_container_engine}" != "podman" ]]; then
+    echo "Secure SSH transport into an execution environment is supported only with Podman." >&2
+    exit 1
+  fi
+
+  staged_dir="$(mktemp -d "${ANSIBLE_HOME}/ee-ssh.XXXXXX")"
+  cleanup_dirs+=("${staged_dir}")
+  chmod 0700 "${staged_dir}"
+  staged_known_hosts="${staged_dir}/known_hosts"
+  install -m 0400 "${ssh_known_hosts_file}" "${staged_known_hosts}"
+  if [[ -n "${ssh_private_key_file}" ]]; then
+    staged_key="${staged_dir}/id_selected"
+    install -m 0400 "${ssh_private_key_file}" "${staged_key}"
+    validate_owner_only_secret_file "${staged_key}" "staged SSH private key"
+    cmd+=(--senv "ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected")
+  else
+    cmd+=(--eev "${SSH_AUTH_SOCK}:/runner/ssh-agent.sock:rw")
+    cmd+=(--senv "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
+  fi
+  cmd+=(--eev "${staged_dir}:/runner/.ssh:ro")
+  cmd+=(--senv "ANSIBLE_HOST_KEY_CHECKING=True")
+  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-o UserKnownHostsFile=/runner/.ssh/known_hosts -o StrictHostKeyChecking=yes")
+  ensure_ee_identity_mapping
 }
 
 validate_choice "ANSIBLE_TOOLBOX_NAV_MODE" "${nav_mode}" "stdout interactive"
 validate_choice "ANSIBLE_TOOLBOX_NAV_EE_ENABLED" "${nav_ee_enabled}" "true false"
 validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_AUTH" "${nav_skip_auth}" "true false"
 validate_choice "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK" "${nav_skip_cert_check}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS" "${ee_only_collections}" "true false"
+validate_choice "ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING" "${ssh_agent_forwarding}" "true false"
 validate_choice "ANSIBLE_TOOLBOX_AUTO_COLLECTIONS" "${auto_collections}" "auto true false"
 validate_choice "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE" "${nav_container_engine}" "auto podman docker"
 
 if [[ -n "${nav_pull_policy}" ]]; then
   validate_choice "ANSIBLE_TOOLBOX_NAV_PULL_POLICY" "${nav_pull_policy}" "always missing never tag"
+fi
+
+if [[ "${ee_only_collections}" == "true" ]]; then
+  auto_collections="false"
 fi
 
 if [[ "${nav_skip_auth}" == "true" ]]; then
@@ -358,7 +479,10 @@ export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTI
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
 collections_path_without_overlays="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
-if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
+if [[ "${ee_only_collections}" == "true" ]]; then
+  collections_path_without_overlays="/usr/share/ansible/collections:/usr/share/automation-controller/collections"
+  export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
+elif [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
 else
   export ANSIBLE_COLLECTIONS_PATH
@@ -420,8 +544,8 @@ case "${subcommand}" in
       cmd+=(--eev "/opt/modulix:/opt/modulix:Z")
     fi
     stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
+    configure_ssh_transport
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
-    add_ee_volume_if_present "/runner/.ssh" "/runner/.ssh" dir
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
     fi
