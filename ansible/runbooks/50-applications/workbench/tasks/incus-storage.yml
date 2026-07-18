@@ -234,6 +234,7 @@
       - storage
       - show
       - "{{ workbench_incus_declared_storage_pools[0].get('name', '') }}"
+  register: workbench_incus_existing_pool
   changed_when: false
   failed_when: false
   check_mode: false
