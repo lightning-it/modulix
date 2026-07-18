@@ -218,7 +218,7 @@
               and (
                 _tang_reboot_binding_before_config.keys()
                 | list | sort
-              ) == ['url']
+              ) in [['adv', 'url'], ['thp', 'url'], ['adv', 'thp', 'url']]
             }}
           binding_has_exact_url: >-
             {{
