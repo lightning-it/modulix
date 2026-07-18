@@ -1,7 +1,8 @@
 """Static safety guards for the Ubuntu Workbench orchestration."""
 
-from pathlib import Path
+from collections.abc import Mapping
 import json
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,24 @@ def load_yaml(path: Path):
     """Load one repository YAML document."""
     with path.open(encoding="utf-8") as stream:
         return yaml.safe_load(stream)
+
+
+def normalized_task_module_names(task):
+    """Return FQCN and short module names from supported Ansible task forms."""
+    module_names = {key for key in task if isinstance(key, str)}
+    for action_key in ("action", "local_action"):
+        action = task.get(action_key)
+        module_name = None
+        if isinstance(action, str):
+            action_parts = action.split(maxsplit=1)
+            if action_parts:
+                module_name = action_parts[0]
+        elif isinstance(action, Mapping):
+            module_name = action.get("module")
+        if isinstance(module_name, str):
+            module_names.add(module_name)
+
+    return module_names | {name.rsplit(".", 1)[-1] for name in module_names}
 
 
 class WorkbenchRunbookSafetyTests(unittest.TestCase):
@@ -84,6 +103,10 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "ansible.builtin.user",
             "community.general.lvol",
         }
+        forbidden_module_names = forbidden_modules | {
+            module.rsplit(".", 1)[-1] for module in forbidden_modules
+        }
+
         def walk_tasks(tasks):
             for task in tasks:
                 yield task
@@ -96,9 +119,21 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             with self.subTest(task_file=path.name):
                 tasks = load_yaml(path)
                 for task in walk_tasks(tasks):
-                    self.assertFalse(forbidden_modules.intersection(task))
-                    if "ansible.builtin.command" in task:
+                    module_names = normalized_task_module_names(task)
+                    self.assertFalse(forbidden_module_names.intersection(module_names))
+                    if "command" in module_names:
                         self.assertIs(task.get("changed_when"), False)
+
+    def test_module_name_detection_covers_supported_ansible_task_forms(self):
+        tasks = (
+            {"ansible.builtin.copy": {"src": "a", "dest": "b"}},
+            {"copy": {"src": "a", "dest": "b"}},
+            {"action": "ansible.builtin.copy src=a dest=b"},
+            {"local_action": {"module": "copy", "src": "a", "dest": "b"}},
+        )
+        for task in tasks:
+            with self.subTest(task=task):
+                self.assertIn("copy", normalized_task_module_names(task))
 
     def test_cleanup_is_bound_to_exact_owner_profile_and_run_id(self):
         cleanup = (RUNBOOK_DIRECTORY / "tasks" / "acceptance-cleanup.yml").read_text(
