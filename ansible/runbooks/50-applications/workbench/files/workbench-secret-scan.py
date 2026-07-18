@@ -27,16 +27,30 @@ PATTERNS = {
 
 def iter_files(paths: list[Path]):
     """Yield regular, non-symlink files in deterministic order."""
+    import os
+
     for path in sorted(paths):
         if path.is_symlink():
             continue
         if path.is_file():
             yield path
-        elif path.is_dir():
-            for candidate in sorted(path.rglob("*")):
-                if candidate.is_file() and not candidate.is_symlink():
-                    yield candidate
+            continue
+        if not path.is_dir():
+            continue
 
+        for root, dirnames, filenames in os.walk(path, followlinks=False):
+            root_path = Path(root)
+            dirnames[:] = [
+                name
+                for name in sorted(dirnames)
+                if not (root_path / name).is_symlink()
+            ]
+            for filename in sorted(filenames):
+                candidate = root_path / filename
+                if candidate.is_symlink():
+                    continue
+                if candidate.is_file():
+                    yield candidate
 
 def main() -> int:
     """Return nonzero without returning matched secret values."""
