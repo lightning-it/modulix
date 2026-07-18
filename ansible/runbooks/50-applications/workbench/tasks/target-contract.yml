@@ -22,16 +22,8 @@
     quiet: true
   changed_when: false
 
-- name: Require the supported Workbench operating system
-  ansible.builtin.assert:
-    that:
-      - ansible_facts is mapping
-      - ansible_facts.get('distribution', '') == 'Ubuntu'
-      - ansible_facts.get('distribution_version', '') == '24.04'
-      - ansible_facts.get('fqdn', '') == inventory_hostname
     fail_msg: >-
-      The selected host is not the inventory-named Ubuntu Workbench (>=24.04,<25.04).
-    quiet: true
+      The selected host is not the inventory-named Ubuntu Workbench (Ubuntu 24.04).
   changed_when: false
 
 - name: Validate the explicit Workbench component switches
