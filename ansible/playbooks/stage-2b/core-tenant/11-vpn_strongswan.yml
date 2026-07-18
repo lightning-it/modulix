@@ -10,4 +10,4 @@
       strongswan__right: 178.15.45.53
       strongswan__leftsubnet: 10.10.30.2/32
       strongswan__rightsubnet: 192.168.253.64/32
-      strongswan__psk: PSH1R238EagTTKQLLLwm
+      strongswan__psk: "{{ vault__strongswan__psk }}"
