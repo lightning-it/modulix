@@ -76,6 +76,16 @@
   check_mode: false
   when: workbench_validation_authorized_keys.stat.exists
 
+- name: Invalidate cached sudo credentials for {{ workbench_validation_user.name }}
+  ansible.builtin.command:
+    argv: [sudo, --reset-timestamp]
+  become: true
+  become_user: "{{ workbench_validation_user.name }}"
+  environment:
+    HOME: "{{ workbench_validation_user.home }}"
+  changed_when: false
+  check_mode: false
+
 - name: Test noninteractive sudo policy for {{ workbench_validation_user.name }}
   ansible.builtin.command:
     argv: [sudo, --non-interactive, --user, root, /usr/bin/true]

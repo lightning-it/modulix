@@ -51,10 +51,10 @@
   ansible.builtin.assert:
     that:
       - >-
-        workbench_heavy_cleanup_container_labels['io.lit.managed-by']
+        workbench_heavy_cleanup_container_labels.get('io.lit.managed-by', '')
         == 'modulix-automation'
       - >-
-        workbench_heavy_cleanup_container_labels['io.lit.run-id']
+        workbench_heavy_cleanup_container_labels.get('io.lit.run-id', '')
         == workbench_acceptance_run_id
     fail_msg: "Refusing to delete a Heavy container without exact run ownership."
     quiet: true
@@ -124,10 +124,10 @@
   ansible.builtin.assert:
     that:
       - >-
-        workbench_heavy_cleanup_image_labels['io.lit.managed-by']
+        workbench_heavy_cleanup_image_labels.get('io.lit.managed-by', '')
         == 'modulix-automation'
       - >-
-        workbench_heavy_cleanup_image_labels['io.lit.run-id']
+        workbench_heavy_cleanup_image_labels.get('io.lit.run-id', '')
         == workbench_acceptance_run_id
     fail_msg: "Refusing to delete a Heavy image without exact run ownership."
     quiet: true

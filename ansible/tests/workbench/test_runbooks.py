@@ -221,9 +221,9 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            self.assertEqual(result.returncode, 0)
             sanitized = destination.read_text(encoding="utf-8")
 
-        self.assertEqual(result.returncode, 0)
         self.assertNotIn("definitely-not-a-real-private-key", sanitized)
         self.assertNotIn("s" * 24, sanitized)
         self.assertIn("<REDACTED_PRIVATE_KEY>", sanitized)
