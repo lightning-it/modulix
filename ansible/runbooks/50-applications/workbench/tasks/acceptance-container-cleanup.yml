@@ -1,0 +1,146 @@
+---
+- name: Check exact Heavy container before cleanup
+  ansible.builtin.command:
+    argv: [podman, container, exists, "{{ workbench_heavy_container }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  register: workbench_heavy_cleanup_container_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require an unambiguous Heavy container existence result
+  ansible.builtin.assert:
+    that:
+      - workbench_heavy_cleanup_container_exists.rc in [0, 1]
+    fail_msg: "Rootless Podman could not determine the exact Heavy container state."
+    quiet: true
+  changed_when: false
+
+- name: Inspect exact Heavy container owner labels
+  ansible.builtin.command:
+    argv: [podman, container, inspect, --format=json, "{{ workbench_heavy_container }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  register: workbench_heavy_cleanup_container_inspect
+  changed_when: false
+  check_mode: false
+  when: workbench_heavy_cleanup_container_exists.rc == 0
+
+- name: Decode exact Heavy container owner labels
+  ansible.builtin.set_fact:
+    workbench_heavy_cleanup_container_labels: >-
+      {{
+        (workbench_heavy_cleanup_container_inspect.stdout | from_json | first)
+        .get(
+          'Labels',
+          (workbench_heavy_cleanup_container_inspect.stdout | from_json | first)
+          .get('Config', {}).get('Labels', {})
+        )
+      }}
+  changed_when: false
+  when: workbench_heavy_cleanup_container_exists.rc == 0
+
+- name: Require exact Heavy container ownership before deletion
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_heavy_cleanup_container_labels['io.lit.managed-by']
+        == 'modulix-automation'
+      - >-
+        workbench_heavy_cleanup_container_labels['io.lit.run-id']
+        == workbench_acceptance_run_id
+    fail_msg: "Refusing to delete a Heavy container without exact run ownership."
+    quiet: true
+  changed_when: false
+  when: workbench_heavy_cleanup_container_exists.rc == 0
+
+- name: Delete exact run-owned Heavy container
+  ansible.builtin.command:
+    argv: [podman, container, rm, --force, "{{ workbench_heavy_container }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  changed_when: true
+  when: workbench_heavy_cleanup_container_exists.rc == 0
+
+- name: Check exact Heavy image before cleanup
+  ansible.builtin.command:
+    argv: [podman, image, exists, "{{ workbench_heavy_image }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  register: workbench_heavy_cleanup_image_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require an unambiguous Heavy image existence result
+  ansible.builtin.assert:
+    that:
+      - workbench_heavy_cleanup_image_exists.rc in [0, 1]
+    fail_msg: "Rootless Podman could not determine the exact Heavy image state."
+    quiet: true
+  changed_when: false
+
+- name: Inspect exact Heavy image owner labels
+  ansible.builtin.command:
+    argv: [podman, image, inspect, --format=json, "{{ workbench_heavy_image }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  register: workbench_heavy_cleanup_image_inspect
+  changed_when: false
+  check_mode: false
+  when: workbench_heavy_cleanup_image_exists.rc == 0
+
+- name: Decode exact Heavy image owner labels
+  ansible.builtin.set_fact:
+    workbench_heavy_cleanup_image_labels: >-
+      {{
+        (workbench_heavy_cleanup_image_inspect.stdout | from_json | first)
+        .get(
+          'Labels',
+          (workbench_heavy_cleanup_image_inspect.stdout | from_json | first)
+          .get('Config', {}).get('Labels', {})
+        )
+      }}
+  changed_when: false
+  when: workbench_heavy_cleanup_image_exists.rc == 0
+
+- name: Require exact Heavy image ownership before deletion
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_heavy_cleanup_image_labels['io.lit.managed-by']
+        == 'modulix-automation'
+      - >-
+        workbench_heavy_cleanup_image_labels['io.lit.run-id']
+        == workbench_acceptance_run_id
+    fail_msg: "Refusing to delete a Heavy image without exact run ownership."
+    quiet: true
+  changed_when: false
+  when: workbench_heavy_cleanup_image_exists.rc == 0
+
+- name: Delete exact run-owned Heavy image
+  ansible.builtin.command:
+    argv: [podman, image, rm, --force, "{{ workbench_heavy_image }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  changed_when: true
+  when: workbench_heavy_cleanup_image_exists.rc == 0

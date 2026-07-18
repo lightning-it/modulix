@@ -1,0 +1,191 @@
+"""Static safety guards for the Ubuntu Workbench orchestration."""
+
+from pathlib import Path
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+
+import yaml
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+RUNBOOK_DIRECTORY = (
+    REPOSITORY_ROOT / "ansible" / "runbooks" / "50-applications" / "workbench"
+)
+
+
+def load_yaml(path: Path):
+    """Load one repository YAML document."""
+    with path.open(encoding="utf-8") as stream:
+        return yaml.safe_load(stream)
+
+
+class WorkbenchRunbookSafetyTests(unittest.TestCase):
+    """Keep the single-target and cleanup safety boundaries reviewable."""
+
+    def test_all_public_workbench_plays_are_serial_and_fail_closed(self):
+        for name in (
+            "20-ubuntu-setup.yml",
+            "30-validate.yml",
+            "40-acceptance.yml",
+            "50-cleanup.yml",
+        ):
+            with self.subTest(playbook=name):
+                play = load_yaml(RUNBOOK_DIRECTORY / name)[0]
+                self.assertEqual(play["hosts"], "ubuntu_workbenches")
+                self.assertEqual(play["serial"], 1)
+                self.assertIs(play["any_errors_fatal"], True)
+                self.assertIs(play["gather_facts"], True)
+
+    def test_deployment_role_scope_is_exact(self):
+        play = load_yaml(RUNBOOK_DIRECTORY / "20-ubuntu-setup.yml")[0]
+        roles = [item["role"] for item in play["roles"]]
+        self.assertEqual(
+            roles,
+            [
+                "lit.ubuntu.repos",
+                "lit.ubuntu.users",
+                "lit.ubuntu.openssh_server",
+                "lit.ubuntu.podman",
+                "lit.ubuntu.incus",
+                "lit.ubuntu.developer_tools",
+            ],
+        )
+
+    def test_target_contract_rejects_broad_scope_and_desktop_components(self):
+        contract = (RUNBOOK_DIRECTORY / "tasks" / "target-contract.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ansible_limit", contract)
+        self.assertIn("ansible_play_hosts_all | length == 1", contract)
+        for component in (
+            "baseline",
+            "automatic_updates",
+            "netplan",
+            "vscode_desktop",
+            "firefox",
+            "gui",
+            "xrdp",
+            "firewalld",
+        ):
+            self.assertIn(f"not (workbench_components.{component} | bool)", contract)
+
+    def test_validation_task_files_contain_no_mutating_modules(self):
+        forbidden_modules = {
+            "ansible.builtin.apt",
+            "ansible.builtin.copy",
+            "ansible.builtin.file",
+            "ansible.builtin.package",
+            "ansible.builtin.service",
+            "ansible.builtin.systemd_service",
+            "ansible.builtin.template",
+            "ansible.builtin.user",
+            "community.general.lvol",
+        }
+        for path in sorted((RUNBOOK_DIRECTORY / "tasks").glob("validate-*.yml")):
+            with self.subTest(task_file=path.name):
+                tasks = load_yaml(path)
+                for task in tasks:
+                    self.assertFalse(forbidden_modules.intersection(task))
+                    if "ansible.builtin.command" in task:
+                        self.assertIs(task.get("changed_when"), False)
+
+    def test_cleanup_is_bound_to_exact_owner_profile_and_run_id(self):
+        cleanup = (RUNBOOK_DIRECTORY / "tasks" / "acceptance-cleanup.yml").read_text(
+            encoding="utf-8"
+        )
+        for guard in (
+            "user.lit.managed_by",
+            "user.lit.acceptance_profile",
+            "user.lit.run_id",
+            "workbench_acceptance_instance_name",
+            "workbench_acceptance.incus.cleanup.managed_name_prefix",
+            "modulix-automation",
+        ):
+            self.assertIn(guard, cleanup)
+        self.assertNotIn("maximum_age_hours", cleanup)
+
+    def test_heavy_and_application_profiles_are_real_and_pinned(self):
+        heavy = (RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy.yml").read_text(
+            encoding="utf-8"
+        )
+        heavy_guest = (
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
+        ).read_text(encoding="utf-8")
+        application = (
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-contract.yml"
+        ).read_text(encoding="utf-8")
+        application_script = (
+            RUNBOOK_DIRECTORY / "files" / "workbench-application-acceptance.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("workbench_acceptance_instance_names", heavy)
+        self.assertIn("workbench-heavy-container.sh", heavy)
+        self.assertIn("workbench-heavy-guest.sh", heavy)
+        self.assertIn(
+            "guest-{{ workbench_heavy_guest_sequence }}-first.raw.log", heavy_guest
+        )
+        self.assertIn(
+            "guest-{{ workbench_heavy_guest_sequence }}-second.raw.log", heavy_guest
+        )
+        self.assertIn("is match('^[0-9a-f]{40}$')", application)
+        self.assertIn(
+            "https://github.com/lightning-it/ansible-collection-ubuntu.git",
+            application,
+        )
+        self.assertIn("WUNDER_DEVTOOLS_STRICT=1", application_script)
+        self.assertIn("scripts/devtools-collection-smoke.sh", application_script)
+        self.assertIn("scripts/devtools-molecule.sh", application_script)
+
+    def test_secret_scanner_fails_without_returning_secret_values(self):
+        scanner = (
+            RUNBOOK_DIRECTORY / "files" / "workbench-secret-scan.py"
+        )
+        fake_token = "ghp_" + ("A" * 30)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            fixture = Path(temporary_directory) / "evidence.log"
+            fixture.write_text(f"token={fake_token}\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(scanner), str(fixture)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn(fake_token, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["findings"][0]["pattern"], "github-token")
+
+    def test_sanitizer_redacts_private_keys_and_generic_credentials(self):
+        sanitizer = RUNBOOK_DIRECTORY / "files" / "workbench-sanitize-log.py"
+        private_key = (
+            "-----BEGIN PRIVATE KEY-----\n"
+            "definitely-not-a-real-private-key\n"
+            "-----END PRIVATE KEY-----"
+        )
+        credential = "password=" + ("s" * 24)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "source.log"
+            destination = Path(temporary_directory) / "sanitized.log"
+            source.write_text(f"{private_key}\n{credential}\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(sanitizer), str(source), str(destination)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            sanitized = destination.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("definitely-not-a-real-private-key", sanitized)
+        self.assertNotIn("s" * 24, sanitized)
+        self.assertIn("<REDACTED_PRIVATE_KEY>", sanitized)
+        self.assertIn("<REDACTED_CREDENTIAL>", sanitized)
+
+
+if __name__ == "__main__":
+    unittest.main()

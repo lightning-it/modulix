@@ -1,0 +1,106 @@
+---
+- name: List the exact acceptance instance before cleanup
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - list
+      - "{{ workbench_acceptance_cleanup_instance_name }}"
+      - --format=json
+  register: workbench_cleanup_instance_list
+  changed_when: false
+  check_mode: false
+
+- name: Resolve exact acceptance cleanup candidates
+  ansible.builtin.set_fact:
+    workbench_cleanup_instance_matches: >-
+      {{
+        workbench_cleanup_instance_list.stdout | from_json
+        | selectattr('name', 'equalto', workbench_acceptance_cleanup_instance_name)
+        | list
+      }}
+  changed_when: false
+
+- name: Read acceptance instance owner metadata
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - config
+      - get
+      - "{{ workbench_acceptance_cleanup_instance_name }}"
+      - "{{ item }}"
+  loop:
+    - user.lit.managed_by
+    - user.lit.acceptance_profile
+    - user.lit.run_id
+  loop_control:
+    label: "{{ item }}"
+  register: workbench_cleanup_owner_metadata
+  changed_when: false
+  check_mode: false
+  when: workbench_cleanup_instance_matches | length == 1
+
+- name: Require exact ownership before destructive cleanup
+  ansible.builtin.assert:
+    that:
+      - workbench_cleanup_instance_matches | length == 1
+      - workbench_cleanup_owner_metadata.results[0].stdout | trim == 'modulix-automation'
+      - >-
+        workbench_cleanup_owner_metadata.results[1].stdout | trim
+        == workbench_acceptance_profile
+      - >-
+        workbench_cleanup_owner_metadata.results[2].stdout | trim
+        == workbench_acceptance_run_id
+      - workbench_acceptance_cleanup_instance_name in workbench_acceptance_instance_names
+      - >-
+        workbench_acceptance_cleanup_instance_name
+        is match('^' ~ workbench_acceptance.incus.cleanup.managed_name_prefix ~ '[a-z0-9-]+$')
+    fail_msg: >-
+      Refusing cleanup because the exact instance does not carry this profile's
+      modulix-automation owner and run-ID metadata.
+    quiet: true
+  changed_when: false
+  when: workbench_cleanup_instance_matches | length > 0
+
+- name: Delete the exact run-owned acceptance instance
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - delete
+      - "{{ workbench_acceptance_cleanup_instance_name }}"
+      - --force
+  changed_when: true
+  when: workbench_cleanup_instance_matches | length == 1
+
+- name: Verify the exact acceptance instance is absent
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - list
+      - "{{ workbench_acceptance_cleanup_instance_name }}"
+      - --format=json
+  register: workbench_cleanup_verify_list
+  changed_when: false
+  check_mode: false
+
+- name: Require cleanup of only the exact acceptance instance
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_cleanup_verify_list.stdout | from_json
+        | selectattr('name', 'equalto', workbench_acceptance_cleanup_instance_name)
+        | list | length == 0
+    fail_msg: "The exact run-owned acceptance instance still exists after cleanup."
+    quiet: true
+  changed_when: false

@@ -1,0 +1,93 @@
+---
+- name: Run declared tool version probes
+  ansible.builtin.command:
+    argv: "{{ item.argv }}"
+  loop: "{{ workbench_acceptance.tools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: workbench_validation_tool_probes
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require every declared tool and version
+  ansible.builtin.assert:
+    that:
+      - item.item.name | default('') | length > 0
+      - item.item.argv | default([]) is sequence
+      - item.item.argv | default([]) is not string
+      - item.item.argv | length > 0
+      - item.item.version_regex | default('') | length > 0
+      - item.rc == 0
+      - (item.stdout ~ "\n" ~ item.stderr) is search(item.item.version_regex)
+    fail_msg: >-
+      Tool probe failed or returned an unexpected version for
+      {{ item.item.name | default('unnamed tool') }} from
+      {{ item.item.source | default('an undeclared source') }}.
+    quiet: true
+  loop: "{{ workbench_validation_tool_probes.results }}"
+  loop_control:
+    label: "{{ item.item.name | default('unnamed tool') }}"
+  changed_when: false
+
+- name: Read isolated Python environment package inventory
+  ansible.builtin.command:
+    argv:
+      - "{{ workbench_acceptance.python_environment.path }}/bin/python"
+      - -m
+      - pip
+      - list
+      - --format=json
+  register: workbench_validation_python_packages
+  changed_when: false
+  check_mode: false
+
+- name: Initialize normalized Python package map
+  ansible.builtin.set_fact:
+    workbench_validation_python_package_map: {}
+  changed_when: false
+
+- name: Build normalized Python package map
+  ansible.builtin.set_fact:
+    workbench_validation_python_package_map: >-
+      {{
+        workbench_validation_python_package_map
+        | combine({item.name | lower: item.version | string})
+      }}
+  loop: "{{ workbench_validation_python_packages.stdout | from_json }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: Require declared isolated Python package versions
+  ansible.builtin.assert:
+    that:
+      - item.key | lower in workbench_validation_python_package_map
+      - workbench_validation_python_package_map[item.key | lower] == item.value | string
+    fail_msg: "Python package {{ item.key }} is absent or has version drift."
+    quiet: true
+  loop: "{{ workbench_acceptance.python_environment.packages | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+
+- name: Read global npm package inventory
+  ansible.builtin.command:
+    argv: [npm, list, --global, --depth=0, --json]
+  register: workbench_validation_npm_packages
+  changed_when: false
+  check_mode: false
+
+- name: Require declared global npm package versions
+  ansible.builtin.assert:
+    that:
+      - item.key in (workbench_validation_npm_packages.stdout | from_json).dependencies
+      - >-
+        (workbench_validation_npm_packages.stdout | from_json).dependencies[item.key].version
+        == item.value | string
+    fail_msg: "Global npm package {{ item.key }} is absent or has version drift."
+    quiet: true
+  loop: "{{ workbench_acceptance.npm_packages | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false

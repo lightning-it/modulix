@@ -1,0 +1,33 @@
+---
+# Tiny, Heavy, or Application acceptance on the selected Workbench.
+
+- name: Run one fail-closed Workbench acceptance profile
+  hosts: ubuntu_workbenches
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+    - name: Validate the exact Workbench target and component contract
+      ansible.builtin.import_tasks: tasks/target-contract.yml
+      tags: [always]
+
+    - name: Validate and resolve the requested acceptance profile
+      ansible.builtin.import_tasks: tasks/acceptance-contract.yml
+      tags: [always, acceptance]
+
+    - name: Run the bounded Tiny acceptance workflow
+      ansible.builtin.import_tasks: tasks/acceptance-tiny.yml
+      when: workbench_acceptance_profile == 'tiny'
+      tags: [acceptance, tiny]
+
+    - name: Run the bounded Heavy acceptance workflow
+      ansible.builtin.import_tasks: tasks/acceptance-heavy.yml
+      when: workbench_acceptance_profile == 'heavy'
+      tags: [acceptance, heavy]
+
+    - name: Run the bounded Application acceptance workflow
+      ansible.builtin.import_tasks: tasks/acceptance-application.yml
+      when: workbench_acceptance_profile == 'application'
+      tags: [acceptance, application]

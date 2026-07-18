@@ -1,0 +1,53 @@
+---
+- name: Validate OpenSSH server configuration syntax
+  ansible.builtin.command:
+    argv: [sshd, -t]
+  changed_when: false
+  check_mode: false
+
+- name: Read effective OpenSSH server configuration
+  ansible.builtin.command:
+    argv: [sshd, -T]
+  register: workbench_validation_sshd
+  changed_when: false
+  check_mode: false
+
+- name: Read OpenSSH service state
+  ansible.builtin.command:
+    argv: [systemctl, is-active, ssh.service]
+  register: workbench_validation_ssh_service
+  changed_when: false
+  check_mode: false
+
+- name: Require key-only OpenSSH policy and active service
+  ansible.builtin.assert:
+    that:
+      - workbench_validation_ssh_service.stdout | trim == 'active'
+      - >-
+        workbench_validation_sshd.stdout
+        is search('(?m)^passwordauthentication ' ~ openssh_server_password_authentication ~ '$')
+      - >-
+        workbench_validation_sshd.stdout
+        is search('(?m)^kbdinteractiveauthentication ' ~ openssh_server_kbd_interactive_authentication ~ '$')
+      - >-
+        workbench_validation_sshd.stdout
+        is search('(?m)^pubkeyauthentication ' ~ openssh_server_pubkey_authentication ~ '$')
+      - >-
+        workbench_validation_sshd.stdout
+        is search('(?m)^permitrootlogin ' ~ openssh_server_permit_root_login ~ '$')
+    fail_msg: "The effective OpenSSH service or key-only policy has drifted."
+    quiet: true
+  changed_when: false
+
+- name: Require every declared OpenSSH user in the effective AllowUsers policy
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_validation_sshd.stdout
+        is search('(?m)^allowusers .*\\b' ~ item.name ~ '\\b')
+    fail_msg: "The effective OpenSSH AllowUsers policy omits {{ item.name }}."
+    quiet: true
+  loop: "{{ workbench_acceptance.users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false

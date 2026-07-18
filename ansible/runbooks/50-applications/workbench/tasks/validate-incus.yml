@@ -1,0 +1,218 @@
+---
+- name: Resolve unique inventory-pinned Incus acceptance images
+  ansible.builtin.set_fact:
+    workbench_validation_incus_image_references: >-
+      {{
+        [
+          workbench_acceptance.tiny.image,
+          workbench_acceptance.heavy.image,
+          workbench_acceptance.application.image
+        ] | unique | list
+      }}
+  changed_when: false
+
+- name: Require immutable Incus acceptance image references
+  ansible.builtin.assert:
+    that:
+      - item is match('^images:[0-9a-f]{64}$')
+    fail_msg: "Every Incus acceptance image must use an images: fingerprint."
+    quiet: true
+  loop: "{{ workbench_validation_incus_image_references }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+
+- name: Read Incus remote API listen address
+  ansible.builtin.command:
+    argv: [incus, --force-local, config, get, core.https_address]
+  register: workbench_validation_incus_https_address
+  changed_when: false
+  check_mode: false
+
+- name: Read Incus storage pool configuration
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - storage
+      - show
+      - "{{ workbench_acceptance.incus.storage_pool.name }}"
+  register: workbench_validation_incus_storage
+  changed_when: false
+  check_mode: false
+
+- name: Read Incus network configuration
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - network
+      - show
+      - "{{ workbench_acceptance.incus.network.name }}"
+  register: workbench_validation_incus_network
+  changed_when: false
+  check_mode: false
+
+- name: Read Incus project configuration
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - project
+      - show
+      - "{{ workbench_acceptance.incus.project.name }}"
+  register: workbench_validation_incus_project
+  changed_when: false
+  check_mode: false
+
+- name: Read Incus profile configuration
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance.incus.project.name }}"
+      - profile
+      - show
+      - "{{ workbench_acceptance.incus.profile.name }}"
+  register: workbench_validation_incus_profile
+  changed_when: false
+  check_mode: false
+
+- name: Read Incus project instances
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance.incus.project.name }}"
+      - list
+      - --format=json
+  register: workbench_validation_incus_instances
+  changed_when: false
+  check_mode: false
+
+- name: Read dedicated Incus logical-volume state
+  ansible.builtin.command:
+    argv:
+      - lvs
+      - --reportformat
+      - json
+      - --units
+      - b
+      - --nosuffix
+      - --options
+      - vg_name,lv_name,lv_size
+      - "{{ workbench_incus_storage.device }}"
+  register: workbench_validation_incus_lv
+  changed_when: false
+  check_mode: false
+
+- name: Read the Incus-managed dedicated block-device mount
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --source
+      - "{{ workbench_incus_storage.device }}"
+      - --output
+      - TARGET,FSTYPE
+  register: workbench_validation_incus_mount
+  changed_when: false
+  failed_when: workbench_validation_incus_mount.rc not in [0, 1]
+  check_mode: false
+
+- name: Decode read-only Incus evidence
+  ansible.builtin.set_fact:
+    workbench_validation_incus_storage_data: "{{ workbench_validation_incus_storage.stdout | from_yaml }}"
+    workbench_validation_incus_network_data: "{{ workbench_validation_incus_network.stdout | from_yaml }}"
+    workbench_validation_incus_project_data: "{{ workbench_validation_incus_project.stdout | from_yaml }}"
+    workbench_validation_incus_profile_data: "{{ workbench_validation_incus_profile.stdout | from_yaml }}"
+    workbench_validation_incus_instance_names: >-
+      {{
+        workbench_validation_incus_instances.stdout
+        | from_json | map(attribute='name') | list | sort
+      }}
+    workbench_validation_incus_expected_instance_names: >-
+      {{ workbench_acceptance.incus.expected_instances | list | sort }}
+    workbench_validation_incus_lv_data: >-
+      {{ (workbench_validation_incus_lv.stdout | from_json).report[0].lv }}
+  changed_when: false
+
+- name: Require Incus remote API, storage, network, and inventory state
+  ansible.builtin.assert:
+    that:
+      - not (workbench_acceptance.incus.remote_api_enabled | bool)
+      - workbench_validation_incus_https_address.stdout | trim | length == 0
+      - >-
+        workbench_validation_incus_storage_data.driver
+        == workbench_acceptance.incus.storage_pool.driver
+      - >-
+        workbench_validation_incus_storage_data.config.source
+        == workbench_acceptance.incus.storage_pool.source
+      - >-
+        workbench_validation_incus_network_data.type
+        == workbench_acceptance.incus.network.type
+      - >-
+        workbench_validation_incus_network_data.config['ipv4.address']
+        == workbench_acceptance.incus.network.ipv4_address
+      - >-
+        workbench_validation_incus_network_data.config['ipv4.dhcp'] | bool
+        == workbench_acceptance.incus.network.ipv4_dhcp | bool
+      - >-
+        workbench_validation_incus_network_data.config['ipv4.nat'] | bool
+        == workbench_acceptance.incus.network.ipv4_nat | bool
+      - >-
+        (workbench_validation_incus_network_data.config['ipv6.address'] != 'none')
+        == (workbench_acceptance.incus.network.ipv6_enabled | bool)
+      - >-
+        workbench_validation_incus_instance_names
+        == workbench_validation_incus_expected_instance_names
+      - workbench_validation_incus_lv_data | length == 1
+      - >-
+        (
+          workbench_validation_incus_lv_data[0].lv_size | trim | float
+          - (workbench_acceptance.incus.storage_pool.size_gib | int * 1024 * 1024 * 1024)
+        ) | abs <= 4194304
+      - workbench_validation_incus_mount.rc == 0
+      - >-
+        workbench_validation_incus_mount.stdout.split()[0]
+        == '/var/lib/incus/storage-pools/' ~ workbench_acceptance.incus.storage_pool.name
+      - workbench_validation_incus_mount.stdout.split()[1] == 'btrfs'
+    fail_msg: >-
+      Incus remote API, storage, network, instance inventory, or dedicated LV
+      drift detected. This validation never repairs network drift.
+    quiet: true
+  changed_when: false
+
+- name: Require declared Incus project limits
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_validation_incus_project_data.config['limits.' ~ item.key]
+        == item.value | string
+    fail_msg: "Incus project limit {{ item.key }} has drifted."
+    quiet: true
+  loop: "{{ workbench_acceptance.incus.project.limits | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+
+- name: Require declared Incus profile and devices
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_validation_incus_profile_data.config['limits.cpu']
+        == workbench_acceptance.incus.profile.cpu | string
+      - >-
+        workbench_validation_incus_profile_data.config['limits.memory']
+        == workbench_acceptance.incus.profile.memory | string
+      - >-
+        workbench_validation_incus_profile_data.devices.eth0.network
+        == workbench_acceptance.incus.network.name
+      - >-
+        workbench_validation_incus_profile_data.devices.root.pool
+        == workbench_acceptance.incus.storage_pool.name
+    fail_msg: "The declared Incus profile limits or devices have drifted."
+    quiet: true
+  changed_when: false

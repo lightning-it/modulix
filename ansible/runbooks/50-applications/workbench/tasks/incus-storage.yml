@@ -1,0 +1,297 @@
+---
+- name: Resolve the Incus storage pool that owns the declared device
+  ansible.builtin.set_fact:
+    workbench_incus_declared_storage_pools: >-
+      {{
+        (incus_preseed | default({})).storage_pools | default([])
+        | selectattr('config.source', 'defined')
+        | selectattr(
+          'config.source',
+          'equalto',
+          workbench_incus_storage.device | default('')
+        )
+        | list
+      }}
+  changed_when: false
+
+- name: Validate the dedicated Incus logical-volume declaration
+  ansible.builtin.assert:
+    that:
+      - workbench_incus_storage is mapping
+      - workbench_incus_storage.volume_group | default('') is string
+      - workbench_incus_storage.volume_group | default('') is match('^[A-Za-z0-9+_.-]+$')
+      - workbench_incus_storage.logical_volume | default('') is string
+      - workbench_incus_storage.logical_volume | default('') is match('^[A-Za-z0-9+_.-]+$')
+      - workbench_incus_storage.size_gib | default(0) | int == 128
+      - workbench_incus_storage.minimum_vg_free_after_gib | default(0) | int >= 16
+      - >-
+        workbench_incus_storage.device | default('')
+        == '/dev/' ~ workbench_incus_storage.volume_group
+        ~ '/' ~ workbench_incus_storage.logical_volume
+      - workbench_incus_storage.filesystem | default('') == 'raw'
+      - workbench_incus_storage.mount | default(true) is boolean
+      - not (workbench_incus_storage.mount | bool)
+      - workbench_incus_declared_storage_pools | length == 1
+      - workbench_incus_declared_storage_pools[0].name is match('^[A-Za-z0-9+_.-]+$')
+      - workbench_incus_declared_storage_pools[0].driver == 'btrfs'
+    fail_msg: >-
+      Incus storage must be the explicit, unmounted 128-GiB raw LV declared by
+      inventory. The Incus preseed, not this task, may initialize its Btrfs
+      storage pool on that exact block device.
+    quiet: true
+  changed_when: false
+
+- name: Discover the selected volume group
+  ansible.builtin.command:
+    argv:
+      - vgs
+      - --reportformat
+      - json
+      - --units
+      - b
+      - --nosuffix
+      - --options
+      - vg_name,vg_size,vg_free
+      - "{{ workbench_incus_storage.volume_group }}"
+  register: workbench_incus_vg_report
+  changed_when: false
+  check_mode: false
+
+- name: Discover logical volumes in the selected volume group
+  ansible.builtin.command:
+    argv:
+      - lvs
+      - --reportformat
+      - json
+      - --units
+      - b
+      - --nosuffix
+      - --options
+      - vg_name,lv_name,lv_size,lv_attr
+      - "{{ workbench_incus_storage.volume_group }}"
+  register: workbench_incus_lv_report
+  changed_when: false
+  check_mode: false
+
+- name: Discover physical volumes backing the selected volume group
+  ansible.builtin.command:
+    argv:
+      - pvs
+      - --reportformat
+      - json
+      - --options
+      - pv_name,vg_name
+      - --select
+      - "vg_name={{ workbench_incus_storage.volume_group }}"
+  register: workbench_incus_pv_report
+  changed_when: false
+  check_mode: false
+
+- name: Decode the Incus LVM safety state
+  ansible.builtin.set_fact:
+    workbench_incus_vg_matches: >-
+      {{
+        (workbench_incus_vg_report.stdout | from_json).report[0].vg
+        | selectattr('vg_name', 'equalto', workbench_incus_storage.volume_group)
+        | list
+      }}
+    workbench_incus_lv_matches: >-
+      {{
+        (workbench_incus_lv_report.stdout | from_json).report[0].lv
+        | selectattr('vg_name', 'equalto', workbench_incus_storage.volume_group)
+        | selectattr('lv_name', 'equalto', workbench_incus_storage.logical_volume)
+        | list
+      }}
+    workbench_incus_pv_matches: >-
+      {{
+        (workbench_incus_pv_report.stdout | from_json).report[0].pv
+        | selectattr('vg_name', 'equalto', workbench_incus_storage.volume_group)
+        | list
+      }}
+    workbench_incus_lv_size_bytes: >-
+      {{ (workbench_incus_storage.size_gib | int) * 1024 * 1024 * 1024 }}
+    workbench_incus_vg_reserve_bytes: >-
+      {{ (workbench_incus_storage.minimum_vg_free_after_gib | int) * 1024 * 1024 * 1024 }}
+  changed_when: false
+
+- name: Require an unambiguous encrypted LVM backing set
+  ansible.builtin.assert:
+    that:
+      - workbench_incus_vg_matches | length == 1
+      - workbench_incus_lv_matches | length <= 1
+      - workbench_incus_pv_matches | length > 0
+      - >-
+        workbench_incus_lv_matches | length == 1
+        or (
+          workbench_incus_vg_matches[0].vg_free | trim | float
+          >= (workbench_incus_lv_size_bytes | int) + (workbench_incus_vg_reserve_bytes | int)
+        )
+      - >-
+        workbench_incus_lv_matches | length == 0
+        or (
+          (
+            workbench_incus_lv_matches[0].lv_size | trim | float
+            - (workbench_incus_lv_size_bytes | int)
+          ) | abs
+        ) <= 4194304
+    fail_msg: >-
+      Refusing Incus LV creation or resize. The VG/LV selection is ambiguous,
+      the existing LV is not exactly 128 GiB, or the requested allocation would
+      violate the inventory-declared free-space reserve. Existing LVs are never
+      resized or shrunk by this workflow.
+    quiet: true
+  changed_when: false
+
+- name: Inspect encryption ancestry for every selected physical volume
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - --inverse
+      - --noheadings
+      - --output
+      - TYPE
+      - "{{ item.pv_name | trim }}"
+  loop: "{{ workbench_incus_pv_matches }}"
+  loop_control:
+    label: "{{ item.pv_name | trim }}"
+  register: workbench_incus_pv_ancestry
+  changed_when: false
+  check_mode: false
+
+- name: Require every Incus PV to descend from active encrypted storage
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - "'crypt' in (item.stdout_lines | map('trim') | list)"
+    fail_msg: >-
+      Refusing Incus storage on {{ item.item.pv_name | trim }} because its
+      block-device ancestry does not contain an active dm-crypt mapping.
+    quiet: true
+  loop: "{{ workbench_incus_pv_ancestry.results }}"
+  loop_control:
+    label: "{{ item.item.pv_name | trim }}"
+  changed_when: false
+
+- name: Check whether the declared Incus device is mounted
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --source
+      - "{{ workbench_incus_storage.device }}"
+      - --output
+      - TARGET,FSTYPE
+  register: workbench_incus_device_mount
+  changed_when: false
+  failed_when: workbench_incus_device_mount.rc not in [0, 1]
+  check_mode: false
+  when: workbench_incus_lv_matches | length == 1
+
+- name: Inspect any existing Incus block-device filesystem signature
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - --noheadings
+      - --output
+      - FSTYPE
+      - "{{ workbench_incus_storage.device }}"
+  register: workbench_incus_device_fstype
+  changed_when: false
+  check_mode: false
+  when: workbench_incus_lv_matches | length == 1
+
+- name: Read an existing Incus storage-pool declaration
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - storage
+      - show
+      - "{{ workbench_incus_declared_storage_pools[0].name }}"
+  register: workbench_incus_existing_pool
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - workbench_incus_lv_matches | length == 1
+    - workbench_incus_device_fstype.stdout | trim == 'btrfs'
+
+- name: Decode an existing Incus storage-pool declaration
+  ansible.builtin.set_fact:
+    workbench_incus_existing_pool_data: "{{ workbench_incus_existing_pool.stdout | from_yaml }}"
+  changed_when: false
+  when:
+    - workbench_incus_lv_matches | length == 1
+    - workbench_incus_device_fstype.stdout | trim == 'btrfs'
+    - workbench_incus_existing_pool.rc == 0
+
+- name: Refuse mounted or foreign existing Incus storage
+  ansible.builtin.assert:
+    that:
+      - workbench_incus_device_fstype.stdout | trim in ['', 'btrfs']
+      - >-
+        workbench_incus_device_fstype.stdout | trim != ''
+        or workbench_incus_device_mount.rc == 1
+      - >-
+        workbench_incus_device_fstype.stdout | trim != 'btrfs'
+        or workbench_incus_existing_pool.rc == 0
+      - >-
+        workbench_incus_device_fstype.stdout | trim != 'btrfs'
+        or workbench_incus_existing_pool_data.get('driver', '') == 'btrfs'
+      - >-
+        workbench_incus_device_fstype.stdout | trim != 'btrfs'
+        or workbench_incus_existing_pool_data.get('config', {}).get('source', '')
+        == workbench_incus_storage.device
+      - >-
+        workbench_incus_device_mount.rc == 1
+        or workbench_incus_device_mount.stdout.split()[0]
+        == '/var/lib/incus/storage-pools/' ~ workbench_incus_declared_storage_pools[0].name
+      - >-
+        workbench_incus_device_mount.rc == 1
+        or workbench_incus_device_mount.stdout.split()[1] == 'btrfs'
+    fail_msg: >-
+      The existing Incus LV has a foreign filesystem or mount, or its Btrfs
+      signature is not owned by the exact inventory-declared Incus storage
+      pool. Refusing to overwrite, reformat, unmount, resize, or adopt it.
+    quiet: true
+  changed_when: false
+  when: workbench_incus_lv_matches | length == 1
+
+- name: Create the absent dedicated Incus logical volume without formatting it
+  community.general.lvol:
+    vg: "{{ workbench_incus_storage.volume_group }}"
+    lv: "{{ workbench_incus_storage.logical_volume }}"
+    size: "{{ workbench_incus_storage.size_gib | int }}g"
+    state: present
+    shrink: false
+    resizefs: false
+  when: workbench_incus_lv_matches | length == 0
+
+- name: Verify the dedicated Incus logical volume after creation
+  ansible.builtin.command:
+    argv:
+      - lvs
+      - --noheadings
+      - --units
+      - g
+      - --nosuffix
+      - --options
+      - lv_size
+      - "{{ workbench_incus_storage.device }}"
+  register: workbench_incus_created_lv_size
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Require the resulting Incus logical volume size
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          workbench_incus_created_lv_size.stdout | trim | float
+          - (workbench_incus_storage.size_gib | int)
+        ) | abs <= 0.01
+    fail_msg: "The resulting Incus logical volume is not exactly 128 GiB."
+    quiet: true
+  changed_when: false
+  when: not ansible_check_mode

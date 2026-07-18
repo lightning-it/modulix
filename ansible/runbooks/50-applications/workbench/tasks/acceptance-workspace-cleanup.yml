@@ -1,0 +1,64 @@
+---
+- name: Inspect exact acceptance workspace before cleanup
+  ansible.builtin.stat:
+    path: "{{ workbench_acceptance_workspace }}"
+    get_checksum: false
+    get_mime: false
+  register: workbench_acceptance_workspace_state
+  changed_when: false
+
+- name: Inspect acceptance workspace owner marker
+  ansible.builtin.stat:
+    path: "{{ workbench_acceptance_workspace }}/.lit-owner.json"
+    get_checksum: false
+    get_mime: false
+  register: workbench_acceptance_workspace_marker
+  changed_when: false
+
+- name: Refuse an existing workspace without a regular owner marker
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (workbench_acceptance_workspace_state.stat.exists | bool)
+        or (workbench_acceptance_workspace_marker.stat.isreg | default(false) | bool)
+    fail_msg: >-
+      Refusing cleanup because the exact acceptance workspace exists without a
+      regular owner marker.
+    quiet: true
+  changed_when: false
+
+- name: Read acceptance workspace owner marker
+  ansible.builtin.slurp:
+    src: "{{ workbench_acceptance_workspace }}/.lit-owner.json"
+  register: workbench_acceptance_workspace_owner
+  no_log: true
+  when: workbench_acceptance_workspace_marker.stat.isreg | default(false)
+
+- name: Require exact workspace ownership before recursive cleanup
+  ansible.builtin.assert:
+    that:
+      - >-
+        (workbench_acceptance_workspace_owner.content | b64decode | from_json).managed_by
+        == 'modulix-automation'
+      - >-
+        (workbench_acceptance_workspace_owner.content | b64decode | from_json).profile
+        == workbench_acceptance_profile
+      - >-
+        (workbench_acceptance_workspace_owner.content | b64decode | from_json).run_id
+        == workbench_acceptance_run_id
+      - >-
+        workbench_acceptance_workspace
+        == '/tmp/lit-workbench-acceptance/' ~ workbench_acceptance_run_id
+        ~ '/' ~ workbench_acceptance_profile
+    fail_msg: >-
+      Refusing recursive workspace cleanup without the exact owner, profile,
+      run ID, and fixed acceptance path.
+    quiet: true
+  changed_when: false
+  when: workbench_acceptance_workspace_marker.stat.exists
+
+- name: Remove the exact run-owned acceptance workspace
+  ansible.builtin.file:
+    path: "{{ workbench_acceptance_workspace }}"
+    state: absent
+  when: workbench_acceptance_workspace_marker.stat.isreg | default(false)
