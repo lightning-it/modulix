@@ -20,6 +20,7 @@
 - name: Run declared tool version probes
   ansible.builtin.command:
     argv: "{{ item.argv }}"
+  become: false
   loop: "{{ workbench_acceptance.tools }}"
   loop_control:
     label: "{{ item.name | default('unnamed tool') }}"
