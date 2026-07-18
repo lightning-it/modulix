@@ -12,7 +12,7 @@ This document covers:
 
 ## Ansible automation (ModuLix)
 
-Wunderbox automation is orchestrated from the **ModuLix** repository (Ansible workspace under `modulix/ansible/`).  
+Wunderbox automation is orchestrated from the **ModuLix** repository (Ansible workspace under `ansible/`).  
 The ModuLix workspace uses **ansible-navigator** with the **Wunder devtools execution environment** to avoid local tooling dependencies.
 
 Repo (public): https://github.com/lightning-it/modulix
