@@ -1,0 +1,731 @@
+---
+# -----------------------------------------------------------------------------
+# Ubuntu 24 - independent pinned CIS audit
+#
+# Run server and workstation classes separately with their exact native
+# upstream profile tag. Audit output is runtime evidence and is intentionally
+# excluded from changed=0 remediation idempotence assertions.
+# -----------------------------------------------------------------------------
+- name: Independent CIS audit (Ubuntu 24)
+  hosts: ubuntu24_cis_targets
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  order: inventory
+  serial: 1
+
+  pre_tasks:
+    - name: Resolve the selected CIS inventory class
+      ansible.builtin.set_fact:
+        cis_audit_server_class_selected: >-
+          {{
+            (
+              ansible_play_hosts_all
+              | intersect(groups['ubuntu24_cis_servers'] | default([]))
+              | length
+            ) == (ansible_play_hosts_all | length)
+          }}
+        cis_audit_workstation_class_selected: >-
+          {{
+            (
+              ansible_play_hosts_all
+              | intersect(groups['ubuntu24_cis_workstations'] | default([]))
+              | length
+            ) == (ansible_play_hosts_all | length)
+          }}
+      tags: always
+
+    - name: Require an explicit class limit for the CIS audit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - >-
+            (
+              cis_audit_server_class_selected | bool
+            ) != (
+              cis_audit_workstation_class_selected | bool
+            )
+          - >-
+            (
+              cis_audit_server_class_selected | bool
+              and cis_ubuntu24_profile_tag == 'level1-server'
+            )
+            or
+            (
+              cis_audit_workstation_class_selected | bool
+              and cis_ubuntu24_profile_tag == 'level1-workstation'
+            )
+          - (ansible_run_tags | sort) == (['setup_audit'] | sort)
+          - ansible_skip_tags | length == 0
+        fail_msg: >-
+          Limit the CIS audit to one inventory class (servers or workstations)
+          and use its matching native profile with exactly --tags setup_audit
+          and no skip tags.
+      tags: always
+
+    - name: Validate the pinned CIS runtime
+      ansible.builtin.import_tasks:
+        file: tasks/validate-cis-runtime.yml
+      tags: always
+
+    - name: Validate the inventory-owned supplemental audit policy
+      ansible.builtin.assert:
+        that:
+          - ubtu24cis_time_sync_tool is defined
+          - ubtu24cis_time_sync_tool in ['systemd-timesyncd', 'chrony']
+          - ubtu24cis_firewall_package is defined
+          - >-
+            ubtu24cis_firewall_package | string | lower
+            in ['none', 'ufw', 'nftables', 'iptables']
+          - ubtu24cis_syslog_service is defined
+          - ubtu24cis_syslog_service in ['journald', 'rsyslog']
+          - ubtu24cis_ipv6_required is defined
+          - ubtu24cis_ipv6_required is boolean
+          - cis_ubuntu24_apt_approved_uris is sequence
+          - cis_ubuntu24_apt_approved_uris is not string
+          - cis_ubuntu24_apt_approved_uris | length > 0
+          - cis_ubuntu24_apt_approved_suites is sequence
+          - cis_ubuntu24_apt_approved_suites is not string
+          - cis_ubuntu24_apt_approved_suites | length > 0
+          - cis_ubuntu24_apt_approved_components is sequence
+          - cis_ubuntu24_apt_approved_components is not string
+          - cis_ubuntu24_apt_approved_components | length > 0
+          - cis_ubuntu24_apt_approved_keyring is match('^/')
+          - cis_ubuntu24_apt_approved_key_fingerprints is sequence
+          - cis_ubuntu24_apt_approved_key_fingerprints is not string
+          - cis_ubuntu24_apt_approved_key_fingerprints | length > 0
+          - cis_ubuntu24_logrotate_frequency in ['daily', 'weekly', 'monthly', 'yearly']
+      tags: always
+
+    - name: Define the immutable CIS audit evidence run
+      ansible.builtin.set_fact:
+        cis_audit_run_id: "{{ ansible_date_time.epoch }}"
+        cis_audit_controller_dir: >-
+          /runner/project/.tmp/cis-audit/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}
+        cis_audit_remote_dir: >-
+          /var/lib/lit/cis-audit/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}
+        cis_audit_checkout_root: >-
+          /var/lib/lit/cis-audit-content/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}
+        cis_audit_checkout_dir: >-
+          /var/lib/lit/cis-audit-content/{{ inventory_hostname }}/{{ ansible_date_time.epoch }}/UBUNTU24-CIS-Audit
+        cis_audit_reviewed_provenance:
+          repository: >-
+            https://github.com/ansible-lockdown/UBUNTU24-CIS-Audit.git
+          commit: 87efcc6d409d1a998a7cb809c5ce5a6afedf84c7
+      tags: always
+
+    - name: Inspect the controller CIS audit evidence path
+      ansible.builtin.stat:
+        path: "{{ cis_audit_controller_dir }}"
+      register: cis_audit_controller_dir_state
+      become: false
+      delegate_to: localhost
+      tags: always
+
+    - name: Reject a stale or colliding CIS audit evidence path
+      ansible.builtin.assert:
+        that:
+          - not cis_audit_controller_dir_state.stat.exists
+        fail_msg: >-
+          Refusing to reuse the existing CIS audit evidence path
+          {{ cis_audit_controller_dir }}.
+      become: false
+      delegate_to: localhost
+      tags: always
+
+    - name: Create the remote CIS audit evidence directory
+      ansible.builtin.file:
+        path: "{{ cis_audit_remote_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: always
+
+    - name: Inspect the immutable CIS audit checkout root
+      ansible.builtin.stat:
+        path: "{{ cis_audit_checkout_root }}"
+        follow: false
+      register: cis_audit_checkout_root_state
+      tags: always
+
+    - name: Reject a stale or colliding CIS audit checkout root
+      ansible.builtin.assert:
+        that:
+          - not cis_audit_checkout_root_state.stat.exists
+        fail_msg: >-
+          Refusing to reuse the existing CIS audit checkout root
+          {{ cis_audit_checkout_root }}.
+      tags: always
+
+    - name: Create the immutable CIS audit checkout root
+      ansible.builtin.file:
+        path: "{{ cis_audit_checkout_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: always
+
+    - name: Create the controller CIS audit evidence directory
+      ansible.builtin.file:
+        path: "{{ cis_audit_controller_dir }}"
+        state: directory
+        mode: "0700"
+      become: false
+      delegate_to: localhost
+      tags: always
+
+    - name: Install Git for the pinned CIS audit checkout
+      ansible.builtin.package:
+        name: git
+        state: present
+        lock_timeout: "{{ ubtu24cis_apt_lock_timeout }}"
+      tags: always
+
+    - name: Check out the exact reviewed CIS audit commit
+      ansible.builtin.git:
+        repo: "{{ cis_audit_reviewed_provenance.repository }}"
+        dest: "{{ cis_audit_checkout_dir }}"
+        version: "{{ cis_audit_reviewed_provenance.commit }}"
+        force: true
+      tags: always
+
+    - name: Protect the pinned CIS audit checkout root
+      ansible.builtin.file:
+        path: "{{ cis_audit_checkout_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: always
+
+    - name: Verify the pinned CIS audit checkout before root execution
+      ansible.builtin.import_tasks:
+        file: tasks/verify-cis-audit-checkout.yml
+      tags: always
+
+  tasks:
+    - name: Run the pinned independent Ubuntu 24 CIS audit
+      ansible.builtin.import_role:
+        name: lit.ubuntu.cis_ubuntu24
+      tags: always
+      vars:
+        cis_ubuntu24_execution_mode: audit
+        setup_audit: true
+        run_audit: true
+        audit_only: true
+        fetch_audit_output: true
+        audit_format: json
+        audit_content: git
+        audit_file_git: "{{ cis_audit_reviewed_provenance.repository }}"
+        audit_git_version: "{{ cis_audit_reviewed_provenance.commit }}"
+        audit_conf_dest: "{{ cis_audit_checkout_root }}"
+        audit_log_dir: "{{ cis_audit_remote_dir }}"
+        audit_output_collection_method: fetch
+        audit_output_destination: "{{ cis_audit_controller_dir }}/"
+
+- name: Validate and protect fresh independent CIS audit evidence
+  hosts: ubuntu24_cis_targets
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  order: inventory
+  serial: 1
+  tags: always
+
+  tasks:
+    - name: Verify the pinned CIS audit checkout after root execution
+      ansible.builtin.import_tasks:
+        file: tasks/verify-cis-audit-checkout.yml
+
+    - name: Discover the current remote pre-audit evidence file
+      ansible.builtin.find:
+        paths: "{{ cis_audit_remote_dir }}"
+        patterns: "*_pre_scan_{{ ansible_date_time.epoch }}.json"
+        file_type: file
+        recurse: false
+      register: cis_audit_remote_evidence
+
+    - name: Require exactly one fresh remote pre-audit evidence file
+      ansible.builtin.assert:
+        that:
+          - cis_audit_remote_evidence.matched == 1
+          - cis_audit_remote_evidence.files[0].size > 0
+        fail_msg: >-
+          The pinned audit did not produce exactly one nonempty current raw JSON
+          file on {{ inventory_hostname }}.
+
+    - name: Protect the remote raw CIS audit evidence
+      ansible.builtin.file:
+        path: "{{ cis_audit_remote_evidence.files[0].path }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Return the remote CIS audit directory to owner-only access
+      ansible.builtin.file:
+        path: "{{ cis_audit_remote_dir }}"
+        owner: root
+        group: root
+        mode: "0700"
+        state: directory
+
+    - name: Read the protected remote raw CIS audit evidence as root
+      ansible.builtin.slurp:
+        src: "{{ cis_audit_remote_evidence.files[0].path }}"
+      register: cis_audit_remote_raw_content
+      no_log: true
+
+    - name: Define the protected controller raw evidence path
+      ansible.builtin.set_fact:
+        cis_audit_controller_evidence_path: >-
+          {{
+            cis_audit_controller_dir
+            ~ '/'
+            ~ (cis_audit_remote_evidence.files[0].path | basename)
+          }}
+
+    - name: Copy the privileged raw CIS audit evidence to the controller
+      ansible.builtin.copy:
+        content: "{{ cis_audit_remote_raw_content.content | b64decode }}"
+        dest: "{{ cis_audit_controller_evidence_path }}"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+      no_log: true
+    - name: Parse the controller raw CIS audit evidence
+      ansible.builtin.set_fact:
+        cis_audit_raw: >-
+          {{ cis_audit_remote_raw_content.content | b64decode | from_json }}
+      no_log: true
+
+    - name: Validate the minimum raw Goss JSON contract
+      ansible.builtin.assert:
+        that:
+          - cis_audit_raw is mapping
+          - cis_audit_raw.results is sequence
+          - cis_audit_raw.results is not string
+          - cis_audit_raw.summary is mapping
+          - cis_audit_raw.summary['test-count'] is integer
+          - cis_audit_raw.summary['failed-count'] is integer
+          - cis_audit_raw.summary['skipped-count'] is integer
+          - cis_audit_raw.results | length == cis_audit_raw.summary['test-count']
+        fail_msg: >-
+          The fresh CIS audit evidence does not satisfy the expected pinned Goss
+          JSON schema or its result count disagrees with the summary.
+      no_log: true
+
+    - name: Record the protected remote raw CIS audit evidence checksum
+      ansible.builtin.stat:
+        path: "{{ cis_audit_remote_evidence.files[0].path }}"
+        checksum_algorithm: sha256
+      register: cis_audit_remote_raw_state
+
+    - name: Record the protected controller raw CIS audit evidence checksum
+      ansible.builtin.stat:
+        path: "{{ cis_audit_controller_evidence_path }}"
+        checksum_algorithm: sha256
+      register: cis_audit_controller_raw_state
+      become: false
+      delegate_to: localhost
+
+    - name: Require protected raw CIS audit evidence metadata
+      ansible.builtin.assert:
+        that:
+          - cis_audit_remote_raw_state.stat.mode == '0600'
+          - cis_audit_controller_raw_state.stat.mode == '0600'
+          - >-
+            cis_audit_remote_raw_state.stat.checksum
+            == cis_audit_controller_raw_state.stat.checksum
+          - >-
+            cis_audit_controller_raw_state.stat.checksum
+            is match('^[0-9a-f]{64}$')
+      become: false
+      delegate_to: localhost
+
+    - name: Materialize the verified CIS audit provenance
+      ansible.builtin.copy:
+        content: "{{ cis_audit_verified_provenance | to_nice_json }}"
+        dest: "{{ cis_audit_controller_dir }}/provenance.json"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Materialize the reviewed CIS exception registry
+      ansible.builtin.copy:
+        content: "{{ cis_ubuntu24_exceptions | default([]) | to_nice_json }}"
+        dest: "{{ cis_audit_controller_dir }}/exceptions.json"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Materialize the effective CIS audit context
+      ansible.builtin.copy:
+        content: >-
+          {{ {
+            'time_sync_tool': ubtu24cis_time_sync_tool,
+            'firewall_mode': (
+              'disabled'
+              if ubtu24cis_firewall_package | string | lower == 'none'
+              else (
+                'iptables-dual-stack'
+                if (
+                  ubtu24cis_firewall_package | string | lower == 'iptables'
+                  and ubtu24cis_ipv6_required | bool
+                )
+                else (
+                  'iptables-ipv4'
+                  if ubtu24cis_firewall_package | string | lower == 'iptables'
+                  else ubtu24cis_firewall_package | string | lower
+                )
+              )
+            ),
+            'syslog_service': ubtu24cis_syslog_service,
+            'ipv6_mode': (
+              'required' if ubtu24cis_ipv6_required | bool else 'disabled'
+            )
+          } | to_nice_json }}
+        dest: "{{ cis_audit_controller_dir }}/context.json"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Run reviewed read-only supplemental CIS checks
+      ansible.builtin.shell: "{{ item.command }}"
+      args:
+        executable: /bin/bash
+      loop:
+        - control_id: '1.1.1.10'
+          check_id: filesystem-module-cve-review
+          command: "test -x /var/fs_with_cves.sh && /var/fs_with_cves.sh >/dev/null"
+        - control_id: '1.2.1.1'
+          check_id: apt-signing-keys-reviewed
+          command: >-
+            test -f "$CIS_APT_KEYRING" &&
+            test "$(stat -c '%U:%G' "$CIS_APT_KEYRING")" = 'root:root' &&
+            mode=$(stat -c '%a' "$CIS_APT_KEYRING") &&
+            (( (8#$mode & 0022) == 0 )) &&
+            actual=$(gpg --batch --show-keys --with-colons "$CIS_APT_KEYRING"
+            2>/dev/null | awk -F: '$1 == "fpr" {print $10}' | sort -u) &&
+            expected=$(tr '|' '\n' <<<"$CIS_APT_KEY_FINGERPRINTS" | sort -u) &&
+            test "$actual" = "$expected"
+        - control_id: '1.2.1.2'
+          check_id: apt-repositories-reviewed
+          command: >-
+            shopt -s nullglob &&
+            files=(/etc/apt/sources.list.d/*.sources) &&
+            test "${files[0]+present}" = present &&
+            ! grep -RhsEq '^[[:space:]]*deb(-src)?[[:space:]]'
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null &&
+            uri_count=0 && signed_count=0 &&
+            while IFS=: read -r field values; do
+              values=${values# };
+              case "$field" in
+                URIs)
+                  uri_count=$((uri_count + 1));
+                  for value in $values; do
+                    tr '|' '\n' <<<"$CIS_APT_APPROVED_URIS" |
+                    grep -Fxq "$value" || exit 1;
+                  done;;
+                Suites)
+                  for value in $values; do
+                    tr '|' '\n' <<<"$CIS_APT_APPROVED_SUITES" |
+                    grep -Fxq "$value" || exit 1;
+                  done;;
+                Components)
+                  for value in $values; do
+                    tr '|' '\n' <<<"$CIS_APT_APPROVED_COMPONENTS" |
+                    grep -Fxq "$value" || exit 1;
+                  done;;
+                Signed-By)
+                  signed_count=$((signed_count + 1));
+                  test "$values" = "$CIS_APT_KEYRING" || exit 1;;
+              esac;
+            done < <(grep -hsE '^(URIs|Suites|Components|Signed-By):' "${files[@]}") &&
+            ((uri_count > 0 && uri_count == signed_count))
+        - control_id: '3.3.5'
+          check_id: icmp-redirects-live-and-persistent
+          command: >-
+            config=$(systemd-analyze cat-config sysctl.d) &&
+            check_sysctl() { key=$1; expected=$2;
+              test "$(sysctl -n "$key")" = "$expected" &&
+              value=$(awk -F= -v wanted="$key" '
+                { k=$1; gsub(/^[[:space:]]+|[[:space:]]+$/, "", k);
+                  if (k == wanted) { v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); value=v } }
+                END { if (value == "") exit 1; print value }' <<<"$config") &&
+              test "$value" = "$expected"; } &&
+            check_sysctl net.ipv4.conf.all.accept_redirects 0 &&
+            check_sysctl net.ipv4.conf.default.accept_redirects 0 &&
+            check_sysctl net.ipv6.conf.all.accept_redirects 0 &&
+            check_sysctl net.ipv6.conf.default.accept_redirects 0
+        - control_id: '3.3.8'
+          check_id: source-route-live-and-persistent
+          command: >-
+            config=$(systemd-analyze cat-config sysctl.d) &&
+            check_sysctl() { key=$1; expected=$2;
+              test "$(sysctl -n "$key")" = "$expected" &&
+              value=$(awk -F= -v wanted="$key" '
+                { k=$1; gsub(/^[[:space:]]+|[[:space:]]+$/, "", k);
+                  if (k == wanted) { v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); value=v } }
+                END { if (value == "") exit 1; print value }' <<<"$config") &&
+              test "$value" = "$expected"; } &&
+            check_sysctl net.ipv4.conf.all.accept_source_route 0 &&
+            check_sysctl net.ipv4.conf.default.accept_source_route 0 &&
+            check_sysctl net.ipv6.conf.all.accept_source_route 0 &&
+            check_sysctl net.ipv6.conf.default.accept_source_route 0
+        - control_id: '3.3.9'
+          check_id: suspicious-packets-logged
+          command: >-
+            config=$(systemd-analyze cat-config sysctl.d) &&
+            check_sysctl() { key=$1; expected=$2;
+              test "$(sysctl -n "$key")" = "$expected" &&
+              value=$(awk -F= -v wanted="$key" '
+                { k=$1; gsub(/^[[:space:]]+|[[:space:]]+$/, "", k);
+                  if (k == wanted) { v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); value=v } }
+                END { if (value == "") exit 1; print value }' <<<"$config") &&
+              test "$value" = "$expected"; } &&
+            check_sysctl net.ipv4.conf.all.log_martians 1 &&
+            check_sysctl net.ipv4.conf.default.log_martians 1
+        - control_id: '3.3.11'
+          check_id: ipv6-router-advertisements-disabled
+          command: >-
+            config=$(systemd-analyze cat-config sysctl.d) &&
+            check_sysctl() { key=$1; expected=$2;
+              test "$(sysctl -n "$key")" = "$expected" &&
+              value=$(awk -F= -v wanted="$key" '
+                { k=$1; gsub(/^[[:space:]]+|[[:space:]]+$/, "", k);
+                  if (k == wanted) { v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); value=v } }
+                END { if (value == "") exit 1; print value }' <<<"$config") &&
+              test "$value" = "$expected"; } &&
+            check_sysctl net.ipv6.conf.all.accept_ra 0 &&
+            check_sysctl net.ipv6.conf.default.accept_ra 0
+        - control_id: '5.1.4'
+          check_id: sshd-effective-access
+          command: "sshd -T | grep -Eq '^(allowusers|allowgroups|denyusers|denygroups)'"
+        - control_id: '5.1.8'
+          check_id: sshd-effective-disable-forwarding
+          profiles:
+            - level1-workstation
+          command: "test \"$(sshd -T | awk '$1 == \"disableforwarding\" {print $2}')\" = yes"
+        - control_id: '5.1.9'
+          check_id: sshd-effective-gssapi-disabled
+          profiles:
+            - level1-workstation
+          command: "test \"$(sshd -T | awk '$1 == \"gssapiauthentication\" {print $2}')\" = no"
+        - control_id: '6.1.1.4'
+          check_id: single-logging-system
+          command: "systemctl is-active --quiet systemd-journald && ! systemctl is-active --quiet rsyslog"
+        - control_id: '6.1.1.2'
+          check_id: journald-log-access
+          command: >-
+            test "$(stat -c '%a %U %G' /usr/lib/tmpfiles.d/systemd.conf)" =
+            '640 root root' &&
+            for root in /var/log/journal /run/log/journal; do
+              test -e "$root" || continue;
+              ! find "$root" -type d \
+              \( ! -user root -o ! -group systemd-journal -o ! -perm 2755 \) \
+              -print -quit | grep -q . || exit 1;
+              ! find "$root" -type f -name '*.journal*' \
+              \( ! -user root -o ! -group systemd-journal -o ! -perm 0640 \) \
+              -print -quit | grep -q . || exit 1;
+            done
+        - control_id: '6.1.3.8'
+          check_id: logrotate-frequency
+          command: >-
+            test -f /etc/logrotate.conf &&
+            grep -Eq "^[[:space:]]*$CIS_LOGROTATE_FREQUENCY[[:space:]]*$"
+            /etc/logrotate.conf &&
+            grep -RhsE '^[[:space:]]*(daily|weekly|monthly|yearly)[[:space:]]*$'
+            /etc/logrotate.conf /etc/logrotate.d | awk -v wanted="$CIS_LOGROTATE_FREQUENCY"
+            '{ gsub(/[[:space:]]/, ""); if ($0 != wanted) exit 1 }'
+        - control_id: '6.2.4.1'
+          check_id: audit-log-files-mode
+          command: "! find /var/log/audit -type f -perm /0137 -print -quit | grep -q ."
+        - control_id: '6.2.4.2'
+          check_id: audit-log-files-owner
+          command: "! find /var/log/audit -type f ! -user root -print -quit | grep -q ."
+        - control_id: '6.2.4.3'
+          check_id: audit-log-files-group
+          command: >-
+            ! find /var/log/audit -type f ! -group root ! -group adm
+            -print -quit | grep -q .
+        - control_id: '6.2.4.4'
+          check_id: audit-log-directory-mode
+          command: "test \"$(stat -c '%a' /var/log/audit)\" = 750"
+        - control_id: '6.2.4.5'
+          check_id: audit-config-files-mode
+          command: >-
+            ! find /etc/audit -type f \( -name '*.conf' -o -name '*.rules' \)
+            -perm /0137 -print -quit | grep -q .
+        - control_id: '6.2.4.6'
+          check_id: audit-config-files-owner
+          command: >-
+            ! find /etc/audit -type f \( -name '*.conf' -o -name '*.rules' \)
+            ! -user root -print -quit | grep -q .
+        - control_id: '6.2.4.7'
+          check_id: audit-config-files-group
+          command: >-
+            ! find /etc/audit -type f \( -name '*.conf' -o -name '*.rules' \)
+            ! -group root -print -quit | grep -q .
+        - control_id: '6.2.4.8'
+          check_id: audit-tools-mode
+          command: >-
+            for path in /sbin/auditctl /sbin/aureport /sbin/ausearch
+            /sbin/autrace /sbin/auditd /sbin/augenrules; do
+              mode=$(stat -c '%a' "$path") || exit 1;
+              (( (8#$mode & 07022) == 0 )) || exit 1;
+            done
+        - control_id: '6.2.4.9'
+          check_id: audit-tools-owner
+          command: >-
+            for path in /sbin/auditctl /sbin/aureport /sbin/ausearch
+            /sbin/autrace /sbin/auditd /sbin/augenrules; do
+              test "$(stat -c '%U' "$path")" = root || exit 1;
+            done
+        - control_id: '6.2.4.10'
+          check_id: audit-tools-group
+          command: >-
+            for path in /sbin/auditctl /sbin/aureport /sbin/ausearch
+            /sbin/autrace /sbin/auditd /sbin/augenrules; do
+              test "$(stat -c '%G' "$path")" = root || exit 1;
+            done
+        - control_id: '6.3.3'
+          check_id: aide-audit-tools-sha512
+          command: >-
+            for path in /usr/sbin/auditctl /usr/sbin/aureport /usr/sbin/ausearch
+            /usr/sbin/autrace /usr/sbin/auditd /usr/sbin/augenrules; do
+              grep -RhsEq "^[[:space:]]*$path[[:space:]]+p\+i\+n\+u\+g\+s\+b\+acl\+xattrs\+sha512[[:space:]]*$" \
+              /etc/aide/aide.conf /etc/aide/aide.conf.d || exit 1;
+            done
+        - control_id: '7.1.13'
+          check_id: suid-sgid-reviewed
+          command: >-
+            while read -r mountpoint; do
+              while IFS= read -r -d '' path; do
+                dpkg-query -S "$path" >/dev/null 2>&1 && continue;
+                merged_path=${path#/usr};
+                dpkg-query -S "$merged_path" >/dev/null 2>&1 || exit 1;
+              done < <(find "$mountpoint" -xdev -type f
+                \( -perm -4000 -o -perm -2000 \) -print0 2>/dev/null);
+            done < <(findmnt -rn -t ext4,xfs,btrfs -o TARGET,OPTIONS |
+              awk '$2 !~ /(^|,)nosuid(,|$)/ {print $1}')
+        - control_id: '1.6.4'
+          check_id: motd-access
+          command: "test ! -e /etc/motd || test \"$(stat -c '%a %U %G' /etc/motd)\" = '644 root root'"
+        - control_id: '2.1.9'
+          check_id: nfs-server-not-in-use
+          command: "! dpkg-query -W -f='${Status}' nfs-kernel-server 2>/dev/null | grep -q 'install ok installed'"
+        - control_id: '2.1.10'
+          check_id: nis-server-not-in-use
+          command: "! dpkg-query -W -f='${Status}' nis 2>/dev/null | grep -q 'install ok installed'"
+        - control_id: '2.1.12'
+          check_id: rpcbind-not-in-use
+          command: "! systemctl is-active --quiet rpcbind.service && ! systemctl is-active --quiet rpcbind.socket"
+        - control_id: '2.1.21'
+          check_id: mta-local-only
+          command: "! ss -ltnH '( sport = :25 )' | grep -qvE '127\\.0\\.0\\.1:25|\\[::1\\]:25'"
+        - control_id: '2.2.1'
+          check_id: nis-client-absent
+          command: "! dpkg-query -W -f='${Status}' nis 2>/dev/null | grep -q 'install ok installed'"
+        - control_id: '5.4.2.8'
+          check_id: noninteractive-accounts-locked
+          command: >-
+            awk -F: '$7 !~ /(nologin|false)$/ && $1 != "root" {print $1}'
+            /etc/passwd | while read -r u; do passwd -S "$u" |
+            awk '$2 !~ /^L|^LK/ {exit 1}'; done
+        - control_id: '5.4.2.4'
+          check_id: root-access-controlled
+          command: "passwd -S root | awk '$2 ~ /^L|^LK|^P$/ {exit 0} {exit 1}'"
+      register: cis_supplemental_checks
+      changed_when: false
+      failed_when: false
+      when:
+        - >-
+          item.profiles is not defined
+          or cis_ubuntu24_profile_tag in item.profiles
+      loop_control:
+        label: "{{ item.control_id }}:{{ item.check_id }}"
+      environment:
+        CIS_APT_APPROVED_URIS: "{{ cis_ubuntu24_apt_approved_uris | join('|') }}"
+        CIS_APT_APPROVED_SUITES: "{{ cis_ubuntu24_apt_approved_suites | join('|') }}"
+        CIS_APT_APPROVED_COMPONENTS: "{{ cis_ubuntu24_apt_approved_components | join('|') }}"
+        CIS_APT_KEYRING: "{{ cis_ubuntu24_apt_approved_keyring }}"
+        CIS_APT_KEY_FINGERPRINTS: >-
+          {{ cis_ubuntu24_apt_approved_key_fingerprints | join('|') }}
+        CIS_LOGROTATE_FREQUENCY: "{{ cis_ubuntu24_logrotate_frequency }}"
+
+    - name: Assemble supplemental CIS check results
+      ansible.builtin.set_fact:
+        cis_supplemental_results: >-
+          {{ (cis_supplemental_results | default([])) +
+             [{'control_id': item.item.control_id,
+               'check_id': item.item.check_id,
+               'status': ('pass' if item.rc == 0 else 'fail')}] }}
+      loop: "{{ cis_supplemental_checks.results }}"
+      when: not (item.skipped | default(false) | bool)
+      loop_control:
+        label: "{{ item.item.control_id }}:{{ item.item.check_id }}"
+      no_log: true
+
+    - name: Materialize supplemental CIS check results
+      ansible.builtin.copy:
+        content: "{{ {'results': cis_supplemental_results} | to_nice_json }}"
+        dest: "{{ cis_audit_controller_dir }}/supplemental.json"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Normalize and gate the fresh CIS audit evidence
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /runner/project/scripts/cis-audit-normalize
+          - --raw
+          - "{{ cis_audit_controller_evidence_path }}"
+          - --profile
+          - "{{ cis_ubuntu24_profile_tag }}"
+          - --manifest
+          - /runner/project/scripts/cis-audit-ubuntu24-v1.0.0-manifest.json
+          - --exceptions
+          - "{{ cis_audit_controller_dir }}/exceptions.json"
+          - --context
+          - "{{ cis_audit_controller_dir }}/context.json"
+          - --provenance
+          - "{{ cis_audit_controller_dir }}/provenance.json"
+          - --supplemental-results
+          - "{{ cis_audit_controller_dir }}/supplemental.json"
+          - --output
+          - "{{ cis_audit_controller_dir }}/normalized.json"
+      register: cis_audit_normalizer
+      changed_when: true
+      become: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Protect normalized CIS audit evidence
+      ansible.builtin.file:
+        path: "{{ cis_audit_controller_dir }}/normalized.json"
+        mode: "0600"
+      become: false
+      delegate_to: localhost
+
+    - name: Require normalized CIS audit evidence checksum
+      ansible.builtin.stat:
+        path: "{{ cis_audit_controller_dir }}/normalized.json"
+        checksum_algorithm: sha256
+      register: cis_audit_normalized_state
+      become: false
+      delegate_to: localhost
+
+    - name: Require protected normalized CIS audit evidence metadata
+      ansible.builtin.assert:
+        that:
+          - cis_audit_normalized_state.stat.mode == '0600'
+          - cis_audit_normalized_state.stat.checksum is match('^[0-9a-f]{64}$')
+      become: false
+      delegate_to: localhost

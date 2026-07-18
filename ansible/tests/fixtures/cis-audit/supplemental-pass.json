@@ -1,0 +1,9 @@
+{
+  "results": [
+    {
+      "control_id": "1.1.1.1",
+      "check_id": "fixture-independent-check",
+      "status": "pass"
+    }
+  ]
+}

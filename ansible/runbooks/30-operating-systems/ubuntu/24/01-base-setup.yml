@@ -38,7 +38,8 @@
   any_errors_fatal: true
 
   vars:
-    _probe_port_normal: "{{ sshd_port | default(22) | int }}"
+    _probe_port_normal: >-
+      {{ openssh_server_primary_port | default(sshd_port | default(22)) | int }}
     _probe_port_bootstrap: "{{ linux_bootstrap_ssh_port | default(22) | int }}"
     _bootstrap_user_effective: "{{ linux_bootstrap_user | default('', true) }}"
     _bootstrap_password_effective: "{{ linux_bootstrap_password | default(omit) }}"

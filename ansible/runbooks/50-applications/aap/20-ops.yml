@@ -16,3 +16,8 @@
       tags:
         - aap
         - aap_ops
+
+    - name: Report AAP operations success
+      ansible.builtin.debug:
+        msg: AAP_OPERATIONS_STATUS_OK
+      changed_when: false

@@ -11,9 +11,124 @@
   gather_facts: true
   become: true
   any_errors_fatal: true
+  order: inventory
+  serial: 1
+
+  pre_tasks:
+    - name: Resolve the selected CIS inventory class
+      ansible.builtin.set_fact:
+        cis_hardening_server_class_selected: >-
+          {{
+            (
+              ansible_play_hosts_all
+              | intersect(groups['ubuntu24_cis_servers'] | default([]))
+              | length
+            ) == (ansible_play_hosts_all | length)
+          }}
+        cis_hardening_workstation_class_selected: >-
+          {{
+            (
+              ansible_play_hosts_all
+              | intersect(groups['ubuntu24_cis_workstations'] | default([]))
+              | length
+            ) == (ansible_play_hosts_all | length)
+          }}
+      tags: always
+
+    - name: Require an explicit class limit for CIS hardening
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - >-
+            (
+              cis_hardening_server_class_selected | bool
+            ) != (
+              cis_hardening_workstation_class_selected | bool
+            )
+          - >-
+            (
+              cis_hardening_server_class_selected | bool
+              and cis_ubuntu24_profile_tag in ['level1-server', 'level2-server']
+            )
+            or
+            (
+              cis_hardening_workstation_class_selected | bool
+              and cis_ubuntu24_profile_tag
+                  in ['level1-workstation', 'level2-workstation']
+            )
+          - >-
+            (ansible_run_tags | sort)
+            == ([cis_ubuntu24_profile_tag] | sort)
+          - ansible_skip_tags | length == 0
+        fail_msg: >-
+          Limit CIS hardening to one inventory class (servers or workstations)
+          and run exactly its matching native profile tag with no skip tags.
+      tags: always
+
+    - name: Validate the pinned CIS runtime
+      ansible.builtin.import_tasks:
+        file: tasks/validate-cis-runtime.yml
+      tags: always
+
+    - name: Require the inventory-owned CIS logging service
+      ansible.builtin.assert:
+        that:
+          - ubtu24cis_syslog_service is defined
+          - ubtu24cis_syslog_service in ['journald', 'rsyslog']
+        fail_msg: >-
+          Inventory must select exactly one supported upstream CIS logging
+          service before hardening.
+      tags: always
+
+    - name: Ensure the journald drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: ubtu24cis_syslog_service == 'journald'
+      tags: always
+
+    - name: Configure bounded journald retention for the lab baseline
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf.d/60-lit-cis-retention.conf
+        content: |
+          [Journal]
+          SystemMaxUse=1G
+          RuntimeMaxUse=256M
+          MaxRetentionSec=1month
+        owner: root
+        group: root
+        mode: '0644'
+      when: ubtu24cis_syslog_service == 'journald'
+      notify: Restart systemd-journald
+      tags: always
+
+  handlers:
+    - name: Restart systemd-journald
+      ansible.builtin.systemd_service:
+        name: systemd-journald.service
+        state: restarted
 
   tasks:
     - name: CIS hardening
       ansible.builtin.import_role:
         name: lit.ubuntu.cis_ubuntu24
-      tags: [cis, compliance]
+      tags: always
+
+  post_tasks:
+    - name: Wait for the managed SSH connection after CIS handlers
+      ansible.builtin.wait_for_connection:
+        connect_timeout: 10
+        sleep: 2
+        timeout: 120
+      tags: always
+
+    - name: Validate the effective OpenSSH configuration after CIS hardening
+      ansible.builtin.command:
+        argv:
+          - sshd
+          - -t
+      changed_when: false
+      tags: always

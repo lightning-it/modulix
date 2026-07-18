@@ -4,10 +4,19 @@
 # -e aap_action=transfer_payload.
 set -euo pipefail
 
-env_file="${1:-${HOME}/aap-work/etc/aap-local.env}"
+env_file="${1:-${MACHINE_A_ENV_FILE:-}}"
 
-if [[ ! -r "${env_file}" ]]; then
-  printf 'AAP local env file not readable: %s\n' "${env_file}" >&2
+if [[ -z "${env_file}" ]]; then
+  printf 'Pass the target-specific Machine A environment file explicitly.\n' >&2
+  exit 1
+fi
+if [[ -L "${env_file}" || ! -f "${env_file}" || ! -r "${env_file}" ||
+      ! -O "${env_file}" ]]; then
+  printf 'AAP local env file is missing or unsafe (symlink/ownership/readability): %s\n' "${env_file}" >&2
+  exit 1
+fi
+if [[ "$(stat -c '%a' -- "${env_file}")" != "600" ]]; then
+  printf 'AAP local env file must have mode 0600: %s\n' "${env_file}" >&2
   exit 1
 fi
 
@@ -18,14 +27,22 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "${script_dir}/aap-local-lib.sh"
 modulix_aap_set_defaults
+if [[ "${env_file}" != "${MACHINE_A_ENV_FILE}" ]]; then
+  printf 'Selected env file does not match MACHINE_A_ENV_FILE: %s != %s\n' \
+    "${env_file}" "${MACHINE_A_ENV_FILE}" >&2
+  exit 1
+fi
+modulix_validate_machine_a_workspace
 
 required_vars=(
   AAP_APPL_ROOT
   AAP_BOOTSTRAP_USER
   AAP_FQDN
+  MACHINE_A_AAP_ROOT
   MACHINE_A_APPL_ROOT
   MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
   MACHINE_A_EXPORT_ROOT
+  MACHINE_A_TMP_DIR
   MODULIX_RUN_EE_ARCHIVE
   MODULIX_RUN_EE_IMAGE
 )
@@ -37,10 +54,46 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
+if [[ "${AAP_APPL_ROOT}" != "/appl/aap-local" ]]; then
+  printf 'This compatibility script requires AAP_APPL_ROOT=/appl/aap-local: %s\n' \
+    "${AAP_APPL_ROOT}" >&2
+  exit 1
+fi
+
 if [[ ! -s "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" ]]; then
   printf 'Verified SSH known hosts file is missing or empty: %s\n' \
     "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" >&2
   exit 1
+fi
+
+if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
+  if grep -Eq \
+    '^[[:space:]]*(export[[:space:]]+)?VAULT_TOKEN[[:space:]]*=' \
+    "${env_file}"; then
+    printf 'An Ansible Vault environment file must not contain VAULT_TOKEN.\n' >&2
+    exit 1
+  fi
+  if [[ -L "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" ||
+        ! -f "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" ||
+        ! -s "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" ]]; then
+    printf 'Machine A Ansible Vault password file is missing or unsafe: %s\n' \
+      "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" >&2
+    exit 1
+  fi
+  if [[ "$(stat -c '%h' -- "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}")" != "1" ||
+        "$(stat -c '%U' -- "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}")" != "$(id -un)" ]]; then
+    printf 'Machine A Ansible Vault password file must be singly linked and owned by %s: %s\n' \
+      "$(id -un)" "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" >&2
+    exit 1
+  fi
+  case "$(stat -c '%a' -- "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}")" in
+    400 | 600) ;;
+    *)
+      printf 'Machine A Ansible Vault password file must have mode 0400 or 0600: %s\n' \
+        "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 machine_a_ee_archive_path="${MACHINE_A_MODULIX_RUN_EE_ARCHIVE_PATH:-${MACHINE_A_APPL_ROOT}/artifacts/${MODULIX_RUN_EE_ARCHIVE}}"
@@ -65,6 +118,15 @@ if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
 fi
 
 remote="${AAP_BOOTSTRAP_USER}@${AAP_FQDN}"
+remote_vault_inbox_pending=false
+cleanup_remote_vault_inbox() {
+  if [[ "${remote_vault_inbox_pending}" == "true" ]]; then
+    ssh "${ssh_opts[@]}" "${remote}" \
+      "rm -f -- \"${AAP_APPL_ROOT}/inbox/.vault-pass.txt\"" \
+      >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_remote_vault_inbox EXIT
 
 artifact_dir="${MACHINE_A_EXPORT_ROOT}/artifacts/aap"
 mkdir -p "${artifact_dir}"
@@ -265,7 +327,12 @@ if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
     "${remote}:${AAP_APPL_ROOT}/inbox/"
 fi
 
-if [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
+if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
+  remote_vault_inbox_pending=true
+  scp "${ssh_opts[@]}" \
+    "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE}" \
+    "${remote}:${AAP_APPL_ROOT}/inbox/.vault-pass.txt"
+elif [[ -s "${MACHINE_A_SECRETS_DIR}/.vault-token" ]]; then
   scp "${ssh_opts[@]}" \
     "${MACHINE_A_SECRETS_DIR}/.vault-token" \
     "${remote}:${AAP_APPL_ROOT}/inbox/.vault-token"
@@ -280,15 +347,47 @@ ee_transfer_enabled="${3:-true}"
 
    install -m 0600 /appl/aap-local/inbox/aap-local.env /appl/aap-local/etc/aap-local.env
    . /appl/aap-local/etc/aap-local.env
+   install -m 0644 /appl/aap-local/inbox/aap-local-lib.sh /appl/aap-local/scripts/aap-local-lib.sh
+   . /appl/aap-local/scripts/aap-local-lib.sh
+   modulix_aap_set_defaults
    aap_known_hosts_file="${AAP_KNOWN_HOSTS_FILE:-${AAP_SECRETS_DIR}/bootstrap_known_hosts}"
    if [ -n "${machine_a_ssh_key_basename}" ]; then
      install -m 0600 "/appl/aap-local/inbox/${machine_a_ssh_key_basename}" "${AAP_SSH_KEY}"
    fi
    install -m 0600 /appl/aap-local/inbox/bootstrap_known_hosts "${aap_known_hosts_file}"
-   if [ -s /appl/aap-local/inbox/.vault-token ]; then
-     install -m 0600 /appl/aap-local/inbox/.vault-token /appl/aap-local/secrets/.vault-token
-   fi
-   install -m 0644 /appl/aap-local/inbox/aap-local-lib.sh /appl/aap-local/scripts/aap-local-lib.sh
+   case "${AAP_SECRET_BACKEND}" in
+     ansible_vault)
+       trap 'rm -f /appl/aap-local/inbox/.vault-pass.txt' EXIT
+       install -m 0600 \
+         /appl/aap-local/inbox/.vault-pass.txt \
+         "${ANSIBLE_VAULT_PASSWORD_FILE}"
+       if ! modulix_validate_ansible_vault_password_file \
+         "${ANSIBLE_VAULT_PASSWORD_FILE}" "${AAP_SETUP_USER}"; then
+         rm -f "${ANSIBLE_VAULT_PASSWORD_FILE}"
+         exit 1
+       fi
+       rm -f \
+         /appl/aap-local/inbox/.vault-pass.txt \
+         /appl/aap-local/inbox/.vault-token \
+         /appl/aap-local/secrets/.vault-token
+       trap - EXIT
+       ;;
+     hashicorp_vault)
+       if [ -s /appl/aap-local/inbox/.vault-token ]; then
+         install -m 0600 \
+           /appl/aap-local/inbox/.vault-token \
+           /appl/aap-local/secrets/.vault-token
+       fi
+       rm -f \
+         /appl/aap-local/inbox/.vault-pass.txt \
+         /appl/aap-local/secrets/.vault-pass.txt
+       ;;
+     *)
+       printf 'Unsupported AAP_SECRET_BACKEND: %s\n' \
+         "${AAP_SECRET_BACKEND}" >&2
+       exit 1
+       ;;
+   esac
    install -m 0755 /appl/aap-local/inbox/run-aap-playbooks.sh /appl/aap-local/scripts/run-aap-playbooks.sh
    install -m 0755 /appl/aap-local/inbox/stage-runtime-on-aap-host.sh /appl/aap-local/scripts/stage-runtime-on-aap-host.sh
    find /appl/aap-local/artifacts -maxdepth 1 -type f \
@@ -299,4 +398,6 @@ ee_transfer_enabled="${3:-true}"
    mv -f /appl/aap-local/inbox/modulix-automation.tar.gz /appl/aap-local/artifacts/
 REMOTE_PAYLOAD
 
+remote_vault_inbox_pending=false
+trap - EXIT
 printf 'Offline payload transfer completed for %s.\n' "${AAP_FQDN}"
