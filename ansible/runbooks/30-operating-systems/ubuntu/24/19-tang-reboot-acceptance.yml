@@ -185,21 +185,21 @@
         method: GET
         status_code: 200
         timeout: 10
+        return_content: true
+      register: _tang_reboot_live_advertisement
       changed_when: false
       no_log: true
 
     - name: Calculate live Tang signing-key thumbprints
-      ansible.builtin.shell: |
-        set -o pipefail
-        curl --fail --silent --show-error --max-time 10 \
-          "${TANG_ADVERTISEMENT_URL}" \
-          | jose fmt -j- -g payload -y -o- \
-          | jose jwk use -i- -r -u verify -o- \
-          | jose jwk thp -i- -a S256
-      args:
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          jose fmt -j- -g payload -y -o- \
+            | jose jwk use -i- -r -u verify -o- \
+            | jose jwk thp -i- -a S256
         executable: /bin/bash
-      environment:
-        TANG_ADVERTISEMENT_URL: "{{ luks_unlock_clevis_tang_url }}/adv"
+        stdin: "{{ _tang_reboot_live_advertisement.content }}"
+        stdin_add_newline: false
       register: _tang_reboot_live_thumbprints
       changed_when: false
       retries: 3
