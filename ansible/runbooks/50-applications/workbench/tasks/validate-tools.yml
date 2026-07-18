@@ -84,7 +84,17 @@
     argv: [npm, list, --global, --depth=0, --json]
   register: workbench_validation_npm_packages
   changed_when: false
+  failed_when: false
   check_mode: false
+
+- name: Require global npm package inventory
+  ansible.builtin.assert:
+    that:
+      - workbench_validation_npm_packages.rc in [0, 1]
+      - workbench_validation_npm_packages.stdout | default('') | length > 0
+    fail_msg: "Could not read the global npm package inventory."
+    quiet: true
+  changed_when: false
 
 - name: Decode global npm package inventory
   ansible.builtin.set_fact:
@@ -94,7 +104,6 @@
           if npm_inventory is mapping else {} -%}
       {{ npm_dependencies if npm_dependencies is mapping else {} }}
   changed_when: false
-
 - name: Require declared global npm package versions
   ansible.builtin.assert:
     that:
