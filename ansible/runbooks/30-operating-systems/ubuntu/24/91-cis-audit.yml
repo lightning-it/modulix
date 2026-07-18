@@ -294,7 +294,7 @@
         mode: "0600"
       become: false
       delegate_to: localhost
-
+      no_log: true
     - name: Parse the controller raw CIS audit evidence
       ansible.builtin.set_fact:
         cis_audit_raw: >-
