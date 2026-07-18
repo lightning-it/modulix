@@ -88,7 +88,7 @@
   ansible.builtin.assert:
     that:
       - item.key | lower in workbench_validation_python_package_map
-      - workbench_validation_python_package_map[item.key | lower] == item.value | string
+      - workbench_validation_python_package_map.get(item.key | lower, '') == (item.value | string)
     fail_msg: "Python package {{ item.key }} is absent or has version drift."
     quiet: true
   loop: "{{ workbench_acceptance.python_environment.packages | dict2items }}"
