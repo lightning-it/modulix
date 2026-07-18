@@ -51,27 +51,25 @@
   changed_when: false
   check_mode: false
 
+- name: Parse Incus image info
+  ansible.builtin.set_fact:
+    workbench_acceptance_image_info_data: "{{ workbench_acceptance_image_info.stdout | from_yaml }}"
+  changed_when: false
+
 - name: Record the immutable Incus image reference
   ansible.builtin.set_fact:
     workbench_acceptance_image_fingerprint: >-
       {{
-        (workbench_acceptance_image_info.stdout | from_yaml)
-        .get(
+        workbench_acceptance_image_info_data.get(
           'fingerprint',
-          (workbench_acceptance_image_info.stdout | from_yaml).get('Fingerprint', '')
+          workbench_acceptance_image_info_data.get('Fingerprint', '')
         )
       }}
     workbench_acceptance_resolved_image: >-
       {{
         (workbench_acceptance_profile_config.image.split(':') | first)
         ~ ':'
-        ~ (
-          (workbench_acceptance_image_info.stdout | from_yaml)
-          .get(
-            'fingerprint',
-            (workbench_acceptance_image_info.stdout | from_yaml).get('Fingerprint', '')
-          )
-        )
+        ~ workbench_acceptance_image_fingerprint
       }}
   changed_when: false
 
