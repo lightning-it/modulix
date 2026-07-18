@@ -22,7 +22,7 @@
 
 - name: Inspect exact Heavy container owner labels
   ansible.builtin.command:
-    argv: [podman, container, inspect, --format=json, "{{ workbench_heavy_container }}"]
+    argv: [podman, container, inspect, "{{ workbench_heavy_container }}"]
   become: true
   become_user: "{{ workbench_acceptance_operator }}"
   environment:
