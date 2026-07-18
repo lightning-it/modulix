@@ -4,11 +4,11 @@
 WUNDER_DEVTOOLS := ./scripts/wunder-devtools-ee.sh
 
 # Ansible paths
-ANSIBLE_PLAYBOOK   := ansible/playbooks/keycloak.yml
+ANSIBLE_PLAYBOOK   := ansible/playbooks/stage-2b/core-tenant/03_keycloak.yml
 # Default to nightly inventory; override with ANSIBLE_INVENTORY=... (e.g. demo) on the CLI
 ANSIBLE_INVENTORY ?= ansible/inventories/nightly/hosts.yml
 
-.PHONY: help lint lint-yaml ssh-setup configure-keycloak deploy-keycloak ci
+.PHONY: help lint lint-yaml ssh-setup configure-keycloak ci
 
 help:
 	@echo "ModuLix Makefile"
