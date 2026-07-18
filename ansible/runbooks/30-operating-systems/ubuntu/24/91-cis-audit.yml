@@ -276,6 +276,7 @@
       ansible.builtin.slurp:
         src: "{{ cis_audit_remote_evidence.files[0].path }}"
       register: cis_audit_remote_raw_content
+      no_log: true
 
     - name: Define the protected controller raw evidence path
       ansible.builtin.set_fact:
