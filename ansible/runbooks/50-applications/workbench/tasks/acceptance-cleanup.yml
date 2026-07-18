@@ -65,7 +65,7 @@
       modulix-automation owner and run-ID metadata.
     quiet: true
   changed_when: false
-  when: workbench_cleanup_instance_matches | length > 0
+  when: workbench_cleanup_instance_matches | length == 1
 
 - name: Delete the exact run-owned acceptance instance
   ansible.builtin.command:
