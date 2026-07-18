@@ -64,12 +64,29 @@
   failed_when: false
   check_mode: false
 
+- name: Require rootless Podman info evidence for {{ workbench_validation_podman_user }}
+  ansible.builtin.assert:
+    that:
+      - workbench_validation_podman_info.rc == 0
+      - workbench_validation_podman_info.stdout | default('') | trim | length > 0
+    fail_msg: >-
+      Could not read rootless Podman info for {{ workbench_validation_podman_user }}.
+    quiet: true
+  changed_when: false
+
+- name: Decode rootless Podman info for {{ workbench_validation_podman_user }}
+  ansible.builtin.set_fact:
+    workbench_validation_podman_info_data: "{{ workbench_validation_podman_info.stdout | from_json }}"
+  changed_when: false
+
 - name: Require rootless Podman state for {{ workbench_validation_podman_user }}
   ansible.builtin.assert:
     that:
-      - (workbench_validation_podman_info.stdout | from_json).host.security.rootless | bool
       - >-
-        (workbench_validation_podman_info.stdout | from_json).store.graphDriverName
+        workbench_validation_podman_info_data.get('host', {}).get('security', {}).get('rootless', false)
+        | bool
+      - >-
+        workbench_validation_podman_info_data.get('store', {}).get('graphDriverName', '')
         == workbench_acceptance.podman.storage_driver
       - workbench_validation_podman_socket_enabled.stdout | trim == 'enabled'
       - workbench_validation_podman_socket_active.stdout | trim == 'active'
