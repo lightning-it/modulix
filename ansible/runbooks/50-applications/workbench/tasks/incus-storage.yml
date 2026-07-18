@@ -123,14 +123,14 @@
       }}
     workbench_incus_lv_matches: >-
       {{
-        (workbench_incus_lv_report.stdout | from_json).report[0].lv
+        (((workbench_incus_lv_report.stdout | from_json).get('report', []) | first | default({})).get('lv', []))
         | selectattr('vg_name', 'equalto', workbench_incus_storage.volume_group)
         | selectattr('lv_name', 'equalto', workbench_incus_storage.logical_volume)
         | list
       }}
     workbench_incus_pv_matches: >-
       {{
-        (workbench_incus_pv_report.stdout | from_json).report[0].pv
+        (((workbench_incus_pv_report.stdout | from_json).get('report', []) | first | default({})).get('pv', []))
         | selectattr('vg_name', 'equalto', workbench_incus_storage.volume_group)
         | list
       }}
