@@ -228,12 +228,7 @@
 
 - name: Read an existing Incus storage-pool declaration
   ansible.builtin.command:
-    argv:
-      - incus
-      - --force-local
-      - storage
-      - show
-      - "{{ workbench_incus_declared_storage_pools[0].name }}"
+      - "{{ workbench_incus_declared_storage_pools[0].get('name', '') }}"
   register: workbench_incus_existing_pool
   changed_when: false
   failed_when: false
