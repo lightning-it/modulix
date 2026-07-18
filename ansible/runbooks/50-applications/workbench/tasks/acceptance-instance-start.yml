@@ -56,7 +56,15 @@
     workbench_acceptance_image_info_data: "{{ workbench_acceptance_image_info.stdout | from_yaml }}"
   changed_when: false
 
-- name: Record the immutable Incus image reference
+- name: Require structured Incus image info
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_image_info_data is mapping
+    fail_msg: "Incus image info did not return a structured mapping."
+    quiet: true
+  changed_when: false
+
+- name: Record the immutable Incus image fingerprint
   ansible.builtin.set_fact:
     workbench_acceptance_image_fingerprint: >-
       {{
@@ -65,6 +73,10 @@
           workbench_acceptance_image_info_data.get('Fingerprint', '')
         )
       }}
+  changed_when: false
+
+- name: Record the immutable Incus image reference
+  ansible.builtin.set_fact:
     workbench_acceptance_resolved_image: >-
       {{
         (workbench_acceptance_profile_config.image.split(':') | first)
