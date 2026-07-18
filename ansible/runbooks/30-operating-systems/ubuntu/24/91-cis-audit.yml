@@ -210,6 +210,7 @@
     - name: Run the pinned independent Ubuntu 24 CIS audit
       ansible.builtin.import_role:
         name: lit.ubuntu.cis_ubuntu24
+      tags: always
       vars:
         cis_ubuntu24_execution_mode: audit
         setup_audit: true
