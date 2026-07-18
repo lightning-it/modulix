@@ -169,8 +169,8 @@ validate_trusted_ssh_file() {
     echo "${label} must not be group- or world-writable (found ${mode})." >&2
     return 1
   fi
-  if [[ "${owner}" != "$(id -u)" ]]; then
-    echo "${label} must be owned by the effective user." >&2
+  if [[ "${owner}" != "$(id -u)" && "${owner}" != "0" ]]; then
+    echo "${label} must be owned by the effective user or root." >&2
     return 1
   fi
 }
