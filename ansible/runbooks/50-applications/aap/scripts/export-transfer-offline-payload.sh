@@ -54,6 +54,12 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
+if [[ "${AAP_APPL_ROOT}" != "/appl/aap-local" ]]; then
+  printf 'This compatibility script requires AAP_APPL_ROOT=/appl/aap-local: %s\n' \
+    "${AAP_APPL_ROOT}" >&2
+  exit 1
+fi
+
 if [[ ! -s "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" ]]; then
   printf 'Verified SSH known hosts file is missing or empty: %s\n' \
     "${MACHINE_A_BOOTSTRAP_KNOWN_HOSTS}" >&2
