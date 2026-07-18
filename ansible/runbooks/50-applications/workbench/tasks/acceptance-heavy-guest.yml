@@ -43,10 +43,11 @@
     - name: Decode Heavy guest IPv4 candidates
       ansible.builtin.set_fact:
         workbench_heavy_guest_addresses: >-
+          {%- set guest = workbench_heavy_guest_list.stdout | from_json | first -%}
+          {%- set state = guest.get('state', {}) if guest is mapping else {} -%}
+          {%- set network = state.get('network', {}) if state is mapping else {} -%}
           {{
-            (
-              workbench_heavy_guest_list.stdout | from_json | first
-            ).state.network | dict2items | sort(attribute='key')
+            network | dict2items | sort(attribute='key')
             | map(attribute='value.addresses') | flatten
             | selectattr('family', 'equalto', 'inet')
             | rejectattr('address', 'equalto', '127.0.0.1')
