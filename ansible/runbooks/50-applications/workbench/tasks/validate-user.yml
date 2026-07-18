@@ -76,10 +76,8 @@
       - "NF && $1 !~ /^#/ { count++ } END { print count + 0 }"
       - "{{ workbench_validation_user.home }}/.ssh/authorized_keys"
   register: workbench_validation_authorized_key_count
-  changed_when: false
   check_mode: false
-  when: workbench_validation_authorized_keys.stat.exists
-
+  when: workbench_validation_authorized_keys.stat.isreg | default(false)
 - name: Inspect effective sudo policy for {{ workbench_validation_user.name }}
   ansible.builtin.command:
     argv:
