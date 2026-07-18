@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -185,6 +186,150 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         self.assertIs(decode_task["no_log"], True)
         self.assertIn("NOPASSWD", policy_text)
         self.assertNotIn("--reset-timestamp", policy_text)
+
+    def test_incus_external_evidence_is_mapping_safe_and_staged(self):
+        tasks = load_yaml(RUNBOOK_DIRECTORY / "tasks" / "validate-incus.yml")
+        task_names = [task["name"] for task in tasks]
+        task_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "validate-incus.yml"
+        ).read_text(encoding="utf-8")
+
+        root_guard_index = task_names.index(
+            "Require mapping-safe decoded Incus evidence roots"
+        )
+        nested_resolution_index = task_names.index(
+            "Resolve nested Incus evidence mappings"
+        )
+        nested_guard_index = task_names.index(
+            "Require mapping-safe nested Incus evidence"
+        )
+        device_resolution_index = task_names.index(
+            "Resolve Incus profile devices and logical-volume report"
+        )
+        device_guard_index = task_names.index(
+            "Require mapping-safe Incus profile devices and logical-volume report"
+        )
+        row_guard_index = task_names.index(
+            "Require a mapping-safe logical-volume evidence row"
+        )
+        size_guard_index = task_names.index(
+            "Require scalar logical-volume size evidence"
+        )
+        instance_guard_index = task_names.index(
+            "Require mapping-safe Incus instance evidence"
+        )
+        instance_collection_index = task_names.index(
+            "Collect normalized Incus instance names"
+        )
+
+        self.assertLess(root_guard_index, nested_resolution_index)
+        self.assertLess(nested_resolution_index, nested_guard_index)
+        self.assertLess(nested_guard_index, device_resolution_index)
+        self.assertLess(device_resolution_index, device_guard_index)
+        self.assertLess(row_guard_index, size_guard_index)
+        self.assertLess(instance_guard_index, instance_collection_index)
+
+        for safe_access in (
+            "workbench_validation_incus_storage_data.get('config', none)",
+            "workbench_validation_incus_storage_data.get('driver', none)",
+            "workbench_validation_incus_network_data.get('config', none)",
+            "workbench_validation_incus_network_data.get('type', none)",
+            "workbench_validation_incus_project_data.get('config', none)",
+            "workbench_validation_incus_profile_data.get('config', none)",
+            "workbench_validation_incus_profile_data.get('devices', none)",
+            "workbench_validation_incus_storage_config.get('source', none)",
+            "workbench_validation_incus_network_config.get('ipv4.address', none)",
+            "workbench_validation_incus_network_config.get('ipv4.dhcp', none)",
+            "workbench_validation_incus_network_config.get('ipv4.nat', none)",
+            "workbench_validation_incus_network_config.get('ipv6.address', none)",
+            "workbench_validation_incus_profile_devices.get('eth0', none)",
+            "workbench_validation_incus_profile_devices.get('root', none)",
+            "workbench_validation_incus_project_config.get('limits.' ~ item.key, none)",
+            "workbench_validation_incus_profile_config.get('limits.cpu', none)",
+            "workbench_validation_incus_profile_config.get('limits.memory', none)",
+            "workbench_validation_incus_profile_eth0.get('network', none)",
+            "workbench_validation_incus_profile_root.get('pool', none)",
+            "workbench_validation_incus_lv_document.get('report', none)",
+            "workbench_validation_incus_lv_report.get('lv', none)",
+            "workbench_validation_incus_lv_row.get('lv_size', none)",
+            "workbench_validation_incus_lv_row.get('lv_size', '-1')",
+            "item.get('name', none)",
+        ):
+            self.assertIn(safe_access, task_text)
+
+        for mapping_variable in (
+            "workbench_validation_incus_storage_data",
+            "workbench_validation_incus_network_data",
+            "workbench_validation_incus_project_data",
+            "workbench_validation_incus_profile_data",
+            "workbench_validation_incus_storage_config",
+            "workbench_validation_incus_network_config",
+            "workbench_validation_incus_project_config",
+            "workbench_validation_incus_profile_config",
+            "workbench_validation_incus_profile_devices",
+            "workbench_validation_incus_profile_eth0",
+            "workbench_validation_incus_profile_root",
+            "workbench_validation_incus_lv_document",
+            "workbench_validation_incus_lv_report",
+            "workbench_validation_incus_lv_row",
+        ):
+            self.assertNotRegex(
+                task_text,
+                rf"{mapping_variable}(?:\[|\.(?!get\())",
+            )
+
+        for unsafe_access in (
+            "workbench_validation_incus_storage_data.driver",
+            "workbench_validation_incus_storage_data.config",
+            "workbench_validation_incus_network_data.type",
+            "workbench_validation_incus_network_data.config",
+            "workbench_validation_incus_project_data.config",
+            "workbench_validation_incus_profile_data.config",
+            "workbench_validation_incus_profile_data.devices",
+            "map(attribute='name')",
+            ".report[0].lv",
+        ):
+            self.assertNotIn(unsafe_access, task_text)
+
+    def test_user_home_and_shell_paths_reject_traversal_segments(self):
+        user_tasks = load_yaml(
+            RUNBOOK_DIRECTORY / "tasks" / "validate-user.yml"
+        )
+        contract_task = user_tasks[0]
+        contract_conditions = contract_task["ansible.builtin.assert"]["that"]
+        home_read_indices = [
+            index
+            for index, task in enumerate(user_tasks)
+            if "workbench_validation_user.home" in repr(task)
+            and index > 0
+        ]
+
+        self.assertEqual(contract_task["name"].split()[0], "Validate")
+        self.assertGreaterEqual(len(home_read_indices), 3)
+        self.assertTrue(all(index > 0 for index in home_read_indices))
+
+        for field in ("home", "shell"):
+            condition = next(
+                item
+                for item in contract_conditions
+                if f"workbench_validation_user.{field}" in item
+                and "is match" in item
+            )
+            path_pattern = re.search(r"is match\('([^']+)'\)", condition)
+            self.assertIsNotNone(path_pattern)
+            compiled_path_pattern = re.compile(path_pattern.group(1))
+
+            self.assertIsNotNone(compiled_path_pattern.fullmatch("/home/developer"))
+            self.assertIsNotNone(compiled_path_pattern.fullmatch("/usr/bin/bash"))
+            for unsafe_path in (
+                "/../etc",
+                "/home/../etc",
+                "/home/./developer",
+                "/home//developer",
+                "/home/developer/",
+            ):
+                with self.subTest(field=field, unsafe_path=unsafe_path):
+                    self.assertIsNone(compiled_path_pattern.fullmatch(unsafe_path))
 
     def test_acceptance_paths_validate_contract_before_profile_resolution(self):
         for name in ("40-acceptance.yml", "50-cleanup.yml"):

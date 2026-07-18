@@ -3,8 +3,12 @@
   ansible.builtin.assert:
     that:
       - workbench_validation_user.name | default('') is match('^[a-z_][a-z0-9_-]*$')
-      - workbench_validation_user.home | default('') is match('^/[A-Za-z0-9/_.-]+$')
-      - workbench_validation_user.shell | default('') is match('^/[A-Za-z0-9/_.-]+$')
+      - >-
+        (workbench_validation_user.home | default('') | string)
+        is match('^(?!.*(?:^|/)\.{1,2}(?:/|$))/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$')
+      - >-
+        (workbench_validation_user.shell | default('') | string)
+        is match('^(?!.*(?:^|/)\.{1,2}(?:/|$))/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$')
       - workbench_validation_user.groups | default([]) is sequence
       - workbench_validation_user.groups | default([]) is not string
       - workbench_validation_user.password_locked | default(none) is boolean
