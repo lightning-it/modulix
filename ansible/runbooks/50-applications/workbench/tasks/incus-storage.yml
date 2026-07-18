@@ -228,6 +228,11 @@
 
 - name: Read an existing Incus storage-pool declaration
   ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - storage
+      - show
       - "{{ workbench_incus_declared_storage_pools[0].get('name', '') }}"
   register: workbench_incus_existing_pool
   changed_when: false
@@ -263,10 +268,13 @@
         workbench_incus_device_fstype.stdout | trim != 'btrfs'
         or workbench_incus_existing_pool_data.get('config', {}).get('source', '')
         == workbench_incus_storage.device
+      - >-
+        workbench_incus_device_mount.rc == 1
+        or (workbench_incus_device_mount.stdout.split() + ['', ''])[0]
         == '/var/lib/incus/storage-pools/' ~ workbench_incus_declared_storage_pools[0].get('name', '')
       - >-
         workbench_incus_device_mount.rc == 1
-        or workbench_incus_device_mount.stdout.split()[1] == 'btrfs'
+        or (workbench_incus_device_mount.stdout.split() + ['', ''])[1] == 'btrfs'
     fail_msg: >-
       The existing Incus LV has a foreign filesystem or mount, or its Btrfs
       signature is not owned by the exact inventory-declared Incus storage
