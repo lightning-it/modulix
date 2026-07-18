@@ -54,8 +54,7 @@ ssh-setup: ## Write SSH keys from env to ~/.ssh
 configure-keycloak: lint ## Run lint + configure Keycloak via keycloak_config role
 	@echo ">>> Configuring Keycloak via $(ANSIBLE_PLAYBOOK) against inventory $(ANSIBLE_INVENTORY)"
 	$(WUNDER_DEVTOOLS) sh -c ' \
-	  ansible-galaxy collection install \
-	    git+https://github.com/lightning-it/ansible-collection-supplementary.git,ro/role-keycloak && \
+	  ansible-galaxy collection install -r ansible/collections/requirements.yml && \
 	  ansible-playbook -i $(ANSIBLE_INVENTORY) $(ANSIBLE_PLAYBOOK) \
 	'
 

@@ -7,7 +7,7 @@ collections:
   - name: fedora.linux_system_roles
     version: "1.115.1"
   - name: lit.supplementary
-    version: ">=1.16.12"
+    version: "1.40.0"
   - name: lit.foundational
     version: ">=1.16.0"
   - name: lit.ocp
