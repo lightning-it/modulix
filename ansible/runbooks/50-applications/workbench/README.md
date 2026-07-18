@@ -18,7 +18,7 @@ rejected before a role runs.
   enough inventory-declared reserve. It never formats, mounts, resizes, or
   shrinks an LV. On later runs, it accepts Btrfs only when the exact declared
   Incus pool already owns the device and any mount is the expected Incus mount.
-- `30-validate.yml` is read-only. It checks developer accounts and workspaces,
+- `30-validate.yml` is configuration read-only (it does not install/modify packages, services, or files), but it may reset sudo timestamps while verifying noninteractive sudo policy. It checks developer accounts and workspaces,
   authorized-key counts without returning key content, effective OpenSSH
   policy, pinned tool/Python/npm versions, rootless Podman sockets, the disabled
   privileged Podman socket, Incus/LVM/network/project/profile drift, the exact
