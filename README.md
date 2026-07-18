@@ -1,22 +1,5 @@
 # ModuLix Automation
 
-<<<<<<< HEAD
-This repository contains the **ModuLix** product inventory and orchestration for automated rollout
-enterprise infrastructure components using **Ansible Collections**.
-
-Most day-to-day work happens in the Ansible workspace:
-
-➡️ **See:** [`ansible/README.md`](ansible/README.md)
-
-## Local workflows (high level)
-
-- **Bootstrap Ansible collections:** see `ansible/README.md` (recommended before any run)
-- **Lint / Molecule / CI-like runs:** via the Wunder devtools execution environment and `Makefile` targets
-
-## License
-
-GPL-2.0-only. See [LICENSE](LICENSE).
-=======
 <!-- BEGIN LIT_SHARED_RELEASE_MODEL -->
 
 ## Release and Quality Model
@@ -186,4 +169,3 @@ The evidence records:
 - security scan status
 
 See [GitHub Releases](../../releases), [RELEASE.md](./RELEASE.md), and [TESTING.md](./TESTING.md) for the release process and validation model.
->>>>>>> origin/develop

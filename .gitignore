@@ -1,17 +1,12 @@
 infra/
 ansible-navigator.log
 ansible_collections/
-<<<<<<< HEAD
-=======
 venv*
->>>>>>> origin/develop
 
 # Ansible Collections Development
 collections-dev/ansible_collections/**
 !collections-dev/.gitkeep
 ansible/.vault-pass.txt
-<<<<<<< HEAD
-=======
 ansible/.secrets/
 
 # AAP containerized installer archive (if stored in the repository for deployment).
@@ -33,4 +28,3 @@ venv*
 .artifacts/
 __pycache__/
 *.py[cod]
->>>>>>> origin/develop

@@ -1,27 +1,3 @@
-<<<<<<< HEAD
-ansible-navigator:
-  execution-environment:
-    enabled: true
-    container-engine: podman
-    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.12.3
-    pull:
-      policy: missing
-    container-options:
-      - "--user=1000"
-      - "--volume=.:/runner/project"
-      - "--workdir=/runner/project"
-      - "--net=host"
-    environment-variables:
-      pass:
-        - ANSIBLE_VAULT_PASSWORD_FILE
-        - VAULT_TOKEN
-      set:
-        ANSIBLE_CONFIG: /runner/project/ansible.cfg
-        ANSIBLE_LOCAL_TEMP: /tmp
-        ANSIBLE_REMOTE_TEMP: /tmp
-        TMPDIR: /tmp
-        ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
-=======
 ---
 ansible-navigator:
   ansible-runner:
@@ -50,7 +26,6 @@ ansible-navigator:
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp/.ansible/tmp
         ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/opt/modulix/ansible/collections:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
->>>>>>> origin/develop
   mode: stdout
   playbook-artifact:
     enable: false
