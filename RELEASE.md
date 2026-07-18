@@ -18,7 +18,7 @@ This repository follows the Lightning IT shared release and quality model.
 - `main` is the protected release branch.
 - Releases happen only after `main` is updated.
 - A `develop` to `main` promotion PR is created automatically when releasable changes exist.
-- The `develop` to `main` PR is a manual gate and must never be auto-merged.
+- The `develop` to `main` PR may auto-merge only after current-revision Copilot review, required checks, and conversation resolution.
 - After `main` changes, a `main` to `develop` backmerge PR is created or updated automatically.
 - Backmerge PRs may auto-merge only when required checks are green and there are no conflicts.
 
