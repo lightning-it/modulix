@@ -39,8 +39,8 @@
 - name: Require a complete machine-readable Workbench acceptance contract
   ansible.builtin.assert:
     that:
-      - workbench_acceptance.hostname | default('') == workbench_target_hostname
-      - workbench_acceptance.hostname == inventory_hostname
+      - workbench_acceptance.get('hostname', '') == workbench_target_hostname
+      - workbench_acceptance.get('hostname', '') == inventory_hostname
       - workbench_acceptance.users | default([]) is sequence
       - workbench_acceptance.users | default([]) is not string
       - workbench_acceptance.users | length > 0
