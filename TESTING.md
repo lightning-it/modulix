@@ -16,6 +16,12 @@ This repository uses the Lightning IT shared test model.
 
 Operating systems and runners:
 
+- Ordinary lint, build, unit, security, documentation, dependency, release,
+  and publication jobs use GitHub-hosted runners.
+- Self-hosted runners are reserved for protected Incus or nested virtualization
+  integration jobs and follow the central runner policy in
+  [lightning-it/shared-assets-lit/RUNNER_POLICY.md](https://github.com/lightning-it/shared-assets-lit/blob/main/RUNNER_POLICY.md).
+
 - `ubuntu-latest`
 - `rhel-9`
 - `rhel-10`
