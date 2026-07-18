@@ -7,12 +7,16 @@
 modulix_aap_set_defaults() {
   local modulix_run_ee_last_segment
 
-  : "${AAP_DEPLOYMENT_ID:=${AAP_FQDN}}"
-  if [[ ! "${AAP_DEPLOYMENT_ID}" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
-    printf 'AAP_DEPLOYMENT_ID must be a canonical lower-case FQDN, got: %s\n' \
-      "${AAP_DEPLOYMENT_ID}" >&2
+  if [[ -z "${AAP_FQDN:-}" ]]; then
+    printf 'AAP_FQDN is required.\n' >&2
     return 1
   fi
+  if [[ ! "${AAP_FQDN}" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    printf 'AAP_FQDN must be a canonical lower-case FQDN, got: %s\n' \
+      "${AAP_FQDN}" >&2
+    return 1
+  fi
+  : "${AAP_DEPLOYMENT_ID:=${AAP_FQDN}}"
   if [[ "${AAP_DEPLOYMENT_ID}" != "${AAP_FQDN}" ]]; then
     printf 'AAP_DEPLOYMENT_ID must exactly match AAP_FQDN: %s != %s\n' \
       "${AAP_DEPLOYMENT_ID}" "${AAP_FQDN}" >&2
