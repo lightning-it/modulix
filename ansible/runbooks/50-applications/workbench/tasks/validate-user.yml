@@ -141,8 +141,8 @@
   ansible.builtin.assert:
     that:
       - workbench_validation_passwd.stdout.split(':') | length == 7
-      - workbench_validation_passwd.stdout.split(':')[5] == workbench_validation_user.home
-      - workbench_validation_passwd.stdout.split(':')[6] == workbench_validation_user.shell
+      - (workbench_validation_passwd.stdout.split(':') + [''] * 7)[5] == workbench_validation_user.home
+      - (workbench_validation_passwd.stdout.split(':') + [''] * 7)[6] == workbench_validation_user.shell
       - >-
         workbench_validation_user.groups
         | difference(workbench_validation_groups.stdout.split())
