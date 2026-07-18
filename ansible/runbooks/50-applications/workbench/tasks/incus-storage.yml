@@ -117,7 +117,7 @@
   ansible.builtin.set_fact:
     workbench_incus_vg_matches: >-
       {{
-        (workbench_incus_vg_report.stdout | from_json).report[0].vg
+        (((workbench_incus_vg_report.stdout | from_json).get('report', []) | first | default({})).get('vg', []))
         | selectattr('vg_name', 'equalto', workbench_incus_storage.volume_group)
         | list
       }}
