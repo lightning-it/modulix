@@ -115,6 +115,7 @@
     - name: CIS hardening
       ansible.builtin.import_role:
         name: lit.ubuntu.cis_ubuntu24
+      tags: always
 
   post_tasks:
     - name: Wait for the managed SSH connection after CIS handlers
