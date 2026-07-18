@@ -34,11 +34,11 @@
           {{
             (
               workbench_heavy_guest_list.stdout | from_json | first
-            ).state.network | dict2items
+            ).state.network | dict2items | sort(attribute='key')
             | map(attribute='value.addresses') | flatten
             | selectattr('family', 'equalto', 'inet')
             | rejectattr('address', 'equalto', '127.0.0.1')
-            | map(attribute='address') | list | unique
+            | map(attribute='address') | list | unique | sort
           }}
       changed_when: false
 

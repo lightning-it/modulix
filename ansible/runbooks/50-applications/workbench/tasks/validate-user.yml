@@ -109,10 +109,16 @@
         | selectattr('stat.isdir', 'equalto', true)
         | list | length
         == workbench_validation_user.workspace_directories | length
-      - workbench_validation_authorized_keys.stat.isreg | default(false)
       - >-
-        workbench_validation_authorized_key_count.stdout | default('-1') | int
-        == workbench_validation_user.authorized_key_count | int
+        (
+          workbench_validation_user.authorized_key_count | int == 0
+          and not (workbench_validation_authorized_keys.stat.exists | default(false))
+        )
+        or (
+          workbench_validation_authorized_keys.stat.isreg | default(false)
+          and workbench_validation_authorized_key_count.stdout | default('-1') | int
+          == workbench_validation_user.authorized_key_count | int
+        )
       - workbench_validation_sudo.rc in [0, 1]
       - >-
         (workbench_validation_sudo.rc == 0)
