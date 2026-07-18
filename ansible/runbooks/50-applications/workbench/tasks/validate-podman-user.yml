@@ -36,8 +36,8 @@
     XDG_RUNTIME_DIR: "/run/user/{{ workbench_validation_podman_uid.stdout | trim }}"
   register: workbench_validation_podman_info
   changed_when: false
+  failed_when: false
   check_mode: false
-
 - name: Read rootless Podman socket enablement for {{ workbench_validation_podman_user }}
   ansible.builtin.command:
     argv: [systemctl, --user, is-enabled, podman.socket]
