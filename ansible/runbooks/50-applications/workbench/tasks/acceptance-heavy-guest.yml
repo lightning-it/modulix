@@ -55,7 +55,7 @@
           }}
       changed_when: false
 
-    - name: Require one reachable Heavy guest IPv4 address
+    - name: Require a reachable Heavy guest IPv4 address
       ansible.builtin.assert:
         that:
           - workbench_heavy_guest_addresses | length > 0
