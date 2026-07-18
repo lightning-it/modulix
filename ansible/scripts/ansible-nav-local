@@ -158,8 +158,8 @@ validate_trusted_ssh_file() {
   local mode=""
   local owner=""
 
-  if [[ -L "${path}" || ! -f "${path}" || ! -s "${path}" ]]; then
-    echo "${label} must reference a nonempty regular, non-symlink file." >&2
+  if [[ -L "${path}" || ! -f "${path}" || ! -s "${path}" || ! -r "${path}" ]]; then
+    echo "${label} must reference a readable, nonempty regular, non-symlink file." >&2
     return 1
   fi
 
