@@ -1,0 +1,43 @@
+---
+- name: Resolve the Tiny acceptance instance
+  ansible.builtin.set_fact:
+    workbench_acceptance_current_instance_name: "{{ workbench_acceptance_instance_names[0] }}"
+  changed_when: false
+
+- name: Create, probe, and remove the Tiny acceptance instance
+  block:
+    - name: Create and start the Tiny instance
+      ansible.builtin.include_tasks: acceptance-instance-start.yml
+
+    - name: Execute the Tiny guest probe
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - test
+          - -r
+          - /etc/os-release
+      changed_when: false
+  always:
+    - name: Remove only the run-owned Tiny instance
+      ansible.builtin.include_tasks: acceptance-cleanup.yml
+      vars:
+        workbench_acceptance_cleanup_instance_name: >-
+          {{ workbench_acceptance_current_instance_name }}
+      when: workbench_acceptance_instance_preflight_passed | default(false) | bool
+
+- name: Validate Tiny host capabilities after instance cleanup
+  ansible.builtin.import_tasks: validate-tools.yml
+
+- name: Validate Tiny rootless Podman capability
+  ansible.builtin.include_tasks: validate-podman-user.yml
+  loop:
+    - "{{ workbench_acceptance.podman.users | first }}"
+  loop_control:
+    loop_var: workbench_validation_podman_user
+    label: "{{ workbench_validation_podman_user }}"

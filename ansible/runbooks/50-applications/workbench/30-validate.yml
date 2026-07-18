@@ -1,0 +1,54 @@
+---
+# Read-only acceptance of the inventory-declared Ubuntu Workbench state.
+
+- name: Validate the selected Ubuntu Workbench without changing it
+  hosts: ubuntu_workbenches
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+    - name: Validate the exact Workbench target and component contract
+      ansible.builtin.import_tasks: tasks/target-contract.yml
+      tags: [always]
+
+    - name: Validate the Workbench acceptance declaration
+      ansible.builtin.import_tasks: tasks/validate-contract.yml
+      tags: [always, validate]
+
+    - name: Validate Workbench users and workspaces
+      ansible.builtin.include_tasks: tasks/validate-user.yml
+      loop: "{{ workbench_acceptance.users }}"
+      loop_control:
+        loop_var: workbench_validation_user
+        label: "{{ workbench_validation_user.name }}"
+      tags: [validate, users]
+
+    - name: Validate the OpenSSH service and effective policy
+      ansible.builtin.import_tasks: tasks/validate-openssh.yml
+      tags: [validate, openssh]
+
+    - name: Validate the declared Workbench tools
+      ansible.builtin.import_tasks: tasks/validate-tools.yml
+      tags: [validate, developer_tools]
+
+    - name: Validate rootless Podman for each developer
+      ansible.builtin.include_tasks: tasks/validate-podman-user.yml
+      loop: "{{ workbench_acceptance.podman.users }}"
+      loop_control:
+        loop_var: workbench_validation_podman_user
+        label: "{{ workbench_validation_podman_user }}"
+      tags: [validate, podman]
+
+    - name: Validate privileged Podman API policy
+      ansible.builtin.import_tasks: tasks/validate-podman-host.yml
+      tags: [validate, podman]
+
+    - name: Validate Incus, its dedicated storage, and expected instances
+      ansible.builtin.import_tasks: tasks/validate-incus.yml
+      tags: [validate, incus, storage]
+
+    - name: Validate that no GitHub Actions runner is installed
+      ansible.builtin.import_tasks: tasks/validate-github-runner.yml
+      tags: [validate, github_runner]

@@ -1,0 +1,283 @@
+---
+- name: Resolve Heavy acceptance runtime identity
+  ansible.builtin.command:
+    argv: [id, --user, "{{ workbench_acceptance_operator }}"]
+  register: workbench_heavy_operator_uid
+  changed_when: false
+  check_mode: false
+
+- name: Resolve Heavy container and workspace resources
+  ansible.builtin.set_fact:
+    workbench_heavy_image: >-
+      {{
+        workbench_acceptance_profile_config.container.image_repository
+        ~ ':' ~ workbench_acceptance_run_id
+      }}
+    workbench_heavy_container: >-
+      {{ workbench_acceptance_profile_config.name ~ '-container-' ~ workbench_acceptance_run_id }}
+    workbench_heavy_workspace_created: false
+    workbench_heavy_container_preflight_passed: false
+  changed_when: false
+
+- name: Require bounded Heavy container identifiers
+  ansible.builtin.assert:
+    that:
+      - workbench_heavy_container | length <= 63
+      - >-
+        workbench_heavy_container
+        is match('^' ~ workbench_acceptance.incus.cleanup.managed_name_prefix ~ '[a-z0-9-]+$')
+      - workbench_heavy_image is match('^localhost/[a-z0-9][a-z0-9._/-]+:[a-z0-9-]+$')
+    fail_msg: "Derived Heavy container resources are outside the run-owned namespace."
+    quiet: true
+  changed_when: false
+
+- name: Inspect Heavy workspace and artifact collisions
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+  loop:
+    - "{{ workbench_acceptance_workspace }}"
+    - "{{ workbench_acceptance_artifacts }}"
+  loop_control:
+    label: "{{ item }}"
+  register: workbench_heavy_path_preflight
+  changed_when: false
+
+- name: Refuse to overwrite Heavy workspace or evidence
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_heavy_path_preflight.results
+        | selectattr('stat.exists', 'equalto', true) | list | length == 0
+    fail_msg: >-
+      Heavy workspace or evidence already exists for this run ID. Use a new
+      run ID; retained evidence is never overwritten or auto-deleted.
+    quiet: true
+  changed_when: false
+
+- name: Check exact Heavy container-name collision
+  ansible.builtin.command:
+    argv: [podman, container, exists, "{{ workbench_heavy_container }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  register: workbench_heavy_container_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Check exact Heavy image collision
+  ansible.builtin.command:
+    argv: [podman, image, exists, "{{ workbench_heavy_image }}"]
+  become: true
+  become_user: "{{ workbench_acceptance_operator }}"
+  environment:
+    HOME: "{{ workbench_acceptance_operator_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+  register: workbench_heavy_image_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse to adopt Heavy Podman resources
+  ansible.builtin.assert:
+    that:
+      - workbench_heavy_container_exists.rc == 1
+      - workbench_heavy_image_exists.rc == 1
+    fail_msg: >-
+      The exact Heavy container or image already exists, or rootless Podman is
+      unavailable. Existing resources are never adopted or replaced.
+    quiet: true
+  changed_when: false
+
+- name: Record successful Heavy Podman collision preflight
+  ansible.builtin.set_fact:
+    workbench_heavy_container_preflight_passed: true
+  changed_when: false
+
+- name: Run the two-guest Heavy and rootless supply-chain workflow
+  block:
+    - name: Create the exact Heavy workspace and evidence directory
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0700"
+      loop:
+        - "{{ workbench_acceptance_workspace }}"
+        - "{{ workbench_acceptance_artifacts }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Mark the run-owned Heavy workspace and evidence
+      ansible.builtin.copy:
+        dest: "{{ item }}/.lit-owner.json"
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'managed_by': 'modulix-automation',
+              'profile': workbench_acceptance_profile,
+              'run_id': workbench_acceptance_run_id
+            } | to_nice_json
+          }}
+      loop:
+        - "{{ workbench_acceptance_workspace }}"
+        - "{{ workbench_acceptance_artifacts }}"
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+
+    - name: Record creation of the owner-marked Heavy workspace
+      ansible.builtin.set_fact:
+        workbench_heavy_workspace_created: true
+      changed_when: false
+
+    - name: Install bounded Heavy acceptance helpers
+      ansible.builtin.copy:
+        src: "files/{{ item }}"
+        dest: "{{ workbench_acceptance_workspace }}/{{ item }}"
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0700"
+      loop:
+        - workbench-heavy-container.sh
+        - workbench-heavy-guest.sh
+        - workbench-secret-scan.py
+        - workbench-sanitize-log.py
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Create the temporary nested-Ansible role directory
+      ansible.builtin.file:
+        path: "{{ workbench_acceptance_workspace }}/roles/lit_heavy_idempotence/tasks"
+        state: directory
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0700"
+
+    - name: Write the temporary idempotent guest role
+      ansible.builtin.copy:
+        dest: >-
+          {{ workbench_acceptance_workspace }}/roles/lit_heavy_idempotence/tasks/main.yml
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0600"
+        content: |
+          ---
+          - name: Create Heavy acceptance marker directory
+            ansible.builtin.file:
+              path: /var/lib/lit-workbench-acceptance
+              state: directory
+              owner: root
+              group: root
+              mode: "0755"
+
+          - name: Write deterministic Heavy acceptance marker
+            ansible.builtin.copy:
+              dest: /var/lib/lit-workbench-acceptance/heavy.txt
+              content: "{{ workbench_acceptance_run_id }}\n"
+              owner: root
+              group: root
+              mode: "0644"
+
+    - name: Write the temporary nested-Ansible playbook
+      ansible.builtin.copy:
+        dest: "{{ workbench_acceptance_workspace }}/guest.yml"
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0600"
+        content: |
+          ---
+          - name: Apply the Heavy acceptance role
+            hosts: all
+            become: true
+            gather_facts: false
+            roles:
+              - lit_heavy_idempotence
+
+    - name: Write isolated nested-Ansible controller configuration
+      ansible.builtin.copy:
+        dest: "{{ workbench_acceptance_workspace }}/ansible.cfg"
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0600"
+        content: |
+          [defaults]
+          roles_path = {{ workbench_acceptance_workspace }}/roles
+          host_key_checking = False
+          retry_files_enabled = False
+          stdout_callback = default
+
+          [ssh_connection]
+          pipelining = True
+
+    - name: Generate a run-specific SSH key without reading existing credentials
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -q
+          - -t
+          - ed25519
+          - -N
+          - ""
+          - -C
+          - "lit-workbench-acceptance-{{ workbench_acceptance_run_id }}"
+          - -f
+          - "{{ workbench_acceptance_workspace }}/guest-key"
+      become: true
+      become_user: "{{ workbench_acceptance_operator }}"
+      environment:
+        HOME: "{{ workbench_acceptance_operator_home }}"
+      changed_when: true
+      no_log: true
+
+    - name: Read only the generated ephemeral public key
+      ansible.builtin.slurp:
+        src: "{{ workbench_acceptance_workspace }}/guest-key.pub"
+      register: workbench_heavy_guest_public_key
+      no_log: true
+
+    - name: Create, test twice, and remove Heavy guests sequentially
+      ansible.builtin.include_tasks: acceptance-heavy-guest.yml
+      loop: "{{ workbench_acceptance_instance_names }}"
+      loop_control:
+        loop_var: workbench_acceptance_current_instance_name
+        index_var: workbench_heavy_guest_index
+        label: "{{ workbench_acceptance_current_instance_name }}"
+
+    - name: Build, run, inspect, and scan the Heavy rootless container
+      ansible.builtin.command:
+        argv:
+          - "{{ workbench_acceptance_workspace }}/workbench-heavy-container.sh"
+          - "{{ workbench_acceptance_profile_config.container.base_image }}"
+          - "{{ workbench_heavy_image }}"
+          - "{{ workbench_heavy_container }}"
+          - "{{ workbench_acceptance_workspace }}/container-build"
+          - "{{ workbench_acceptance_artifacts }}"
+          - "{{ workbench_acceptance_run_id }}"
+          - "{{ workbench_acceptance_profile_config.container.expected_stdout }}"
+      become: true
+      become_user: "{{ workbench_acceptance_operator }}"
+      environment:
+        HOME: "{{ workbench_acceptance_operator_home }}"
+        XDG_RUNTIME_DIR: "/run/user/{{ workbench_heavy_operator_uid.stdout | trim }}"
+        GH_TOKEN: ""
+        GITHUB_TOKEN: ""
+      changed_when: true
+      no_log: true
+  always:
+    - name: Finalize Heavy evidence and temporary resources
+      block:
+        - name: Scan Heavy evidence without returning matched values
+          ansible.builtin.include_tasks: acceptance-artifact-secret-scan.yml
+          when: workbench_heavy_workspace_created | bool
+      always:
+        - name: Finalize Heavy Podman resources and workspace
+          block:
+            - name: Remove only run-owned Heavy Podman resources
+              ansible.builtin.include_tasks: acceptance-container-cleanup.yml
+              when: workbench_heavy_container_preflight_passed | bool
+          always:
+            - name: Remove only the owner-marked Heavy workspace and ephemeral key
+              ansible.builtin.include_tasks: acceptance-workspace-cleanup.yml
+              when: workbench_heavy_workspace_created | bool

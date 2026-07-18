@@ -1,0 +1,53 @@
+---
+- name: Check forbidden GitHub runner accounts
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ item }}"]
+  loop: "{{ workbench_acceptance.github_runner.forbidden_accounts }}"
+  loop_control:
+    label: "{{ item }}"
+  register: workbench_validation_github_runner_accounts
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read installed service unit names
+  ansible.builtin.command:
+    argv: [systemctl, list-unit-files, --type=service, --no-legend, --no-pager]
+  register: workbench_validation_service_units
+  changed_when: false
+  check_mode: false
+
+- name: Inspect standard GitHub runner installation paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /opt/actions-runner
+    - /opt/github-runner
+    - /srv/actions-runner
+  loop_control:
+    label: "{{ item }}"
+  register: workbench_validation_github_runner_paths
+  changed_when: false
+
+- name: Require the GitHub runner to remain absent
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_validation_github_runner_accounts.results
+        | map(attribute='rc') | list | difference([0, 2]) | length == 0
+      - >-
+        workbench_validation_github_runner_accounts.results
+        | selectattr('rc', 'equalto', 0) | list | length == 0
+      - >-
+        workbench_validation_service_units.stdout
+        is not search('(?im)^(actions\\.runner[.-]|github[-.]runner)')
+      - >-
+        workbench_validation_github_runner_paths.results
+        | selectattr('stat.exists', 'equalto', true) | list | length == 0
+    fail_msg: >-
+      A forbidden GitHub Actions runner account or service exists. Runner
+      installation is deliberately outside this Workbench rollout.
+    quiet: true
+  changed_when: false

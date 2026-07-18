@@ -1,0 +1,87 @@
+---
+- name: Require an explicit single-host Workbench limit
+  ansible.builtin.assert:
+    that:
+      - workbench_enabled is defined
+      - workbench_enabled is boolean
+      - workbench_enabled | bool
+      - workbench_target_hostname is defined
+      - workbench_target_hostname is string
+      - workbench_target_hostname | trim | length > 0
+      - ansible_limit is defined
+      - ansible_limit | string | trim == workbench_target_hostname
+      - ansible_play_hosts_all | length == 1
+      - ansible_play_hosts_all == [workbench_target_hostname]
+      - inventory_hostname == workbench_target_hostname
+      - "'ubuntu_workbenches' in groups"
+      - inventory_hostname in groups['ubuntu_workbenches']
+    fail_msg: >-
+      Refusing Workbench execution. Enable the inventory contract and pass one
+      exact --limit equal to workbench_target_hostname; patterns, groups, and
+      multi-host selections are not accepted.
+    quiet: true
+  changed_when: false
+
+- name: Require the supported Workbench operating system
+  ansible.builtin.assert:
+    that:
+      - ansible_facts is mapping
+      - ansible_facts.get('distribution', '') == 'Ubuntu'
+      - ansible_facts.get('distribution_version', '') == '24.04'
+      - ansible_facts.get('fqdn', '') == inventory_hostname
+    fail_msg: >-
+      The selected host is not the inventory-named Ubuntu Workbench (Ubuntu 24.04).
+    quiet: true
+  changed_when: false
+
+- name: Validate the explicit Workbench component switches
+  ansible.builtin.assert:
+    that:
+      - workbench_components is defined
+      - workbench_components is mapping
+      - workbench_components.users | default(none) is boolean
+      - workbench_components.openssh | default(none) is boolean
+      - workbench_components.repos | default(none) is boolean
+      - workbench_components.incus_storage | default(none) is boolean
+      - workbench_components.podman | default(none) is boolean
+      - workbench_components.incus | default(none) is boolean
+      - workbench_components.developer_tools | default(none) is boolean
+      - workbench_components.baseline | default(none) is boolean
+      - workbench_components.automatic_updates | default(none) is boolean
+      - workbench_components.netplan | default(none) is boolean
+      - workbench_components.vscode_desktop | default(none) is boolean
+      - workbench_components.firefox | default(none) is boolean
+      - workbench_components.gui | default(none) is boolean
+      - workbench_components.xrdp | default(none) is boolean
+      - workbench_components.firewalld | default(none) is boolean
+      - not (workbench_components.baseline | bool)
+      - not (workbench_components.automatic_updates | bool)
+      - not (workbench_components.netplan | bool)
+      - not (workbench_components.vscode_desktop | bool)
+      - not (workbench_components.firefox | bool)
+      - not (workbench_components.gui | bool)
+      - not (workbench_components.xrdp | bool)
+      - not (workbench_components.firewalld | bool)
+      - >-
+        not (workbench_components.incus | bool)
+        or (workbench_components.incus_storage | bool)
+      - >-
+        not (workbench_components.developer_tools | bool)
+        or (workbench_components.users | bool)
+    fail_msg: >-
+      Workbench components must be explicit booleans. This application runbook
+      refuses OS baseline, updates, netplan, desktop VS Code, Firefox, GUI, and
+      XRDP, and firewalld ownership; those lifecycles remain separate.
+    quiet: true
+  changed_when: false
+
+- name: Refuse credential material in Workbench application provisioning
+  ansible.builtin.assert:
+    that:
+      - not (developer_tools_ssh_private_keys_enabled | default(false) | bool)
+    fail_msg: >-
+      Workbench provisioning must not materialize developer private keys.
+      Users authenticate GitHub and agent CLIs interactively after rollout.
+    quiet: true
+  changed_when: false
+  when: workbench_components.developer_tools | bool
