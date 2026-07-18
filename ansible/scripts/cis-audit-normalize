@@ -57,8 +57,11 @@ def sha256_file(path: Path) -> str:
 
 
 def normalize_control_id(value: Any, context: str) -> str:
-    require(not isinstance(value, bool), f"{context} control ID must be a string")
-    control_id = str(value)
+    require(
+        isinstance(value, str) and value,
+        f"{context} control ID must be a nonempty string",
+    )
+    control_id = value
     require(
         CONTROL_ID_RE.fullmatch(control_id) is not None,
         f"{context} has invalid control ID {control_id!r}",
