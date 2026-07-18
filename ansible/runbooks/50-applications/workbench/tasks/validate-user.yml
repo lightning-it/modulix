@@ -148,6 +148,10 @@
         | difference(workbench_validation_groups.stdout.split())
         | length == 0
       - >-
+        workbench_validation_groups.stdout.split()
+        | difference(workbench_validation_user.groups)
+        | length == 0
+      - >-
         not (workbench_validation_user.password_locked | bool)
         or workbench_validation_password.stdout.split()[1] in ['L', 'LK']
       - workbench_validation_home.stat.isdir | default(false)
