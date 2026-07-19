@@ -26,6 +26,7 @@
           {% if galaxy_server_key is defined %}--api-key {{ galaxy_server_key }}{% endif %}
       changed_when: true
       register: _install_collections
+      no_log: true
       args:
         chdir: "{{ playbook_dir }}/../../.."
       tags:
