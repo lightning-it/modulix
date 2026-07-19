@@ -90,23 +90,44 @@ jobs:
       - name: Classify trusted automation pull request
         id: trusted-automation
         env:
+          GH_TOKEN: ${{ github.token }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_BASE: ${{ github.event.pull_request.base.ref }}
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           trusted=false
           trusted_kind=none
+          live_pr="{}"
           if [ "${PR_AUTHOR}" = "renovate[bot]" ] \
             && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
             && [[ "${PR_HEAD}" == renovate/* ]] \
             && [ "${PR_BASE}" = "develop" ]; then
-            trusted=true
-            trusted_kind=renovate
+            if live_pr="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")" \
+              && jq -e \
+              --arg author "${PR_AUTHOR}" \
+              --arg base "${PR_BASE}" \
+              --arg head "${PR_HEAD}" \
+              --arg head_sha "${PR_HEAD_SHA}" \
+              --arg repo "${REPOSITORY}" \
+              '(.state == "open") and (.draft == false)
+               and (.user.login == $author) and (.base.ref == $base)
+               and (.head.ref == $head) and (.head.sha == $head_sha)
+               and (.head.repo.full_name == $repo)
+               and ([.labels[].name] | index("renovate") != null)
+               and ([.labels[].name] | index("dependencies") != null)
+               and ([.labels[].name] | index("safe-automerge") != null)
+               and ([.labels[].name] | index("breaking-update") == null)' \
+                <<<"${live_pr}" >/dev/null; then
+              trusted=true
+              trusted_kind=renovate
+            fi
           elif [ "${PR_AUTHOR}" = "litreleasebot" ] \
             && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
             && [[ "${PR_HEAD}" == chore/sync-shared-assets-lit-* ]] \
@@ -182,7 +203,17 @@ jobs:
           steps.trusted-automation.outputs.trusted == 'true' &&
           steps.trusted-automation.outputs.kind != 'ancestry-backmerge' &&
           steps.trusted-automation.outputs.kind != 'release-promotion'
-        run: echo "Trusted automation PR; Copilot review is delegated to its required guarded-automerge policy."
+        run: |
+          if [ "${{ steps.trusted-automation.outputs.kind }}" = renovate ]; then
+            {
+              echo "### Trusted Renovate exemption"
+              echo
+              echo "Copilot review is not required for this exact-head trusted Renovate PR."
+              echo "Trusted identity and policy verification succeeded."
+            } >>"${GITHUB_STEP_SUMMARY}"
+          else
+            echo "Trusted automation PR; Copilot review is delegated to its required guarded-automerge policy."
+          fi
 
       - name: Verify current Copilot review and resolved findings
         if: steps.trusted-automation.outputs.trusted != 'true'
