@@ -57,16 +57,16 @@ ansible-navigator exec -- \
 
 ### Wunderbox (VM + RHEL9) setup
 
-```bash
+~~~bash
 ansible-navigator run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+  -i inventories/<env>/inventory.yml --limit <wunderbox-fqdn>
 
 ansible-navigator run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+  -i inventories/<env>/inventory.yml --limit <wunderbox-fqdn>
 
 ansible-navigator run playbooks/stage-2b/12-wunderbox.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-```
+  -i inventories/<env>/inventory.yml --limit <wunderbox-fqdn>
+~~~
 
 > Notes:
 > - Adjust `--limit` to your Wunderbox FQDN(s).
