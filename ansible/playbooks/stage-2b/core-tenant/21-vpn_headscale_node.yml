@@ -1,6 +1,6 @@
 ---
 - name: Setup headscale node
-  hosts: vpn_headsacle_node
+  hosts: vpn_headscale_node
   gather_facts: true
   become: true
   roles:
