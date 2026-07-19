@@ -1,6 +1,6 @@
 ---
 - name: Configure Keycloak instance via keycloak_config role
-  hosts: all
+  hosts: localhost
   connection: local
   gather_facts: false
   roles:
