@@ -11,8 +11,13 @@
           - strongswan__right is defined
           - strongswan__leftsubnet is defined
           - strongswan__rightsubnet is defined
-          - strongswan__psk is defined
         fail_msg: Required strongSwan connection variables must be provided by inventory.
+
+    - name: Validate required strongSwan secret variable
+      ansible.builtin.assert:
+        that:
+          - strongswan__psk is defined
+        fail_msg: The required strongSwan secret variable must be provided by inventory.
       no_log: true
   roles:
     - role: strongswan
