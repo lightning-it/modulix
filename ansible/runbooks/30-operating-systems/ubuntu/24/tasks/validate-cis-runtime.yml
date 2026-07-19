@@ -1,0 +1,43 @@
+---
+- name: Inspect the installed CIS remediation role provenance
+  ansible.builtin.stat:
+    path: >-
+      /usr/share/ansible/roles/ansible-lockdown.ubuntu24_cis/meta/.galaxy_install_info
+  register: cis_remediation_install_info
+  become: false
+  delegate_to: localhost
+
+- name: Require the pinned CIS remediation role metadata
+  ansible.builtin.assert:
+    that:
+      - cis_remediation_install_info.stat.exists
+      - cis_remediation_install_info.stat.isreg
+      - cis_remediation_install_info.stat.size > 0
+    fail_msg: >-
+      The execution environment does not contain installation metadata for the
+      pinned ansible-lockdown.ubuntu24_cis role.
+  become: false
+  delegate_to: localhost
+
+- name: Read the installed CIS remediation role metadata
+  ansible.builtin.slurp:
+    src: >-
+      /usr/share/ansible/roles/ansible-lockdown.ubuntu24_cis/meta/.galaxy_install_info
+  register: cis_remediation_install_info_content
+  become: false
+  delegate_to: localhost
+
+- name: Require CIS remediation role version 1.6.0
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          cis_remediation_install_info_content.content
+          | b64decode
+          | from_yaml
+        ).version == '1.6.0'
+    fail_msg: >-
+      The execution environment CIS remediation role version does not match the
+      reviewed 1.6.0 release.
+  become: false
+  delegate_to: localhost

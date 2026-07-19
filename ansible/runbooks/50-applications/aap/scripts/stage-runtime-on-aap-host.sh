@@ -24,6 +24,14 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${script_dir}/aap-local-lib.sh"
 modulix_aap_set_defaults
 
+if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
+  modulix_validate_ansible_vault_password_file \
+    "${ANSIBLE_VAULT_PASSWORD_FILE}" "${AAP_SETUP_USER}"
+  rm -f "${AAP_SECRETS_DIR}/.vault-token"
+else
+  rm -f "${AAP_SECRETS_DIR}/.vault-pass.txt"
+fi
+
 mkdir -p "${AAP_APPL_ROOT}/src" /appl/tmp /appl/ansible-tmp
 modulix_write_podman_storage_conf
 
@@ -117,31 +125,6 @@ else
 fi
 podman image exists "${MODULIX_RUN_EE_RUNTIME_IMAGE}"
 
-if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
-  if [[ -L "${ANSIBLE_VAULT_PASSWORD_FILE}" ||
-        ! -f "${ANSIBLE_VAULT_PASSWORD_FILE}" ||
-        ! -s "${ANSIBLE_VAULT_PASSWORD_FILE}" ]]; then
-    printf 'A pre-provisioned Ansible Vault password file is required: %s\n' \
-      "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
-    printf 'Provision it through a secure transfer before staging; it will not be generated locally.\n' >&2
-    exit 1
-  fi
-  if [[ "$(stat -c '%h' -- "${ANSIBLE_VAULT_PASSWORD_FILE}")" != "1" ]]; then
-    printf 'Ansible Vault password file must not have hard links: %s\n' \
-      "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
-    exit 1
-  fi
-  if [[ "$(stat -c '%U' -- "${ANSIBLE_VAULT_PASSWORD_FILE}")" != "${AAP_SETUP_USER}" ]]; then
-    printf 'Ansible Vault password file must be owned by %s: %s\n' \
-      "${AAP_SETUP_USER}" "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
-    exit 1
-  fi
-  if [[ "$(stat -c '%a' -- "${ANSIBLE_VAULT_PASSWORD_FILE}")" != "600" ]]; then
-    printf 'Ansible Vault password file must have mode 0600: %s\n' \
-      "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
-    exit 1
-  fi
-fi
 if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
   chmod 0600 "${AAP_SSH_KEY}"
 fi

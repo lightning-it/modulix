@@ -1,0 +1,143 @@
+---
+- name: Resolve Application acceptance runtime identity
+  ansible.builtin.command:
+    argv: [id, --user, "{{ workbench_acceptance_operator }}"]
+  register: workbench_application_operator_uid
+  changed_when: false
+  check_mode: false
+
+- name: Inspect Application workspace and artifact collisions
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+  loop:
+    - "{{ workbench_acceptance_workspace }}"
+    - "{{ workbench_acceptance_artifacts }}"
+  loop_control:
+    label: "{{ item }}"
+  register: workbench_application_path_preflight
+  changed_when: false
+
+- name: Refuse to overwrite Application workspace or evidence
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_application_path_preflight.results
+        | selectattr('stat.exists', 'equalto', true) | list | length == 0
+    fail_msg: >-
+      Application workspace or evidence already exists for this run ID. Use a
+      new run ID; retained evidence is never overwritten or auto-deleted.
+    quiet: true
+  changed_when: false
+
+- name: Resolve the Application acceptance instance
+  ansible.builtin.set_fact:
+    workbench_acceptance_current_instance_name: "{{ workbench_acceptance_instance_names[0] }}"
+    workbench_application_workspace_created: false
+  changed_when: false
+
+- name: Run the pinned public Application workflow
+  block:
+    - name: Create the exact Application workspace and evidence directory
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0700"
+      loop:
+        - "{{ workbench_acceptance_workspace }}"
+        - "{{ workbench_acceptance_artifacts }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Mark the run-owned Application workspace and evidence
+      ansible.builtin.copy:
+        dest: "{{ item }}/.lit-owner.json"
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'managed_by': 'modulix-automation',
+              'profile': workbench_acceptance_profile,
+              'run_id': workbench_acceptance_run_id
+            } | to_nice_json
+          }}
+      loop:
+        - "{{ workbench_acceptance_workspace }}"
+        - "{{ workbench_acceptance_artifacts }}"
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+
+    - name: Record creation of the owner-marked Application workspace
+      ansible.builtin.set_fact:
+        workbench_application_workspace_created: true
+      changed_when: false
+
+    - name: Install bounded Application acceptance helpers
+      ansible.builtin.copy:
+        src: "files/{{ item }}"
+        dest: "{{ workbench_acceptance_workspace }}/{{ item }}"
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0700"
+      loop:
+        - workbench-application-acceptance.sh
+        - workbench-secret-scan.py
+        - workbench-sanitize-log.py
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Create and start the Application test instance
+      ansible.builtin.include_tasks: acceptance-instance-start.yml
+
+    - name: Run the pinned repository lint, smoke, and Molecule workflow
+      ansible.builtin.command:
+        argv:
+          - "{{ workbench_acceptance_workspace }}/workbench-application-acceptance.sh"
+          - "{{ workbench_acceptance_profile_config.repository.url }}"
+          - "{{ workbench_acceptance_profile_config.repository.commit }}"
+          - "{{ workbench_acceptance_profile_config.molecule_scenario }}"
+          - "{{ workbench_acceptance_workspace }}"
+          - "{{ workbench_acceptance_artifacts }}"
+          - "{{ workbench_acceptance_workspace }}/workbench-secret-scan.py"
+          - "{{ workbench_acceptance_workspace }}/workbench-sanitize-log.py"
+          - "{{ workbench_acceptance_run_id }}"
+      become: true
+      become_user: "{{ workbench_acceptance_operator }}"
+      environment:
+        HOME: "{{ workbench_acceptance_operator_home }}"
+        XDG_RUNTIME_DIR: "/run/user/{{ workbench_application_operator_uid.stdout | trim }}"
+        GH_TOKEN: ""
+        GITHUB_TOKEN: ""
+      changed_when: true
+      no_log: true
+
+    - name: Validate sanitized Application evidence JSON
+      ansible.builtin.command:
+        argv:
+          - jq
+          - --exit-status
+          - .status=="passed"
+          - "{{ item }}"
+      loop:
+        - "{{ workbench_acceptance_artifacts }}/application-summary.json"
+        - "{{ workbench_acceptance_artifacts }}/secret-scan.json"
+      loop_control:
+        label: "{{ item | basename }}"
+      changed_when: false
+      check_mode: false
+  always:
+    - name: Finalize Application temporary resources
+      block:
+        - name: Remove only the run-owned Application instance
+          ansible.builtin.include_tasks: acceptance-cleanup.yml
+          vars:
+            workbench_acceptance_cleanup_instance_name: >-
+              {{ workbench_acceptance_current_instance_name }}
+          when: workbench_acceptance_instance_preflight_passed | default(false) | bool
+      always:
+        - name: Remove only the owner-marked Application workspace
+          ansible.builtin.include_tasks: acceptance-workspace-cleanup.yml
+          when: workbench_application_workspace_created | bool

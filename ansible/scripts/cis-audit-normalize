@@ -1,0 +1,1086 @@
+#!/usr/bin/env python3
+"""Normalize pinned Ubuntu 24 CIS Goss JSON and enforce audit gates.
+
+The raw Goss report remains the immutable source evidence.  This program emits
+only control IDs, classifications, counts, and source checksums; it deliberately
+does not copy matcher values or command output into the normalized report.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+from typing import Any
+
+
+PROFILES = ("level1-server", "level1-workstation")
+VISIBILITIES = ("intentional_exception", "manual_evidence", "not_applicable")
+CONTROL_ID_RE = re.compile(r"^[1-7](?:\.\d+){1,5}$")
+DEFAULT_MANIFEST = Path(__file__).with_name(
+    "cis-audit-ubuntu24-v1.0.0-manifest.json"
+)
+
+
+class ContractError(ValueError):
+    """Raised when input does not satisfy the pinned evidence contract."""
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ContractError(message)
+
+
+def load_json(path: Path, label: str) -> Any:
+    require(not path.is_symlink(), f"{label} must not be a symlink: {path}")
+    require(path.is_file(), f"{label} is not a regular file: {path}")
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            return json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ContractError(f"unable to read {label} JSON {path}: {exc}") from exc
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ContractError(f"unable to hash raw evidence {path}: {exc}") from exc
+    return digest.hexdigest()
+
+
+def normalize_control_id(value: Any, context: str) -> str:
+    require(
+        isinstance(value, str) and value,
+        f"{context} control ID must be a nonempty string",
+    )
+    control_id = value
+    require(
+        CONTROL_ID_RE.fullmatch(control_id) is not None,
+        f"{context} has invalid control ID {control_id!r}",
+    )
+    return control_id
+
+
+def normalize_level(value: Any, context: str) -> int | str:
+    if not isinstance(value, bool) and value in (1, "1"):
+        return 1
+    if not isinstance(value, bool) and value in (2, "2"):
+        return 2
+    if isinstance(value, str) and value.upper().replace("/", "") == "NA":
+        return "NA"
+    raise ContractError(f"{context} must be 1, 2, or NA; got {value!r}")
+
+
+def expected_controls(manifest: dict[str, Any], profile: str) -> set[str]:
+    controls = manifest["expected_controls"]
+    common = set(controls["common_level1"])
+    profile_only = set(controls[f"{profile}_only"])
+    return common | profile_only
+
+
+def validate_manifest(manifest: Any) -> dict[str, Any]:
+    require(isinstance(manifest, dict), "manifest must be an object")
+    require(manifest.get("schema_version") == 1, "unsupported manifest schema_version")
+
+    benchmark = manifest.get("benchmark")
+    require(isinstance(benchmark, dict), "manifest benchmark must be an object")
+    for field in ("os", "type", "version", "goss_version"):
+        require(
+            isinstance(benchmark.get(field), str) and benchmark[field],
+            f"manifest benchmark.{field} must be a nonempty string",
+        )
+
+    remediation_role = benchmark.get("remediation_role")
+    require(
+        isinstance(remediation_role, dict),
+        "manifest benchmark.remediation_role must be an object",
+    )
+    for field in ("version", "commit"):
+        require(
+            isinstance(remediation_role.get(field), str) and remediation_role[field],
+            f"manifest benchmark.remediation_role.{field} must be nonempty",
+        )
+    require(
+        re.fullmatch(r"[0-9a-f]{40}", remediation_role["commit"]) is not None,
+        "manifest benchmark.remediation_role.commit must be a full Git SHA",
+    )
+
+    audit = benchmark.get("audit")
+    require(isinstance(audit, dict), "manifest benchmark.audit must be an object")
+    for field in ("repository", "commit", "archive_sha256"):
+        require(
+            isinstance(audit.get(field), str) and audit[field],
+            f"manifest benchmark.audit.{field} must be nonempty",
+        )
+    require(
+        re.fullmatch(r"[0-9a-f]{40}", audit["commit"]) is not None,
+        "manifest benchmark.audit.commit must be a full Git SHA",
+    )
+    require(
+        re.fullmatch(r"[0-9a-f]{64}", audit["archive_sha256"]) is not None,
+        "manifest benchmark.audit.archive_sha256 must be a SHA-256 digest",
+    )
+
+    controls = manifest.get("expected_controls")
+    require(isinstance(controls, dict), "manifest expected_controls must be an object")
+    parsed_lists: dict[str, list[str]] = {}
+    for key in ("common_level1", "level1-server_only", "level1-workstation_only"):
+        value = controls.get(key)
+        require(isinstance(value, list), f"manifest {key} must be a list")
+        parsed = [normalize_control_id(item, f"manifest {key}") for item in value]
+        require(len(parsed) == len(set(parsed)), f"manifest {key} has duplicates")
+        parsed_lists[key] = parsed
+
+    common = set(parsed_lists["common_level1"])
+    server_only = set(parsed_lists["level1-server_only"])
+    workstation_only = set(parsed_lists["level1-workstation_only"])
+    require(not common & server_only, "server-only controls overlap common controls")
+    require(
+        not common & workstation_only,
+        "workstation-only controls overlap common controls",
+    )
+    require(
+        not server_only & workstation_only,
+        "server-only and workstation-only controls overlap",
+    )
+
+    counts = controls.get("counts")
+    require(isinstance(counts, dict), "manifest control counts must be an object")
+    calculated_counts = {
+        "level1-server": len(common | server_only),
+        "level1-workstation": len(common | workstation_only),
+        "common": len(common),
+    }
+    require(counts == calculated_counts, "manifest expected-control counts are inconsistent")
+
+    context_contract = manifest.get("effective_context")
+    if context_contract is not None:
+        require(
+            isinstance(context_contract, dict),
+            "manifest effective_context must be an object",
+        )
+        require(
+            isinstance(context_contract.get("required"), bool),
+            "manifest effective_context.required must be boolean",
+        )
+        context_choices = context_contract.get("choices")
+        require(
+            isinstance(context_choices, dict) and context_choices,
+            "manifest effective_context.choices must be a nonempty object",
+        )
+        assigned_controls: dict[str, str] = {}
+        all_profile_controls = common | server_only | workstation_only
+        for context_key, choices in context_choices.items():
+            context = f"manifest effective_context.choices.{context_key}"
+            require(
+                isinstance(context_key, str) and context_key,
+                "manifest effective-context keys must be nonempty strings",
+            )
+            require(isinstance(choices, dict) and choices, f"{context} must be an object")
+            family_controls: set[str] = set()
+            for choice_name, choice in choices.items():
+                choice_context = f"{context}.{choice_name}"
+                require(
+                    isinstance(choice_name, str) and choice_name,
+                    f"{context} choice names must be nonempty strings",
+                )
+                require(isinstance(choice, dict), f"{choice_context} must be an object")
+                active = choice.get("active_controls", [])
+                required_exceptions = choice.get("required_exception_controls", [])
+                for field, values in (
+                    ("active_controls", active),
+                    ("required_exception_controls", required_exceptions),
+                ):
+                    require(isinstance(values, list), f"{choice_context}.{field} invalid")
+                    parsed = [
+                        normalize_control_id(item, f"{choice_context}.{field}")
+                        for item in values
+                    ]
+                    require(
+                        len(parsed) == len(set(parsed)),
+                        f"{choice_context}.{field} has duplicates",
+                    )
+                    require(
+                        set(parsed) <= all_profile_controls,
+                        f"{choice_context}.{field} contains a non-L1 control",
+                    )
+                    if field == "active_controls":
+                        active = parsed
+                    else:
+                        required_exceptions = parsed
+                    family_controls.update(parsed)
+                require(
+                    not set(active) & set(required_exceptions),
+                    f"{choice_context} activates and excepts the same control",
+                )
+            for control_id in family_controls:
+                previous = assigned_controls.get(control_id)
+                require(
+                    previous in (None, context_key),
+                    f"context control {control_id} belongs to {previous} and {context_key}",
+                )
+                assigned_controls[control_id] = context_key
+
+    benchmark_mismatch_selectors: set[tuple[str, str, str]] = set()
+    for index, mismatch in enumerate(
+        manifest.get("benchmark_metadata_mismatches", [])
+    ):
+        context = f"manifest benchmark_metadata_mismatches[{index}]"
+        require(isinstance(mismatch, dict), f"{context} must be an object")
+        require(mismatch.get("profile") in PROFILES, f"{context}.profile is invalid")
+        for field in ("field", "emitted_value", "expected_value", "reason"):
+            require(
+                isinstance(mismatch.get(field), str) and mismatch[field],
+                f"{context}.{field} must be nonempty",
+            )
+        selector = (
+            mismatch["profile"],
+            mismatch["field"],
+            mismatch["emitted_value"],
+        )
+        require(
+            selector not in benchmark_mismatch_selectors,
+            f"duplicate benchmark metadata mismatch selector {selector}",
+        )
+        benchmark_mismatch_selectors.add(selector)
+
+    metadata_backfill_selectors: set[str] = set()
+    for index, backfill in enumerate(manifest.get("result_metadata_backfills", [])):
+        context = f"manifest result_metadata_backfills[{index}]"
+        require(isinstance(backfill, dict), f"{context} must be an object")
+        for field in ("resource_id", "title_prefix", "reason"):
+            require(
+                isinstance(backfill.get(field), str) and backfill[field],
+                f"{context}.{field} must be nonempty",
+            )
+        normalize_control_id(backfill.get("control_id"), context)
+        normalize_level(backfill.get("server"), f"{context}.server")
+        normalize_level(backfill.get("workstation"), f"{context}.workstation")
+        require(
+            backfill["resource_id"] not in metadata_backfill_selectors,
+            f"duplicate metadata backfill selector {backfill['resource_id']}",
+        )
+        metadata_backfill_selectors.add(backfill["resource_id"])
+
+    duplicate_id_selectors: set[tuple[str, str]] = set()
+    for index, deduplication in enumerate(
+        manifest.get("result_duplicate_id_deduplications", [])
+    ):
+        context = f"manifest result_duplicate_id_deduplications[{index}]"
+        require(isinstance(deduplication, dict), f"{context} must be an object")
+        require(
+            isinstance(deduplication.get("resource_id"), str)
+            and deduplication["resource_id"],
+            f"{context}.resource_id must be nonempty",
+        )
+        control_id = normalize_control_id(deduplication.get("control_id"), context)
+        require(
+            isinstance(deduplication.get("reason"), str) and deduplication["reason"],
+            f"{context}.reason must be nonempty",
+        )
+        selector = (deduplication["resource_id"], control_id)
+        require(selector not in duplicate_id_selectors, f"duplicate ID selector {selector}")
+        duplicate_id_selectors.add(selector)
+
+    remap_selectors: set[tuple[str, str]] = set()
+    for index, remap in enumerate(manifest.get("result_id_remaps", [])):
+        context = f"manifest result_id_remaps[{index}]"
+        require(isinstance(remap, dict), f"{context} must be an object")
+        source = normalize_control_id(remap.get("from_control_id"), context)
+        normalize_control_id(remap.get("to_control_id"), context)
+        resources = remap.get("resource_ids")
+        require(
+            isinstance(resources, list)
+            and resources
+            and all(isinstance(item, str) and item for item in resources),
+            f"{context}.resource_ids must be a nonempty string list",
+        )
+        require(
+            isinstance(remap.get("reason"), str) and remap["reason"],
+            f"{context}.reason must be nonempty",
+        )
+        for resource_id in resources:
+            selector = (source, resource_id)
+            require(selector not in remap_selectors, f"duplicate remap selector {selector}")
+            remap_selectors.add(selector)
+
+    mismatch_selectors: set[tuple[str, str, int | str]] = set()
+    for index, mismatch in enumerate(manifest.get("profile_metadata_mismatches", [])):
+        context = f"manifest profile_metadata_mismatches[{index}]"
+        require(isinstance(mismatch, dict), f"{context} must be an object")
+        control_id = normalize_control_id(mismatch.get("control_id"), context)
+        profiles = mismatch.get("profiles")
+        require(
+            isinstance(profiles, list)
+            and profiles
+            and all(profile in PROFILES for profile in profiles),
+            f"{context}.profiles must contain known profiles",
+        )
+        metadata_value = normalize_level(mismatch.get("metadata_value"), context)
+        require(
+            isinstance(mismatch.get("expected_applicable"), bool),
+            f"{context}.expected_applicable must be boolean",
+        )
+        require(
+            isinstance(mismatch.get("reason"), str) and mismatch["reason"],
+            f"{context}.reason must be nonempty",
+        )
+        for profile in profiles:
+            expected = control_id in expected_controls(manifest, profile)
+            require(
+                mismatch["expected_applicable"] == expected,
+                f"{context} disagrees with the expected-control manifest",
+            )
+            selector = (control_id, profile, metadata_value)
+            require(
+                selector not in mismatch_selectors,
+                f"duplicate profile metadata mismatch selector {selector}",
+            )
+            mismatch_selectors.add(selector)
+
+    gap_selectors: set[tuple[str, str]] = set()
+    for index, gap in enumerate(manifest.get("coverage_gaps", [])):
+        context = f"manifest coverage_gaps[{index}]"
+        require(isinstance(gap, dict), f"{context} must be an object")
+        control_id = normalize_control_id(gap.get("control_id"), context)
+        profiles = gap.get("profiles")
+        require(
+            isinstance(profiles, list)
+            and profiles
+            and all(profile in PROFILES for profile in profiles),
+            f"{context}.profiles must contain known profiles",
+        )
+        for field in ("supplemental_check_id", "requirement", "reason"):
+            require(
+                isinstance(gap.get(field), str) and gap[field],
+                f"{context}.{field} must be nonempty",
+            )
+        require(
+            gap.get("raw_result_policy", "usable")
+            in ("usable", "supplemental_required"),
+            f"{context}.raw_result_policy is invalid",
+        )
+        for profile in profiles:
+            require(
+                control_id in expected_controls(manifest, profile),
+                f"{context} is not expected for {profile}",
+            )
+            selector = (control_id, profile)
+            require(selector not in gap_selectors, f"duplicate coverage gap {selector}")
+            gap_selectors.add(selector)
+
+    return manifest
+
+
+def parse_exceptions(document: Any) -> dict[str, dict[str, Any]]:
+    if document is None:
+        records: Any = []
+    elif isinstance(document, list):
+        records = document
+    elif isinstance(document, dict):
+        records = document.get("cis_ubuntu24_exceptions", document.get("exceptions"))
+    else:
+        records = None
+    require(isinstance(records, list), "exceptions JSON must be a list or contain one")
+
+    by_control: dict[str, dict[str, Any]] = {}
+    for index, record in enumerate(records):
+        context = f"exceptions[{index}]"
+        require(isinstance(record, dict), f"{context} must be an object")
+        control_ids = record.get("control_ids")
+        require(isinstance(control_ids, list) and control_ids, f"{context}.control_ids invalid")
+        visibility = record.get("audit_visibility")
+        require(visibility in VISIBILITIES, f"{context}.audit_visibility is invalid")
+        for field in ("scope", "reason", "compensating_control"):
+            require(
+                isinstance(record.get(field), str) and record[field],
+                f"{context}.{field} must be nonempty",
+            )
+        variables = record.get("variables")
+        require(isinstance(variables, list) and variables, f"{context}.variables is invalid")
+        for control_value in control_ids:
+            control_id = normalize_control_id(control_value, context)
+            require(
+                control_id not in by_control,
+                f"control {control_id} has more than one exception classification",
+            )
+            by_control[control_id] = {
+                "visibility": visibility,
+                "scope": record["scope"],
+                "reason": record["reason"],
+            }
+    return by_control
+
+
+def parse_supplemental(document: Any) -> dict[str, dict[str, str]]:
+    if document is None:
+        records: Any = []
+    elif isinstance(document, list):
+        records = document
+    elif isinstance(document, dict):
+        records = document.get("results")
+    else:
+        records = None
+    require(isinstance(records, list), "supplemental JSON must be a list or contain results")
+
+    by_control: dict[str, dict[str, str]] = {}
+    for index, record in enumerate(records):
+        context = f"supplemental results[{index}]"
+        require(isinstance(record, dict), f"{context} must be an object")
+        control_id = normalize_control_id(record.get("control_id"), context)
+        check_id = record.get("check_id")
+        status = record.get("status")
+        require(isinstance(check_id, str) and check_id, f"{context}.check_id is invalid")
+        require(status in ("pass", "fail", "skip"), f"{context}.status is invalid")
+        require(control_id not in by_control, f"duplicate supplemental result {control_id}")
+        by_control[control_id] = {"check_id": check_id, "status": status}
+    return by_control
+
+
+def parse_context(document: Any, manifest: dict[str, Any]) -> dict[str, str]:
+    contract = manifest.get("effective_context")
+    if contract is None:
+        require(document in (None, {}), "context supplied but manifest has no context contract")
+        return {}
+    if document is None:
+        require(not contract["required"], "effective context JSON is required")
+        return {}
+    require(isinstance(document, dict), "effective context JSON must be an object")
+    choices = contract["choices"]
+    require(
+        set(document) == set(choices),
+        "effective context keys do not exactly match the reviewed contract",
+    )
+    parsed: dict[str, str] = {}
+    for key, value in document.items():
+        require(
+            isinstance(value, str) and value in choices[key],
+            f"effective context {key} has unreviewed value {value!r}",
+        )
+        parsed[key] = value
+    return parsed
+
+
+def parse_provenance(document: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+    require(isinstance(document, dict), "verified audit provenance must be an object")
+    expected_keys = {
+        "repository",
+        "expected_commit",
+        "verified_commit",
+        "checkout_clean",
+    }
+    require(
+        set(document) == expected_keys,
+        "verified audit provenance keys do not exactly match the contract",
+    )
+    audit = manifest["benchmark"]["audit"]
+    require(
+        document["repository"] == audit["repository"],
+        "verified audit repository does not match the reviewed manifest",
+    )
+    require(
+        document["expected_commit"] == audit["commit"],
+        "expected audit commit does not match the reviewed manifest",
+    )
+    require(
+        document["verified_commit"] == audit["commit"],
+        "verified audit commit does not match the reviewed manifest",
+    )
+    require(
+        document["checkout_clean"] is True,
+        "verified audit checkout must be clean",
+    )
+    return {
+        "repository": document["repository"],
+        "expected_commit": document["expected_commit"],
+        "verified_commit": document["verified_commit"],
+        "checkout_clean": True,
+    }
+
+
+def effective_expected_controls(
+    manifest: dict[str, Any],
+    profile: str,
+    context: dict[str, str],
+    exceptions: dict[str, dict[str, Any]],
+) -> tuple[set[str], list[dict[str, Any]], list[dict[str, str]]]:
+    expected = expected_controls(manifest, profile)
+    contract = manifest.get("effective_context")
+    if contract is None:
+        return expected, [], []
+
+    selections: list[dict[str, Any]] = []
+    missing_exceptions: list[dict[str, str]] = []
+    for context_key, choices in contract["choices"].items():
+        family_controls: set[str] = set()
+        for choice in choices.values():
+            family_controls.update(choice.get("active_controls", []))
+            family_controls.update(choice.get("required_exception_controls", []))
+        expected -= family_controls
+
+        selected_name = context[context_key]
+        selected = choices[selected_name]
+        active = set(selected.get("active_controls", [])) & expected_controls(
+            manifest, profile
+        )
+        required_exceptions = set(
+            selected.get("required_exception_controls", [])
+        ) & expected_controls(manifest, profile)
+        expected.update(active)
+        for control_id in sorted(required_exceptions, key=control_sort_key):
+            if control_id not in exceptions:
+                missing_exceptions.append(
+                    {
+                        "control_id": control_id,
+                        "status": "missing_required_context_exception",
+                        "category": context_key,
+                    }
+                )
+        selections.append(
+            {
+                "key": context_key,
+                "value": selected_name,
+                "active_controls": sorted(active, key=control_sort_key),
+                "required_exception_controls": sorted(
+                    required_exceptions, key=control_sort_key
+                ),
+            }
+        )
+    return expected, selections, missing_exceptions
+
+
+def validate_result_state(result: Any, index: int) -> str:
+    context = f"raw results[{index}]"
+    require(isinstance(result, dict), f"{context} must be an object")
+    for field in ("resource-id", "resource-type", "property"):
+        require(isinstance(result.get(field), str), f"{context}.{field} must be a string")
+    require(isinstance(result.get("result"), int), f"{context}.result must be integer")
+    require(isinstance(result.get("skipped"), bool), f"{context}.skipped must be boolean")
+    require(
+        isinstance(result.get("successful"), bool),
+        f"{context}.successful must be boolean",
+    )
+    if result["skipped"]:
+        require(
+            result["result"] == 2 and result["successful"],
+            f"{context} has inconsistent skipped state",
+        )
+        return "skip"
+    if result["successful"]:
+        require(result["result"] == 0, f"{context} has inconsistent pass state")
+        return "pass"
+    require(result["result"] == 1, f"{context} has inconsistent failure state")
+    return "fail"
+
+
+def validate_raw(
+    raw: Any, manifest: dict[str, Any], profile: str
+) -> tuple[list[str], list[dict[str, str]]]:
+    require(isinstance(raw, dict), "raw Goss document must be an object")
+    results = raw.get("results")
+    summary = raw.get("summary")
+    require(isinstance(results, list), "raw results must be a list")
+    require(isinstance(summary, dict), "raw summary must be an object")
+    for field in ("test-count", "failed-count", "skipped-count"):
+        value = summary.get(field)
+        require(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0,
+            f"raw summary.{field} must be a nonnegative integer",
+        )
+    require(len(results) == summary["test-count"], "raw test-count is inconsistent")
+
+    states = [validate_result_state(result, index) for index, result in enumerate(results)]
+    require(states.count("fail") == summary["failed-count"], "raw failed-count is inconsistent")
+    require(states.count("skip") == summary["skipped-count"], "raw skipped-count is inconsistent")
+
+    metadata_indexes = [
+        index
+        for index, result in enumerate(results)
+        if result.get("resource-id") == "benchmark_meta"
+    ]
+    require(len(metadata_indexes) == 1, "raw evidence must contain one benchmark_meta result")
+    metadata_index = metadata_indexes[0]
+    require(states[metadata_index] == "pass", "benchmark_meta result must pass")
+    metadata = results[metadata_index].get("meta")
+    require(isinstance(metadata, dict), "benchmark_meta.meta must be an object")
+    benchmark = manifest["benchmark"]
+    required_metadata = {
+        "benchmark_os": benchmark["os"],
+        "benchmark_type": benchmark["type"],
+        "benchmark_version": benchmark["version"],
+        "host_system_type": "Server" if profile == "level1-server" else "Workstation",
+    }
+    declared_defects: list[dict[str, str]] = []
+    for field, expected in required_metadata.items():
+        actual = metadata.get(field)
+        if actual == expected:
+            continue
+        matches = [
+            item
+            for item in manifest.get("benchmark_metadata_mismatches", [])
+            if item["profile"] == profile
+            and item["field"] == field
+            and item["emitted_value"] == actual
+            and item["expected_value"] == expected
+        ]
+        require(
+            len(matches) == 1,
+            f"benchmark_meta.{field} does not equal {expected!r}",
+        )
+        declared_defects.append(
+            {
+                "field": field,
+                "emitted_value": actual,
+                "expected_value": expected,
+                "reason": matches[0]["reason"],
+            }
+        )
+    return states, declared_defects
+
+
+def find_remap(
+    manifest: dict[str, Any], control_id: str, resource_id: str
+) -> dict[str, Any] | None:
+    matches = [
+        item
+        for item in manifest.get("result_id_remaps", [])
+        if item["from_control_id"] == control_id
+        and resource_id in item["resource_ids"]
+    ]
+    require(len(matches) <= 1, f"multiple result-ID remaps match {control_id}/{resource_id}")
+    return matches[0] if matches else None
+
+
+def find_metadata_mismatch(
+    manifest: dict[str, Any], control_id: str, profile: str, level: int | str
+) -> dict[str, Any] | None:
+    matches = [
+        item
+        for item in manifest.get("profile_metadata_mismatches", [])
+        if item["control_id"] == control_id
+        and profile in item["profiles"]
+        and normalize_level(item["metadata_value"], "manifest mismatch") == level
+    ]
+    require(
+        len(matches) <= 1,
+        f"multiple metadata mismatch declarations match {control_id}/{profile}/{level}",
+    )
+    return matches[0] if matches else None
+
+
+def find_metadata_backfill(
+    manifest: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any] | None:
+    matches = [
+        item
+        for item in manifest.get("result_metadata_backfills", [])
+        if item["resource_id"] == result.get("resource-id")
+        and isinstance(result.get("title"), str)
+        and result["title"].startswith(item["title_prefix"])
+    ]
+    require(
+        len(matches) <= 1,
+        f"multiple metadata backfills match {result.get('resource-id')!r}",
+    )
+    return matches[0] if matches else None
+
+
+def normalize_result_ids(
+    value: Any,
+    context: str,
+    manifest: dict[str, Any],
+    result: dict[str, Any],
+) -> tuple[list[str], str | None]:
+    values = value if isinstance(value, list) else [value]
+    require(values, f"{context} CIS_ID must not be empty")
+    ids = [normalize_control_id(item, context) for item in values]
+    if len(ids) == len(set(ids)):
+        return ids, None
+    duplicate_ids = {control_id for control_id in ids if ids.count(control_id) > 1}
+    require(len(duplicate_ids) == 1, f"{context} has unreviewed duplicate CIS_ID values")
+    control_id = next(iter(duplicate_ids))
+    matches = [
+        item
+        for item in manifest.get("result_duplicate_id_deduplications", [])
+        if item["resource_id"] == result.get("resource-id")
+        and item["control_id"] == control_id
+    ]
+    require(len(matches) == 1, f"{context} contains duplicate CIS_ID values")
+    return list(dict.fromkeys(ids)), control_id
+
+
+def normalize(
+    raw: dict[str, Any],
+    manifest: dict[str, Any],
+    profile: str,
+    exceptions: dict[str, dict[str, Any]],
+    supplemental: dict[str, dict[str, str]],
+    effective_context: dict[str, str],
+    verified_provenance: dict[str, Any],
+    raw_sha256: str,
+) -> tuple[dict[str, Any], bool]:
+    states, benchmark_metadata_defects = validate_raw(raw, manifest, profile)
+    tagged_expected = expected_controls(manifest, profile)
+    expected, context_selections, context_errors = effective_expected_controls(
+        manifest, profile, effective_context, exceptions
+    )
+    active_gap_by_control = {
+        gap["control_id"]: gap
+        for gap in manifest.get("coverage_gaps", [])
+        if profile in gap["profiles"] and gap["control_id"] in expected
+    }
+    profile_key = "server" if profile == "level1-server" else "workstation"
+
+    controls: dict[str, dict[str, int]] = {}
+    ignored_results = 0
+    remap_counts: dict[tuple[str, str], int] = {}
+    mismatch_counts: dict[tuple[str, int | str, bool], int] = {}
+    metadata_backfill_counts: dict[str, int] = {}
+    duplicate_id_counts: dict[tuple[str, str], int] = {}
+    explained_producer_results: list[dict[str, Any]] = []
+    unexplained: list[dict[str, Any]] = list(context_errors)
+
+    for index, (result, state) in enumerate(zip(raw["results"], states)):
+        if result["resource-id"] == "benchmark_meta":
+            continue
+        context = f"raw results[{index}]"
+        metadata = result.get("meta")
+        if not isinstance(metadata, dict):
+            backfill = find_metadata_backfill(manifest, result)
+            require(backfill is not None, f"{context}.meta must be an object")
+            metadata = {
+                "CIS_ID": backfill["control_id"],
+                "server": backfill["server"],
+                "workstation": backfill["workstation"],
+            }
+            resource_id = backfill["resource_id"]
+            metadata_backfill_counts[resource_id] = (
+                metadata_backfill_counts.get(resource_id, 0) + 1
+            )
+        require("server" in metadata, f"{context}.meta.server is required")
+        require("workstation" in metadata, f"{context}.meta.workstation is required")
+        server_level = normalize_level(metadata["server"], f"{context}.meta.server")
+        workstation_level = normalize_level(
+            metadata["workstation"], f"{context}.meta.workstation"
+        )
+        selected_level = server_level if profile_key == "server" else workstation_level
+        require("CIS_ID" in metadata, f"{context}.meta.CIS_ID is required")
+
+        result_ids, duplicate_id = normalize_result_ids(
+            metadata["CIS_ID"], context, manifest, result
+        )
+        if duplicate_id:
+            selector = (result["resource-id"], duplicate_id)
+            duplicate_id_counts[selector] = duplicate_id_counts.get(selector, 0) + 1
+        for original_id in result_ids:
+            remap = find_remap(manifest, original_id, result["resource-id"])
+            control_id = remap["to_control_id"] if remap else original_id
+            if remap:
+                selector = (original_id, control_id)
+                remap_counts[selector] = remap_counts.get(selector, 0) + 1
+
+            tag_should_apply = control_id in tagged_expected
+            metadata_applies = selected_level == 1
+            if tag_should_apply != metadata_applies:
+                mismatch = find_metadata_mismatch(
+                    manifest, control_id, profile, selected_level
+                )
+                require(
+                    mismatch is not None
+                    and mismatch["expected_applicable"] == tag_should_apply,
+                    "undeclared profile metadata mismatch for "
+                    f"{control_id}: {profile_key}={selected_level}, "
+                    f"expected_applicable={tag_should_apply}",
+                )
+                selector = (control_id, selected_level, tag_should_apply)
+                mismatch_counts[selector] = mismatch_counts.get(selector, 0) + 1
+
+            if not tag_should_apply or control_id not in expected:
+                ignored_results += 1
+                continue
+
+            counts = controls.setdefault(control_id, {"pass": 0, "fail": 0, "skip": 0})
+            counts[state] += 1
+            if state != "pass" and control_id not in exceptions:
+                gap = active_gap_by_control.get(control_id)
+                finding = {
+                    "control_id": control_id,
+                    "resource_id": result["resource-id"],
+                    "resource_type": result["resource-type"],
+                    "property": result["property"],
+                    "status": state,
+                }
+                if gap and gap.get("raw_result_policy") == "supplemental_required":
+                    explained_producer_results.append(finding)
+                else:
+                    unexplained.append(finding)
+
+    normalized_controls: list[dict[str, Any]] = []
+    for control_id in sorted(set(controls) | set(exceptions), key=control_sort_key):
+        counts = controls.get(control_id, {"pass": 0, "fail": 0, "skip": 0})
+        exception = exceptions.get(control_id)
+        if exception:
+            status = exception["visibility"]
+        elif counts["fail"]:
+            status = "fail"
+        elif counts["skip"]:
+            status = "skip"
+        elif counts["pass"]:
+            status = "pass"
+        else:
+            status = "not_produced"
+        entry: dict[str, Any] = {
+            "control_id": control_id,
+            "status": status,
+            "test_counts": counts,
+        }
+        if exception:
+            entry["exception"] = exception
+        normalized_controls.append(entry)
+
+    profile_gaps = [
+        gap for gap in manifest.get("coverage_gaps", []) if profile in gap["profiles"]
+    ]
+    active_gaps = [gap for gap in profile_gaps if gap["control_id"] in expected]
+    gap_by_control = {gap["control_id"]: gap for gap in active_gaps}
+    require(
+        set(supplemental) <= set(gap_by_control),
+        "supplemental results contain controls without an active reviewed coverage gap",
+    )
+    coverage: list[dict[str, Any]] = []
+    for gap in sorted(profile_gaps, key=lambda item: control_sort_key(item["control_id"])):
+        control_id = gap["control_id"]
+        if control_id not in expected:
+            coverage.append(
+                {
+                    "control_id": control_id,
+                    "resolution": "inactive_by_reviewed_context",
+                    "supplemental_check_id": gap["supplemental_check_id"],
+                    "reason": gap["reason"],
+                    "requirement": gap["requirement"],
+                }
+            )
+            continue
+        counts = controls.get(control_id, {"pass": 0, "fail": 0, "skip": 0})
+        supplemental_result = supplemental.get(control_id)
+        exception = exceptions.get(control_id)
+        resolution: str
+        if exception:
+            resolution = exception["visibility"]
+        elif (
+            gap.get("raw_result_policy", "usable") == "usable"
+            and counts["pass"]
+            and not counts["fail"]
+            and not counts["skip"]
+        ):
+            resolution = "raw_pass"
+        elif supplemental_result:
+            require(
+                supplemental_result["check_id"] == gap["supplemental_check_id"],
+                f"supplemental check ID does not match reviewed gap {control_id}",
+            )
+            resolution = f"supplemental_{supplemental_result['status']}"
+        else:
+            resolution = "unresolved"
+
+        coverage_entry = {
+            "control_id": control_id,
+            "resolution": resolution,
+            "supplemental_check_id": gap["supplemental_check_id"],
+            "reason": gap["reason"],
+            "requirement": gap["requirement"],
+        }
+        coverage.append(coverage_entry)
+        if resolution in ("unresolved", "supplemental_fail", "supplemental_skip"):
+            unexplained.append(
+                {
+                    "control_id": control_id,
+                    "status": resolution,
+                    "category": "audit_coverage_gap",
+                }
+            )
+
+    active_gap_ids = {gap["control_id"] for gap in active_gaps}
+    missing_controls = sorted(
+        expected - set(controls) - set(exceptions) - active_gap_ids,
+        key=control_sort_key,
+    )
+    unexplained.extend(
+        {
+            "control_id": control_id,
+            "status": "not_produced",
+            "category": "expected_control_coverage",
+        }
+        for control_id in missing_controls
+    )
+
+    observed_expected = set(controls)
+    report = {
+        "schema_version": 1,
+        "status": "pass" if not unexplained else "fail",
+        "profile": profile,
+        "benchmark": manifest["benchmark"],
+        "verified_audit_provenance": verified_provenance,
+        "raw_evidence": {
+            "sha256": raw_sha256,
+            "summary": {
+                field: raw["summary"][field]
+                for field in ("test-count", "failed-count", "skipped-count")
+            },
+        },
+        "benchmark_metadata_defects": benchmark_metadata_defects,
+        "tagged_expected_control_count": len(tagged_expected),
+        "effective_expected_control_count": len(expected),
+        "expected_control_count": len(expected),
+        "effective_context": context_selections,
+        "observed_expected_control_count": len(observed_expected),
+        "not_produced_by_effective_audit": sorted(
+            expected - observed_expected, key=control_sort_key
+        ),
+        "ignored_nonapplicable_result_control_count": ignored_results,
+        "controls": normalized_controls,
+        "known_coverage_gaps": coverage,
+        "producer_id_remaps": [
+            {"from_control_id": source, "to_control_id": target, "result_count": count}
+            for (source, target), count in sorted(remap_counts.items())
+        ],
+        "producer_metadata_mismatches": [
+            {
+                "control_id": control_id,
+                "metadata_value": level,
+                "expected_applicable": applicable,
+                "result_count": count,
+            }
+            for (control_id, level, applicable), count in sorted(
+                mismatch_counts.items(), key=lambda item: control_sort_key(item[0][0])
+            )
+        ],
+        "producer_metadata_backfills": [
+            {"resource_id": resource_id, "result_count": count}
+            for resource_id, count in sorted(metadata_backfill_counts.items())
+        ],
+        "producer_duplicate_id_deduplications": [
+            {
+                "resource_id": resource_id,
+                "control_id": control_id,
+                "result_count": count,
+            }
+            for (resource_id, control_id), count in sorted(duplicate_id_counts.items())
+        ],
+        "explained_unreliable_producer_results": explained_producer_results,
+        "unexplained_failures_or_skips": unexplained,
+    }
+    return report, not unexplained
+
+
+def control_sort_key(control_id: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in control_id.split("."))
+
+
+def write_report(path: Path, text: str) -> None:
+    require(path.parent.is_dir(), f"output parent directory does not exist: {path.parent}")
+    temporary_name: str | None = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent, text=True
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, path)
+    except OSError as exc:
+        raise ContractError(f"unable to write normalized report {path}: {exc}") from exc
+    finally:
+        if temporary_name and os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--raw", type=Path, required=True, help="raw Goss JSON")
+    parser.add_argument("--profile", choices=PROFILES, required=True)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=DEFAULT_MANIFEST,
+        help="reviewed pinned producer manifest",
+    )
+    parser.add_argument(
+        "--exceptions",
+        type=Path,
+        help="inventory exception registry rendered as JSON (JSON is valid YAML)",
+    )
+    parser.add_argument(
+        "--context",
+        type=Path,
+        help="effective inventory choices rendered as reviewed JSON",
+    )
+    parser.add_argument(
+        "--provenance",
+        type=Path,
+        required=True,
+        help="verified runtime audit checkout provenance JSON",
+    )
+    parser.add_argument(
+        "--supplemental-results",
+        type=Path,
+        help="reviewed supplemental check results JSON",
+    )
+    parser.add_argument("--output", type=Path, help="also write normalized JSON mode 0600")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        manifest = validate_manifest(load_json(args.manifest, "manifest"))
+        raw = load_json(args.raw, "raw evidence")
+        exceptions = parse_exceptions(
+            load_json(args.exceptions, "exceptions") if args.exceptions else None
+        )
+        effective_context = parse_context(
+            load_json(args.context, "effective context") if args.context else None,
+            manifest,
+        )
+        verified_provenance = parse_provenance(
+            load_json(args.provenance, "verified audit provenance"), manifest
+        )
+        supplemental = parse_supplemental(
+            load_json(args.supplemental_results, "supplemental results")
+            if args.supplemental_results
+            else None
+        )
+        report, passed = normalize(
+            raw,
+            manifest,
+            args.profile,
+            exceptions,
+            supplemental,
+            effective_context,
+            verified_provenance,
+            sha256_file(args.raw),
+        )
+        rendered = json.dumps(report, indent=2, sort_keys=True)
+        if args.output:
+            write_report(args.output, rendered)
+        print(rendered)
+        return 0 if passed else 2
+    except ContractError as exc:
+        print(f"cis-audit-normalize: {exc}", file=sys.stderr)
+        return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main())

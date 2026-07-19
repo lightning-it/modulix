@@ -1,0 +1,190 @@
+---
+- name: Validate acceptance contract for user {{ workbench_validation_user.name }}
+  ansible.builtin.assert:
+    that:
+      - workbench_validation_user.name | default('') is match('^[a-z_][a-z0-9_-]*$')
+      - >-
+        (workbench_validation_user.home | default('') | string)
+        is match('^(?!.*(?:^|/)\.{1,2}(?:/|$))/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$')
+      - >-
+        (workbench_validation_user.shell | default('') | string)
+        is match('^(?!.*(?:^|/)\.{1,2}(?:/|$))/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$')
+      - workbench_validation_user.groups | default([]) is sequence
+      - workbench_validation_user.groups | default([]) is not string
+      - workbench_validation_user.password_locked | default(none) is boolean
+      - workbench_validation_user.passwordless_sudo | default(none) is boolean
+      - workbench_validation_user.authorized_key_count | default(-1) | int >= 0
+      - workbench_validation_user.workspace_directories | default([]) is sequence
+      - workbench_validation_user.workspace_directories | default([]) is not string
+      - >-
+        workbench_validation_user.workspace_directories
+        | select('match', '^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9/_.-]+$')
+        | list | length
+        == workbench_validation_user.workspace_directories | length
+    fail_msg: "Invalid acceptance declaration for a Workbench developer user."
+    quiet: true
+  changed_when: false
+
+- name: Read passwd entry for {{ workbench_validation_user.name }}
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ workbench_validation_user.name }}"]
+  register: workbench_validation_passwd
+  changed_when: false
+  check_mode: false
+
+- name: Read group memberships for {{ workbench_validation_user.name }}
+  ansible.builtin.command:
+    argv: [id, --name, --groups, "{{ workbench_validation_user.name }}"]
+  register: workbench_validation_groups
+  changed_when: false
+  check_mode: false
+
+- name: Read password lock status for {{ workbench_validation_user.name }}
+  ansible.builtin.command:
+    argv: [passwd, --status, "{{ workbench_validation_user.name }}"]
+  register: workbench_validation_password
+  changed_when: false
+  check_mode: false
+
+- name: Inspect home directory for {{ workbench_validation_user.name }}
+  ansible.builtin.stat:
+    path: "{{ workbench_validation_user.home }}"
+  register: workbench_validation_home
+  changed_when: false
+
+- name: Inspect declared workspace directories for {{ workbench_validation_user.name }}
+  ansible.builtin.stat:
+    path: "{{ workbench_validation_user.home }}/{{ item }}"
+  loop: "{{ workbench_validation_user.workspace_directories }}"
+  loop_control:
+    label: "{{ item }}"
+  register: workbench_validation_workspaces
+  changed_when: false
+
+- name: Inspect authorized_keys metadata for {{ workbench_validation_user.name }}
+  ansible.builtin.stat:
+    path: "{{ workbench_validation_user.home }}/.ssh/authorized_keys"
+    get_checksum: false
+    get_mime: false
+  register: workbench_validation_authorized_keys
+  changed_when: false
+
+- name: Count authorized keys without returning their content
+  ansible.builtin.command:
+    argv:
+      - awk
+      - "NF && $1 !~ /^#/ { count++ } END { print count + 0 }"
+      - "{{ workbench_validation_user.home }}/.ssh/authorized_keys"
+  register: workbench_validation_authorized_key_count
+  changed_when: false
+  check_mode: false
+  when: workbench_validation_authorized_keys.stat.isreg | default(false)
+
+- name: Inspect effective sudo policy for {{ workbench_validation_user.name }}
+  ansible.builtin.command:
+    argv:
+      - sudo
+      - --non-interactive
+      - --list
+      - "--other-user={{ workbench_validation_user.name }}"
+  become: true
+  become_user: root
+  environment:
+    LANG: C
+    LC_ALL: C
+  register: workbench_validation_sudo_policy
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Decode effective sudo policy for {{ workbench_validation_user.name }}
+  ansible.builtin.set_fact:
+    workbench_validation_sudo_policy_valid: >-
+      {{
+        workbench_validation_sudo_policy.rc == 0
+        or (
+          workbench_validation_sudo_policy.rc == 1
+          and (
+            (workbench_validation_sudo_policy.stdout | default(''))
+            ~ '\n'
+            ~ (workbench_validation_sudo_policy.stderr | default(''))
+          )
+          is search(
+            'User ' ~ workbench_validation_user.name
+            ~ ' is not allowed to run sudo on '
+          )
+        )
+      }}
+    workbench_validation_sudo_has_nopasswd: >-
+      {{
+        (
+          (workbench_validation_sudo_policy.stdout_lines | default([]))
+          + (workbench_validation_sudo_policy.stderr_lines | default([]))
+        )
+        | select('search', '(^|\\s)NOPASSWD\\s*:')
+        | list | length > 0
+      }}
+    workbench_validation_sudo_has_unrestricted_nopasswd: >-
+      {{
+        (
+          (workbench_validation_sudo_policy.stdout_lines | default([]))
+          + (workbench_validation_sudo_policy.stderr_lines | default([]))
+        )
+        | select('search', '(^|\\s)NOPASSWD\\s*:\\s*ALL\\s*$')
+        | list | length > 0
+      }}
+  changed_when: false
+  no_log: true
+
+- name: Require declared state for {{ workbench_validation_user.name }}
+  ansible.builtin.assert:
+    that:
+      - workbench_validation_passwd.stdout.split(':') | length == 7
+      - (workbench_validation_passwd.stdout.split(':') + [''] * 7)[5] == workbench_validation_user.home
+      - (workbench_validation_passwd.stdout.split(':') + [''] * 7)[6] == workbench_validation_user.shell
+      - >-
+        workbench_validation_user.groups
+        | difference(workbench_validation_groups.stdout.split())
+        | length == 0
+      - >-
+        workbench_validation_groups.stdout.split()
+        | difference(workbench_validation_user.groups)
+        | length == 0
+      - >-
+        not (workbench_validation_user.password_locked | bool)
+        or workbench_validation_password.stdout.split()[1] in ['L', 'LK']
+      - workbench_validation_home.stat.isdir | default(false)
+      - workbench_validation_home.stat.pw_name | default('') == workbench_validation_user.name
+      - >-
+        workbench_validation_workspaces.results
+        | selectattr('stat.isdir', 'defined')
+        | selectattr('stat.isdir', 'equalto', true)
+        | list | length
+        == workbench_validation_user.workspace_directories | length
+      - >-
+        (
+          workbench_validation_user.authorized_key_count | int == 0
+          and not (workbench_validation_authorized_keys.stat.exists | default(false))
+        )
+        or (
+          workbench_validation_authorized_keys.stat.isreg | default(false)
+          and workbench_validation_authorized_key_count.stdout | default('-1') | int
+          == workbench_validation_user.authorized_key_count | int
+        )
+      - workbench_validation_sudo_policy_valid | bool
+      - >-
+        (
+          not (workbench_validation_user.passwordless_sudo | bool)
+          and not (workbench_validation_sudo_has_nopasswd | bool)
+        )
+        or (
+          workbench_validation_user.passwordless_sudo | bool
+          and workbench_validation_sudo_has_unrestricted_nopasswd | bool
+        )
+    fail_msg: >-
+      User, key count, workspace, group, password lock, or sudo drift detected
+      for {{ workbench_validation_user.name }}. Authorized key content was not
+      returned.
+    quiet: true
+  changed_when: false

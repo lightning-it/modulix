@@ -14,18 +14,26 @@ aap_ansible_vault_required_secret_vars:
   - aap_breakglass_password_input
   - rh_offline_token
 
+machine_a_effective_deployment_id: >-
+  {{ machine_a_deployment_id | default(aap_fqdn, true) }}
+machine_a_effective_aap_root: >-
+  {{ machine_a_aap_root
+     | default(lookup('ansible.builtin.env', 'HOME') ~ '/appl/aap', true) }}
 machine_a_effective_appl_root: >-
   {{ machine_a_appl_root
-     | default(lookup('ansible.builtin.env', 'HOME') ~ '/aap-work', true) }}
+     | default(machine_a_effective_aap_root ~ '/' ~ machine_a_effective_deployment_id, true) }}
 machine_a_effective_export_root: >-
   {{ machine_a_export_root
-     | default(lookup('ansible.builtin.env', 'HOME') ~ '/aap-export', true) }}
+     | default(machine_a_effective_appl_root ~ '/export', true) }}
 machine_a_effective_env_file: >-
   {{ machine_a_env_file
      | default(machine_a_effective_appl_root ~ '/etc/aap-local.env', true) }}
 machine_a_effective_secrets_dir: >-
   {{ machine_a_secrets_dir
      | default(machine_a_effective_appl_root ~ '/secrets', true) }}
+machine_a_effective_tmp_dir: >-
+  {{ machine_a_tmp_dir
+     | default(machine_a_effective_appl_root ~ '/tmp', true) }}
 machine_a_effective_ssh_key: >-
   {{ machine_a_ssh_key
      | default(machine_a_effective_secrets_dir ~ '/svc_ansible_aap', true) }}

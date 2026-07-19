@@ -1,0 +1,17 @@
+[
+  {
+    "control_ids": [
+      "1.1.1.1"
+    ],
+    "scope": "unit-test",
+    "reason": "Exercise explicit exception classification.",
+    "compensating_control": "The unit test verifies the classification contract.",
+    "variables": [
+      {
+        "name": "unit_test_rule",
+        "value": false
+      }
+    ],
+    "audit_visibility": "intentional_exception"
+  }
+]

@@ -26,3 +26,5 @@ ansible/.toolbox-podman/
 venv*
 .venv*
 .artifacts/
+__pycache__/
+*.py[cod]

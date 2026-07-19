@@ -1,80 +1,49 @@
 ---
-# -----------------------------------------------------------------------------
-# Ubuntu Workbenches - baseline + GUI + RDP + developer tooling
+# Inventory-driven Ubuntu Workbench application setup.
 #
-# Purpose:
-# - Prepare Ubuntu workbench hosts with OS baseline and update policy
-# - Configure local users and network policy from inventory
-# - Install Podman, developer tools, VS Code, Firefox, GUI, and XRDP
-#
-# Notes:
-# - Keep environment values in inventory.
-# - Cloudflare WARP is intentionally not included here because the current
-#   lit.supplementary.cloudflare_warp role supports RedHat-family hosts only.
-# -----------------------------------------------------------------------------
+# The operating-system installation, Ubuntu baseline, CIS remediation,
+# networking, update policy, and encrypted boot lifecycle are deliberately out
+# of scope here. This play may only run for the single inventory-declared
+# Workbench selected by an exact --limit.
 
-- name: Configure Ubuntu workbenches
-  hosts: workbenches
+- name: Configure the selected Ubuntu Workbench
+  hosts: ubuntu_workbenches
   become: true
   gather_facts: true
+  any_errors_fatal: true
+  serial: 1
 
   pre_tasks:
-    - name: Ensure the Ubuntu workbench runbook only runs on Ubuntu
-      ansible.builtin.assert:
-        that:
-          - ansible_distribution == "Ubuntu"
-        fail_msg: >-
-          This runbook is for Ubuntu workbenches only. Use
-          runbooks/50-applications/workbench/10-rhel-setup.yml for the RHEL
-          workbench path.
+    - name: Validate the exact Workbench target and component contract
+      ansible.builtin.import_tasks: tasks/target-contract.yml
       tags: [always]
+
+    - name: Prepare the dedicated Incus logical volume
+      ansible.builtin.import_tasks: tasks/incus-storage.yml
+      when: workbench_components.incus_storage | bool
+      tags: [workbench, workbench_incus_storage, incus, storage]
 
   roles:
     - role: lit.ubuntu.repos
-      tags: [repos, baseline]
-
-    - role: lit.ubuntu.baseline
-      tags: [baseline]
+      when: workbench_components.repos | bool
+      tags: [workbench, workbench_repos, repos]
 
     - role: lit.ubuntu.users
-      tags: [users, hardening]
+      when: workbench_components.users | bool
+      tags: [workbench, workbench_users, users]
 
-    - role: lit.ubuntu.automatic_updates
-      tags: [updates, hardening]
-
-    - role: lit.ubuntu.netplan
-      tags: [networking, netplan, baseline]
+    - role: lit.ubuntu.openssh_server
+      when: workbench_components.openssh | bool
+      tags: [workbench, workbench_openssh, openssh]
 
     - role: lit.ubuntu.podman
-      vars:
-        podman_user_socket_enabled: true
-        podman_user_socket_users: >-
-          {{ developer_tools_ssh_agent_users | default([]) }}
-      tags: [packages, podman, containers]
+      when: workbench_components.podman | bool
+      tags: [workbench, workbench_podman, podman, containers]
 
     - role: lit.ubuntu.incus
-      when: incus_enabled | default(true) | bool
-      tags: [incus, virtualization]
+      when: workbench_components.incus | bool
+      tags: [workbench, workbench_incus, incus, virtualization]
 
     - role: lit.ubuntu.developer_tools
-      vars:
-        developer_tools_packer_enabled: true
-      tags: [packages, developer_tools]
-
-    - role: lit.ubuntu.vscode_deploy
-      tags: [packages, vscode, vscode_deploy]
-
-    - role: lit.ubuntu.vscode_config
-      tags: [vscode, vscode_config]
-
-    - role: lit.ubuntu.firefox_deploy
-      tags: [packages, firefox, firefox_deploy]
-
-    - role: lit.ubuntu.firefox_config
-      tags: [firefox, firefox_config]
-
-    - role: lit.ubuntu.gui
-      tags: [gui]
-
-    - role: lit.ubuntu.xrdp
-      tags: [xrdp]
+      when: workbench_components.developer_tools | bool
+      tags: [workbench, workbench_developer_tools, developer_tools]

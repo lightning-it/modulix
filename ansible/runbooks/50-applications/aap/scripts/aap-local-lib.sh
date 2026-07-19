@@ -7,6 +7,21 @@
 modulix_aap_set_defaults() {
   local modulix_run_ee_last_segment
 
+  if [[ -z "${AAP_FQDN:-}" ]]; then
+    printf 'AAP_FQDN is required.\n' >&2
+    return 1
+  fi
+  if [[ ! "${AAP_FQDN}" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    printf 'AAP_FQDN must be a canonical lower-case FQDN, got: %s\n' \
+      "${AAP_FQDN}" >&2
+    return 1
+  fi
+  : "${AAP_DEPLOYMENT_ID:=${AAP_FQDN}}"
+  if [[ "${AAP_DEPLOYMENT_ID}" != "${AAP_FQDN}" ]]; then
+    printf 'AAP_DEPLOYMENT_ID must exactly match AAP_FQDN: %s != %s\n' \
+      "${AAP_DEPLOYMENT_ID}" "${AAP_FQDN}" >&2
+    return 1
+  fi
   : "${AAP_SHORTNAME:=${AAP_FQDN%%.*}}"
   : "${AAP_USER:=svc_ansible}"
   : "${AAP_SETUP_USER:=${AAP_USER}}"
@@ -37,9 +52,6 @@ modulix_aap_set_defaults() {
     : "${AAP_BASELINE_SSH_KEY:=}"
     : "${AAP_BOOTSTRAP_SSH_KEY:=}"
   fi
-  : "${AAP_VAULT_HOST_KEY:=${AAP_FQDN}}"
-  : "${AAP_VAULT_ADMIN_PASSWORDS_KV_PATH:=${AAP_VAULT_HOST_KEY}/aap/deploy/admin_passwords}"
-  : "${AAP_VAULT_DEFAULTS_KV_PATH:=defaults}"
   : "${AAP_INVENTORY_HOST:=${AAP_SHORTNAME}}"
   : "${AAP_APPL_ROOT:=/appl/aap-local}"
   : "${AAP_ENV_FILE:=${AAP_APPL_ROOT}/etc/aap-local.env}"
@@ -51,10 +63,13 @@ modulix_aap_set_defaults() {
   else
     : "${AAP_SSH_KEY:=}"
   fi
-  : "${MACHINE_A_APPL_ROOT:=${HOME}/aap-work}"
-  : "${MACHINE_A_EXPORT_ROOT:=${HOME}/aap-export}"
+  : "${MACHINE_A_AAP_ROOT:=${HOME}/appl/aap}"
+  : "${MACHINE_A_APPL_ROOT:=${MACHINE_A_AAP_ROOT}/${AAP_DEPLOYMENT_ID}}"
+  : "${MACHINE_A_EXPORT_ROOT:=${MACHINE_A_APPL_ROOT}/export}"
   : "${MACHINE_A_ENV_FILE:=${MACHINE_A_APPL_ROOT}/etc/aap-local.env}"
   : "${MACHINE_A_SECRETS_DIR:=${MACHINE_A_APPL_ROOT}/secrets}"
+  : "${MACHINE_A_TMP_DIR:=${MACHINE_A_APPL_ROOT}/tmp}"
+  : "${MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE:=${MACHINE_A_SECRETS_DIR}/.vault-pass.txt}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" == "true" ]]; then
     : "${MACHINE_A_SSH_KEY:=${MACHINE_A_SECRETS_DIR}/svc_ansible_aap}"
   else
@@ -100,6 +115,11 @@ modulix_aap_set_defaults() {
   : "${ANSIBLE_TOOLBOX_RUNTIME_MODE:=disconnected}"
   if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
     : "${ANSIBLE_VAULT_PASSWORD_FILE:=${AAP_SECRETS_DIR}/.vault-pass.txt}"
+    if [[ "${ANSIBLE_VAULT_PASSWORD_FILE}" != "${AAP_SECRETS_DIR}/.vault-pass.txt" ]]; then
+      printf 'ANSIBLE_VAULT_PASSWORD_FILE must be %s for the fixed EE mount, got: %s\n' \
+        "${AAP_SECRETS_DIR}/.vault-pass.txt" "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
+      return 1
+    fi
   else
     ANSIBLE_VAULT_PASSWORD_FILE=""
   fi
@@ -129,45 +149,58 @@ modulix_aap_set_defaults() {
       ;;
   esac
 
-  if [[ -z "${VAULT_VALIDATE_CERTS+x}" ]]; then
-    case "${VAULT_SKIP_VERIFY:-false}" in
-      true) VAULT_VALIDATE_CERTS=false ;;
-      false | "") VAULT_VALIDATE_CERTS=true ;;
+  if [[ "${AAP_SECRET_BACKEND}" == "hashicorp_vault" ]]; then
+    : "${AAP_VAULT_HOST_KEY:=${AAP_FQDN}}"
+    : "${AAP_VAULT_ADMIN_PASSWORDS_KV_PATH:=${AAP_VAULT_HOST_KEY}/aap/deploy/admin_passwords}"
+    : "${AAP_VAULT_DEFAULTS_KV_PATH:=defaults}"
+    if [[ -z "${VAULT_VALIDATE_CERTS+x}" ]]; then
+      case "${VAULT_SKIP_VERIFY:-false}" in
+        true) VAULT_VALIDATE_CERTS=false ;;
+        false | "") VAULT_VALIDATE_CERTS=true ;;
+        *)
+          printf 'VAULT_SKIP_VERIFY must be true or false, got: %s\n' \
+            "${VAULT_SKIP_VERIFY}" >&2
+          return 1
+          ;;
+      esac
+    fi
+    case "${VAULT_VALIDATE_CERTS}" in
+      true) VAULT_SKIP_VERIFY=false ;;
+      false) VAULT_SKIP_VERIFY=true ;;
       *)
-        printf 'VAULT_SKIP_VERIFY must be true or false, got: %s\n' \
-          "${VAULT_SKIP_VERIFY}" >&2
+        printf 'VAULT_VALIDATE_CERTS must be true or false, got: %s\n' \
+          "${VAULT_VALIDATE_CERTS}" >&2
         return 1
         ;;
     esac
+    # On the AAP host, the staged token file is authoritative.
+    if [[ -s "${AAP_SECRETS_DIR}/.vault-token" ]]; then
+      VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
+    fi
+  else
+    # Never forward inherited HashiCorp context into Ansible Vault runs.
+    unset \
+      AAP_VAULT_ADMIN_PASSWORDS_KV_PATH \
+      AAP_VAULT_DEFAULTS_KV_PATH \
+      AAP_VAULT_HOST_KEY \
+      VAULT_ADDR \
+      VAULT_ENGINE_MOUNT_POINT \
+      VAULT_SKIP_VERIFY \
+      VAULT_TOKEN \
+      VAULT_VALIDATE_CERTS
   fi
-  case "${VAULT_VALIDATE_CERTS}" in
-    true) VAULT_SKIP_VERIFY=false ;;
-    false) VAULT_SKIP_VERIFY=true ;;
-    *)
-      printf 'VAULT_VALIDATE_CERTS must be true or false, got: %s\n' \
-        "${VAULT_VALIDATE_CERTS}" >&2
-      return 1
-      ;;
-  esac
 
-  # On the AAP host, the staged token file is authoritative. This lets an
-  # operator refresh a scoped token between long, feedback-driven rollout
-  # sections without a stale inherited VAULT_TOKEN winning precedence.
-  if [[ -s "${AAP_SECRETS_DIR}/.vault-token" ]]; then
-    VAULT_TOKEN="$(tr -d '\r\n' <"${AAP_SECRETS_DIR}/.vault-token")"
-  fi
-
-  export AAP_SHORTNAME AAP_USER AAP_SETUP_USER AAP_INSTALL_USER AAP_ANSIBLE_HOST
+  export AAP_DEPLOYMENT_ID AAP_SHORTNAME AAP_USER AAP_SETUP_USER AAP_INSTALL_USER AAP_ANSIBLE_HOST
   export AAP_ANSIBLE_BECOME_FLAGS AAP_SECRET_BACKEND
   export AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES
   export AAP_SSH_KEY_AUTH_ENABLED
   export AAP_BOOTSTRAP_USER AAP_BASELINE_SSH_KEY AAP_BOOTSTRAP_SSH_KEY
-  export AAP_VAULT_HOST_KEY AAP_VAULT_ADMIN_PASSWORDS_KV_PATH AAP_VAULT_DEFAULTS_KV_PATH
   export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_ENV_FILE
   export AAP_SECRETS_DIR AAP_SSH_KEY AAP_SSH_KEY_CONTAINER
   export AAP_KNOWN_HOSTS_FILE AAP_KNOWN_HOSTS_CONTAINER
-  export MACHINE_A_APPL_ROOT MACHINE_A_EXPORT_ROOT MACHINE_A_ENV_FILE
-  export MACHINE_A_SECRETS_DIR MACHINE_A_SSH_KEY MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
+  export MACHINE_A_AAP_ROOT MACHINE_A_APPL_ROOT MACHINE_A_EXPORT_ROOT MACHINE_A_ENV_FILE
+  export MACHINE_A_SECRETS_DIR MACHINE_A_TMP_DIR MACHINE_A_ANSIBLE_VAULT_PASSWORD_FILE
+  export MACHINE_A_SSH_KEY MACHINE_A_BOOTSTRAP_KNOWN_HOSTS
   export AUTOMATION_DIR AUTOMATION_ANSIBLE_DIR AAP_ARTIFACT_DIR
   export INVENTORY_REL INVENTORY_FILE
   export MODULIX_RUN_EE_ARCHIVE MODULIX_RUN_EE_ARCHIVE_PATH
@@ -176,7 +209,100 @@ modulix_aap_set_defaults() {
   export AAP_PODMAN_STORAGE_CONF AAP_PODMAN_ROOT_GRAPHROOT AAP_PODMAN_ROOT_RUNROOT AAP_PODMAN_TMPDIR
   export AAP_EE_TRANSFER_ENABLED
   export AAP_HOST_CA_TRUST_DIR AAP_REQUESTS_CA_BUNDLE
-  export VAULT_TOKEN VAULT_VALIDATE_CERTS VAULT_SKIP_VERIFY
+  if [[ "${AAP_SECRET_BACKEND}" == "hashicorp_vault" ]]; then
+    export AAP_VAULT_HOST_KEY AAP_VAULT_ADMIN_PASSWORDS_KV_PATH AAP_VAULT_DEFAULTS_KV_PATH
+    export VAULT_TOKEN VAULT_VALIDATE_CERTS VAULT_SKIP_VERIFY
+  fi
+}
+
+modulix_validate_machine_a_workspace() {
+  local -a machine_a_paths
+  local expected_appl_root
+  local machine_a_path
+
+  expected_appl_root="${MACHINE_A_AAP_ROOT}/${AAP_DEPLOYMENT_ID}"
+  if [[ "${MACHINE_A_ENV_FILE}" != "${MACHINE_A_APPL_ROOT}/etc/aap-local.env" ||
+        "${MACHINE_A_SECRETS_DIR}" != "${MACHINE_A_APPL_ROOT}/secrets" ||
+        "${MACHINE_A_TMP_DIR}" != "${MACHINE_A_APPL_ROOT}/tmp" ]]; then
+    printf 'Machine A environment, secrets, and temporary paths must stay inside: %s\n' \
+      "${MACHINE_A_APPL_ROOT}" >&2
+    return 1
+  fi
+  if [[ "${MACHINE_A_APPL_ROOT}" == "${expected_appl_root}" ]]; then
+    if [[ "${MACHINE_A_EXPORT_ROOT}" != "${expected_appl_root}/export" ]]; then
+      printf 'Target-scoped Machine A export must stay inside: %s\n' \
+        "${expected_appl_root}" >&2
+      return 1
+    fi
+  elif [[ "${MACHINE_A_APPL_ROOT}" != /* ||
+          "${MACHINE_A_EXPORT_ROOT}" != /* ||
+          "${MACHINE_A_APPL_ROOT}" == "/" ||
+          "${MACHINE_A_EXPORT_ROOT}" == "/" ||
+          "${MACHINE_A_APPL_ROOT}" == "${HOME}" ||
+          "${MACHINE_A_EXPORT_ROOT}" == "${HOME}" ||
+          "${MACHINE_A_EXPORT_ROOT}" == "${MACHINE_A_APPL_ROOT}" ]]; then
+    printf 'Explicit legacy Machine A roots are unsafe.\n' >&2
+    return 1
+  fi
+
+  machine_a_paths=(
+    "${MACHINE_A_APPL_ROOT}"
+    "${MACHINE_A_APPL_ROOT}/etc"
+    "${MACHINE_A_APPL_ROOT}/artifacts"
+    "${MACHINE_A_SECRETS_DIR}"
+    "${MACHINE_A_TMP_DIR}"
+    "${MACHINE_A_EXPORT_ROOT}"
+    "${MACHINE_A_EXPORT_ROOT}/src"
+    "${MACHINE_A_ENV_FILE}"
+  )
+  if [[ "${MACHINE_A_APPL_ROOT}" == "${expected_appl_root}" ]]; then
+    machine_a_paths=("${MACHINE_A_AAP_ROOT}" "${machine_a_paths[@]}")
+  fi
+
+  for machine_a_path in "${machine_a_paths[@]}"; do
+    if [[ -L "${machine_a_path}" ]]; then
+      printf 'Machine A workspace path must not be a symlink: %s\n' \
+        "${machine_a_path}" >&2
+      return 1
+    fi
+    if [[ -e "${machine_a_path}" && ! -O "${machine_a_path}" ]]; then
+      printf 'Machine A workspace path must be owned by %s: %s\n' \
+        "$(id -un)" "${machine_a_path}" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
+modulix_validate_ansible_vault_password_file() {
+  local password_file="${1:-${ANSIBLE_VAULT_PASSWORD_FILE:-}}"
+  local expected_owner="${2:-${AAP_SETUP_USER:-}}"
+
+  if [[ -z "${password_file}" || -z "${expected_owner}" ]]; then
+    printf 'Ansible Vault password-file validation requires a path and expected owner.\n' >&2
+    return 1
+  fi
+  if [[ -L "${password_file}" || ! -f "${password_file}" || ! -s "${password_file}" ]]; then
+    printf 'Ansible Vault password file is missing or unsafe: %s\n' \
+      "${password_file}" >&2
+    return 1
+  fi
+  if [[ "$(stat -c '%h' -- "${password_file}")" != "1" ]]; then
+    printf 'Ansible Vault password file must not have hard links: %s\n' \
+      "${password_file}" >&2
+    return 1
+  fi
+  if [[ "$(stat -c '%U' -- "${password_file}")" != "${expected_owner}" ]]; then
+    printf 'Ansible Vault password file must be owned by %s: %s\n' \
+      "${expected_owner}" "${password_file}" >&2
+    return 1
+  fi
+  if [[ "$(stat -c '%a' -- "${password_file}")" != "600" ]]; then
+    printf 'Ansible Vault password file must have mode 0600: %s\n' \
+      "${password_file}" >&2
+    return 1
+  fi
+  return 0
 }
 
 modulix_write_podman_storage_conf() {
@@ -232,6 +358,7 @@ modulix_resolve_aap_artifacts() {
 modulix_ansible_ee() {
   local -a ssh_agent_args=()
   local -a ansible_vault_args=()
+  local -a vault_runtime_args=()
   local aap_local_ansible_config="${AUTOMATION_ANSIBLE_DIR}/aap-local.cfg"
   if [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
     ssh_agent_args=(
@@ -257,13 +384,23 @@ modulix_ansible_ee() {
   fi
 
   if [[ "${AAP_SECRET_BACKEND}" == "ansible_vault" ]]; then
-    if [[ ! -s "${ANSIBLE_VAULT_PASSWORD_FILE}" ]]; then
-      printf 'Ansible Vault password file is missing or empty: %s\n' \
-        "${ANSIBLE_VAULT_PASSWORD_FILE}" >&2
+    if ! modulix_validate_ansible_vault_password_file \
+      "${ANSIBLE_VAULT_PASSWORD_FILE}" "${AAP_SETUP_USER}"; then
       return 1
     fi
     ansible_vault_args=(
       -e ANSIBLE_VAULT_PASSWORD_FILE=/runner/secrets/.vault-pass.txt
+    )
+  else
+    vault_runtime_args=(
+      -e VAULT_ADDR
+      -e VAULT_SKIP_VERIFY
+      -e VAULT_VALIDATE_CERTS
+      -e VAULT_TOKEN
+      -e VAULT_ENGINE_MOUNT_POINT
+      -e AAP_VAULT_HOST_KEY
+      -e AAP_VAULT_ADMIN_PASSWORDS_KV_PATH
+      -e AAP_VAULT_DEFAULTS_KV_PATH
     )
   fi
 
@@ -278,14 +415,7 @@ modulix_ansible_ee() {
     -e ANSIBLE_TOOLBOX_RUNTIME_MODE \
     -e ANSIBLE_COLLECTIONS_PATH \
     "${ansible_vault_args[@]}" \
-    -e VAULT_ADDR \
-    -e VAULT_SKIP_VERIFY \
-    -e VAULT_VALIDATE_CERTS \
-    -e VAULT_TOKEN \
-    -e VAULT_ENGINE_MOUNT_POINT \
-    -e AAP_VAULT_HOST_KEY \
-    -e AAP_VAULT_ADMIN_PASSWORDS_KV_PATH \
-    -e AAP_VAULT_DEFAULTS_KV_PATH \
+    "${vault_runtime_args[@]}" \
     -e AAP_ARTIFACT_DIR \
     -e AAP_BUNDLE_REMOTE_SRC \
     -e AAP_MANIFEST_REMOTE_SRC \

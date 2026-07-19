@@ -1,0 +1,236 @@
+---
+- name: Reset acceptance instance preflight state
+  ansible.builtin.set_fact:
+    workbench_acceptance_instance_preflight_passed: false
+  changed_when: false
+
+- name: List any exact-name acceptance instance collision
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - list
+      - "{{ workbench_acceptance_current_instance_name }}"
+      - --format=json
+  register: workbench_acceptance_collision_list
+  changed_when: false
+  check_mode: false
+
+- name: Refuse to adopt an existing acceptance instance
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_acceptance_collision_list.stdout | from_json
+        | selectattr('name', 'equalto', workbench_acceptance_current_instance_name)
+        | list | length == 0
+    fail_msg: >-
+      Refusing to adopt or replace the existing instance
+      {{ workbench_acceptance_current_instance_name }}. Run the
+      ownership-checking cleanup playbook with the same profile and run ID.
+    quiet: true
+  changed_when: false
+
+- name: Record successful acceptance instance collision preflight
+  ansible.builtin.set_fact:
+    workbench_acceptance_instance_preflight_passed: true
+  changed_when: false
+
+- name: Resolve the declared Incus image to an immutable fingerprint
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - image
+      - info
+      - "{{ workbench_acceptance_profile_config.image }}"
+  register: workbench_acceptance_image_info
+  changed_when: false
+  check_mode: false
+
+- name: Parse Incus image info
+  ansible.builtin.set_fact:
+    workbench_acceptance_image_info_data: "{{ workbench_acceptance_image_info.stdout | from_yaml }}"
+  changed_when: false
+
+- name: Require structured Incus image info
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_image_info_data is mapping
+    fail_msg: "Incus image info did not return a structured mapping."
+    quiet: true
+  changed_when: false
+
+- name: Record the immutable Incus image fingerprint
+  ansible.builtin.set_fact:
+    workbench_acceptance_image_fingerprint: >-
+      {{
+        workbench_acceptance_image_info_data.get(
+          'fingerprint',
+          workbench_acceptance_image_info_data.get('Fingerprint', '')
+        )
+      }}
+  changed_when: false
+
+- name: Record the immutable Incus image reference
+  ansible.builtin.set_fact:
+    workbench_acceptance_resolved_image: >-
+      {{
+        (workbench_acceptance_profile_config.image.split(':') | first)
+        ~ ':'
+        ~ workbench_acceptance_image_fingerprint
+      }}
+  changed_when: false
+
+- name: Require a full Incus image fingerprint
+  ansible.builtin.assert:
+    that:
+      - workbench_acceptance_image_fingerprint is match('^[0-9a-f]{64}$')
+      - >-
+        workbench_acceptance_image_fingerprint
+        == workbench_acceptance_profile_config.image.split(':')[1]
+    fail_msg: >-
+      Incus did not resolve the declared image alias to a full immutable
+      fingerprint; refusing a mutable-image acceptance result.
+    quiet: true
+  changed_when: false
+
+- name: Record Incus image fingerprint in retained evidence
+  ansible.builtin.copy:
+    dest: >-
+      {{ workbench_acceptance_artifacts }}/{{ workbench_acceptance_current_instance_name }}-image.json
+    owner: "{{ workbench_acceptance_operator }}"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          'configured_reference': workbench_acceptance_profile_config.image,
+          'fingerprint': workbench_acceptance_image_fingerprint,
+          'instance': workbench_acceptance_current_instance_name,
+          'run_id': workbench_acceptance_run_id
+        } | to_nice_json
+      }}
+  when:
+    - workbench_acceptance_artifacts is defined
+    - workbench_acceptance_operator is defined
+
+- name: Create the stopped acceptance instance
+  ansible.builtin.include_role:
+    name: lit.ubuntu.incus_instance
+  vars:
+    incus_instance_items:
+      - name: "{{ workbench_acceptance_current_instance_name }}"
+        image: "{{ workbench_acceptance_resolved_image }}"
+        project: "{{ workbench_acceptance_profile_config.project }}"
+        profiles:
+          - "{{ workbench_acceptance_profile_config.profile }}"
+        type: >-
+          {{
+            'vm'
+            if workbench_acceptance_profile_config.instance_type == 'virtual-machine'
+            else 'container'
+          }}
+        state: present
+        cloud_init_enabled: "{{ workbench_acceptance_cloud_init_enabled | default(false) | bool }}"
+        ssh_user: >-
+          {{ workbench_acceptance_guest_user | default('ubuntu') }}
+        ssh_public_keys: >-
+          {{ workbench_acceptance_guest_public_keys | default([]) }}
+        cloud_init_groups:
+          - sudo
+        cloud_init_sudo: "ALL=(ALL) NOPASSWD:ALL"
+        wait_for_ip: false
+        wait_for_ssh: false
+        config:
+          user.lit.managed_by: modulix-automation
+          user.lit.acceptance_profile: "{{ workbench_acceptance_profile }}"
+          user.lit.run_id: "{{ workbench_acceptance_run_id }}"
+        limits:
+          cpu: "{{ workbench_acceptance_profile_config.limits.cpu }}"
+          memory: "{{ workbench_acceptance_profile_config.limits.memory }}"
+
+- name: Override the ephemeral root disk size
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - config
+      - device
+      - override
+      - "{{ workbench_acceptance_current_instance_name }}"
+      - root
+      - "size={{ workbench_acceptance_profile_config.limits.root_disk }}"
+  changed_when: true
+
+- name: Start the ephemeral acceptance instance
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - start
+      - "{{ workbench_acceptance_current_instance_name }}"
+  changed_when: true
+
+- name: Wait until the Incus guest agent can execute a command
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - exec
+      - "{{ workbench_acceptance_current_instance_name }}"
+      - "--"
+      - /usr/bin/true
+  register: workbench_acceptance_guest_ready
+  changed_when: false
+  retries: 60
+  delay: 5
+  until: workbench_acceptance_guest_ready.rc == 0
+
+- name: Read resulting acceptance instance configuration
+  ansible.builtin.command:
+    argv:
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - config
+      - show
+      - "{{ workbench_acceptance_current_instance_name }}"
+  register: workbench_acceptance_instance_config
+  changed_when: false
+
+- name: Require ownership and resource limits on the acceptance instance
+  ansible.builtin.assert:
+    that:
+      - >-
+        ((workbench_acceptance_instance_config.stdout | from_yaml).get('config', {})).get('user.lit.managed_by', '')
+        == 'modulix-automation'
+      - >-
+        (workbench_acceptance_instance_config.stdout | from_yaml).config['user.lit.acceptance_profile']
+        == workbench_acceptance_profile
+      - >-
+        (workbench_acceptance_instance_config.stdout | from_yaml).config['user.lit.run_id']
+        == workbench_acceptance_run_id
+      - >-
+        (workbench_acceptance_instance_config.stdout | from_yaml).config['limits.cpu']
+        == workbench_acceptance_profile_config.limits.cpu | string
+      - >-
+        (workbench_acceptance_instance_config.stdout | from_yaml).config['limits.memory']
+        == workbench_acceptance_profile_config.limits.memory | string
+      - >-
+        ((workbench_acceptance_instance_config.stdout | from_yaml).get('devices', {})).get('root', {}).get('size', '')
+        == workbench_acceptance_profile_config.limits.root_disk | string
+    fail_msg: >-
+      The acceptance instance does not satisfy its isolated resource and
+      ownership contract.
+    quiet: true
+  changed_when: false

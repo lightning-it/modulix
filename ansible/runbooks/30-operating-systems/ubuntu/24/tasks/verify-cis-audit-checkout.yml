@@ -1,0 +1,84 @@
+---
+- name: Inspect the pinned CIS audit checkout directory
+  ansible.builtin.stat:
+    path: "{{ cis_audit_checkout_dir }}"
+    follow: false
+  register: cis_audit_checkout_state
+
+- name: Inspect the pinned CIS audit entry point
+  ansible.builtin.stat:
+    path: "{{ cis_audit_checkout_dir }}/run_audit.sh"
+    follow: false
+  register: cis_audit_entrypoint_state
+
+- name: Read the pinned CIS audit checkout commit
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ cis_audit_checkout_dir }}"
+      - rev-parse
+      - --verify
+      - HEAD^{commit}
+  register: cis_audit_checkout_commit
+  changed_when: false
+
+- name: Read the pinned CIS audit checkout origin
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ cis_audit_checkout_dir }}"
+      - remote
+      - get-url
+      - origin
+  register: cis_audit_checkout_origin
+  changed_when: false
+
+- name: Inspect the pinned CIS audit checkout for local changes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ cis_audit_checkout_dir }}"
+      - status
+      - --porcelain=v1
+      - --untracked-files=all
+  register: cis_audit_checkout_status
+  changed_when: false
+
+- name: Require exact clean CIS audit provenance before evidence use
+  ansible.builtin.assert:
+    that:
+      - cis_audit_checkout_state.stat.exists
+      - cis_audit_checkout_state.stat.isdir
+      - not cis_audit_checkout_state.stat.islnk
+      - cis_audit_checkout_state.stat.pw_name == 'root'
+      - cis_audit_checkout_state.stat.gr_name == 'root'
+      - cis_audit_checkout_state.stat.mode == '0755'
+      - cis_audit_entrypoint_state.stat.exists
+      - cis_audit_entrypoint_state.stat.isreg
+      - not cis_audit_entrypoint_state.stat.islnk
+      - cis_audit_entrypoint_state.stat.pw_name == 'root'
+      - cis_audit_entrypoint_state.stat.gr_name == 'root'
+      - cis_audit_entrypoint_state.stat.mode == '0755'
+      - >-
+        cis_audit_checkout_origin.stdout | trim
+        == cis_audit_reviewed_provenance.repository
+      - >-
+        cis_audit_checkout_commit.stdout | trim
+        == cis_audit_reviewed_provenance.commit
+      - cis_audit_checkout_status.stdout | trim | length == 0
+    fail_msg: >-
+      Refusing to execute or normalize CIS audit evidence from a checkout that
+      is mutable, dirty, incorrectly owned, or not at the reviewed commit.
+    quiet: true
+
+- name: Record verified CIS audit checkout provenance
+  ansible.builtin.set_fact:
+    cis_audit_verified_provenance:
+      repository: "{{ cis_audit_checkout_origin.stdout | trim }}"
+      expected_commit: "{{ cis_audit_reviewed_provenance.commit }}"
+      verified_commit: "{{ cis_audit_checkout_commit.stdout | trim }}"
+      checkout_clean: true
+  no_log: true

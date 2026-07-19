@@ -1,0 +1,6 @@
+{
+  "time_sync_tool": "systemd-timesyncd",
+  "firewall_mode": "disabled",
+  "syslog_service": "journald",
+  "ipv6_mode": "required"
+}
