@@ -64,7 +64,7 @@ prepare:
       - playbooks
       - galaxy-roles
       - ansible_collections
-      - inventory
+      # - inventory  # do not artifact inventories (may contain secrets)
     expire_in: 1 week
   rules:
     - when: always
