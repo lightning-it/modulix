@@ -22,6 +22,7 @@
       ansible.builtin.command:
         cmd: >-
           ansible-galaxy collection install -r requirements.yml --force
+          --collections-path collections-dev
           {% if galaxy_server is defined %}--server {{ galaxy_server }}{% endif %}
           {% if galaxy_server_key is defined %}--api-key {{ galaxy_server_key }}{% endif %}
       changed_when: true
@@ -33,7 +34,7 @@
         - galaxy_collections
     - name: Install galaxy roles
       ansible.builtin.command:
-        cmd: ansible-galaxy role install -r requirements.yml -g
+        cmd: ansible-galaxy role install -r requirements.yml -p roles
       changed_when: true
       register: _install_roles
       args:
