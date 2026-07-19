@@ -77,9 +77,9 @@ ansible-navigator run playbooks/stage-2b/12-wunderbox.yml \
 
 ## Inventory and roles
 
-- Inventory: `inventories/corp/inventory.yml`
+- Inventory: provide your own inventory file (kept outside this repo)
 - Roles path: `./roles` (set in `ansible.cfg`)
-- Adjust variables in `group_vars/` and `host_vars/` as needed.
+- Adjust variables in `group_vars/` and `host_vars/` as needed (avoid committing secrets).
 
 ---
 
