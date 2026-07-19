@@ -77,7 +77,7 @@ jobs:
       contents: read
       pull-requests: read
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Classify trusted automation pull request
@@ -335,7 +335,7 @@ jobs:
           declare -A rejected_review_ids=()
           review_complete=false
           head_sha=""
-          for attempt in $(seq 1 40); do
+          for attempt in $(seq 1 60); do
             head_sha=""
             before=""
             request_failed=false
@@ -417,7 +417,7 @@ jobs:
               fi
             done
 
-            if [ "${attempt}" -eq 40 ]; then
+            if [ "${attempt}" -eq 60 ]; then
               if [ "${request_failed}" = true ]; then
                 echo "Unable to verify the Copilot review after repeated API or head-change failures." >&2
               else
