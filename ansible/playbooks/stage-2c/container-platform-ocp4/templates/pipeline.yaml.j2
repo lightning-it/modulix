@@ -24,15 +24,14 @@ workflow:
     - when: always
 
 variables:
-  INVENTORY_REPO: git@gitlab.noris.net:paas/openshift4/ocp4_inventory.git
+  INVENTORY_REPO: git@example.com:group/ocp4_inventory.git
   INVENTORY_VERSION: main
-  PLAYBOOKS_REPO: git@gitlab.noris.net:paas/ansible-playbooks/playbooks-ocp4.git
+  PLAYBOOKS_REPO: git@example.com:group/playbooks-ocp4.git
   PLAYBOOKS_VERSION: main
   ANSIBLE_COLLECTIONS_PATH: ${CI_PROJECT_DIR}/ansible_collections
   TAGS: "all"
 
-image: harbor.prod.paas.pop.noris.de/noris/ansible-ee@sha256:aaa381173de2751ed08a9807a2cb7e85cfaf97a1a893cfbc3afe56c343bde2b6
-
+image: registry.example.com/namespace/ansible-ee@sha256:aaa381173de2751ed08a9807a2cb7e85cfaf97a1a893cfbc3afe56c343bde2b6
 .ansible-call: &ansible-call
   - ls -alt inventory/
   - ls -alt playbooks/
