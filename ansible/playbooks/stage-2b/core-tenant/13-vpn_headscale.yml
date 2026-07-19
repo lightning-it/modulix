@@ -1,6 +1,6 @@
 ---
 - name: headscale
-  hosts: vpn_headsacle_server
+  hosts: vpn_headscale_server
   gather_facts: false
   become: true
   roles:
