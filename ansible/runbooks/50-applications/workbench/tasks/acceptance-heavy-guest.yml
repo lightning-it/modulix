@@ -1,0 +1,118 @@
+---
+- name: Resolve Heavy guest sequence label
+  ansible.builtin.set_fact:
+    workbench_heavy_guest_sequence: "{{ '%02d' | format((workbench_heavy_guest_index | int) + 1) }}"
+  changed_when: false
+
+- name: Create, test twice, and remove Heavy guest {{ workbench_heavy_guest_sequence }}
+  block:
+    - name: Create and start Heavy guest {{ workbench_heavy_guest_sequence }}
+      ansible.builtin.include_tasks: acceptance-instance-start.yml
+      vars:
+        workbench_acceptance_cloud_init_enabled: true
+        workbench_acceptance_guest_user: "{{ workbench_acceptance_profile_config.guest_user }}"
+        workbench_acceptance_guest_public_keys:
+          - "{{ workbench_heavy_guest_public_key.content | b64decode | trim }}"
+
+    - name: Read Heavy guest network state
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - list
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - --format=json
+      register: workbench_heavy_guest_list
+      changed_when: false
+      check_mode: false
+
+    - name: Require Heavy guest list evidence
+      ansible.builtin.assert:
+        that:
+          - workbench_heavy_guest_list.rc == 0
+          - (workbench_heavy_guest_list.stdout | from_json) is sequence
+          - (workbench_heavy_guest_list.stdout | from_json) is not string
+          - (workbench_heavy_guest_list.stdout | from_json | length) == 1
+          - (workbench_heavy_guest_list.stdout | from_json | first) is mapping
+        fail_msg: "Incus did not return exactly one Heavy guest listing with network state."
+        quiet: true
+      changed_when: false
+
+    - name: Decode Heavy guest IPv4 candidates
+      ansible.builtin.set_fact:
+        workbench_heavy_guest_addresses: >-
+          {%- set guest = workbench_heavy_guest_list.stdout | from_json | first -%}
+          {%- set state = guest.get('state', {}) if guest is mapping else {} -%}
+          {%- set network = state.get('network', {}) if state is mapping else {} -%}
+          {{
+            network | dict2items | sort(attribute='key')
+            | map(attribute='value.addresses') | flatten
+            | selectattr('family', 'equalto', 'inet')
+            | rejectattr('address', 'equalto', '127.0.0.1')
+            | map(attribute='address') | list | unique | sort
+          }}
+      changed_when: false
+
+    - name: Require a reachable Heavy guest IPv4 address
+      ansible.builtin.assert:
+        that:
+          - workbench_heavy_guest_addresses | length > 0
+        fail_msg: "Incus did not report a non-loopback IPv4 address for the Heavy guest."
+        quiet: true
+      changed_when: false
+
+    - name: Write temporary Heavy guest inventory
+      ansible.builtin.copy:
+        dest: >-
+          {{ workbench_acceptance_workspace }}/guest-{{ workbench_heavy_guest_sequence }}-inventory.yml
+        owner: "{{ workbench_acceptance_operator }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'all': {
+                'hosts': {
+                  workbench_acceptance_current_instance_name: {
+                    'ansible_host': workbench_heavy_guest_addresses | first,
+                    'ansible_user': workbench_acceptance_profile_config.guest_user,
+                    'ansible_ssh_private_key_file': workbench_acceptance_workspace ~ '/guest-key',
+                    'ansible_ssh_common_args': (
+                      '-o IdentitiesOnly=yes -o StrictHostKeyChecking=no '
+                      ~ '-o UserKnownHostsFile=/dev/null'
+                    ),
+                    'ansible_python_interpreter': '/usr/bin/python3'
+                  }
+                }
+              }
+            } | to_nice_yaml
+          }}
+      no_log: true
+
+    - name: Apply the guest role twice and require second-run idempotence
+      ansible.builtin.command:
+        argv:
+          - "{{ workbench_acceptance_workspace }}/workbench-heavy-guest.sh"
+          - >-
+            {{ workbench_acceptance_workspace }}/guest-{{ workbench_heavy_guest_sequence }}-inventory.yml
+          - "{{ workbench_acceptance_workspace }}/guest.yml"
+          - >-
+            {{ workbench_acceptance_artifacts }}/guest-{{ workbench_heavy_guest_sequence }}-first.raw.log
+          - >-
+            {{ workbench_acceptance_artifacts }}/guest-{{ workbench_heavy_guest_sequence }}-second.raw.log
+          - >-
+            {{ workbench_acceptance_workspace }}/ansible-local-{{ workbench_heavy_guest_sequence }}
+      become: true
+      become_user: "{{ workbench_acceptance_operator }}"
+      environment:
+        HOME: "{{ workbench_acceptance_operator_home }}"
+      changed_when: true
+      no_log: true
+  always:
+    - name: Remove only run-owned Heavy guest {{ workbench_heavy_guest_sequence }}
+      ansible.builtin.include_tasks: acceptance-cleanup.yml
+      vars:
+        workbench_acceptance_cleanup_instance_name: >-
+          {{ workbench_acceptance_current_instance_name }}
+      when: workbench_acceptance_instance_preflight_passed | default(false) | bool

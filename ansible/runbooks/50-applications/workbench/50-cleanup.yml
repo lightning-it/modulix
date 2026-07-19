@@ -1,0 +1,61 @@
+---
+# Exact-name, ownership-checked cleanup for one acceptance run.
+
+- name: Clean one run-owned Workbench acceptance instance
+  hosts: ubuntu_workbenches
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+    - name: Validate the exact Workbench target and component contract
+      ansible.builtin.import_tasks: tasks/target-contract.yml
+      tags: [always]
+
+    - name: Validate the complete Workbench acceptance declaration
+      ansible.builtin.import_tasks: tasks/validate-contract.yml
+      tags: [always, cleanup]
+
+    - name: Validate and resolve the requested acceptance profile
+      ansible.builtin.import_tasks: tasks/acceptance-contract.yml
+      tags: [always, cleanup]
+
+    - name: Remove only exact run-owned acceptance instances
+      ansible.builtin.include_tasks: tasks/acceptance-cleanup.yml
+      loop: "{{ workbench_acceptance_instance_names }}"
+      loop_control:
+        loop_var: workbench_acceptance_cleanup_instance_name
+        label: "{{ workbench_acceptance_cleanup_instance_name }}"
+      tags: [always, cleanup]
+
+    - name: Resolve cleanup operator uid
+      ansible.builtin.command:
+        argv: [id, --user, "{{ workbench_acceptance_operator }}"]
+      register: workbench_cleanup_operator_uid
+      changed_when: false
+      check_mode: false
+      when: workbench_acceptance_profile in ['heavy', 'application']
+
+    - name: Resolve exact Heavy Podman cleanup resources
+      ansible.builtin.set_fact:
+        workbench_heavy_operator_uid: "{{ workbench_cleanup_operator_uid }}"
+        workbench_heavy_image: >-
+          {{
+            workbench_acceptance_profile_config.container.image_repository
+            ~ ':' ~ workbench_acceptance_run_id
+          }}
+        workbench_heavy_container: >-
+          {{ workbench_acceptance_profile_config.name ~ '-container-' ~ workbench_acceptance_run_id }}
+      changed_when: false
+      when: workbench_acceptance_profile == 'heavy'
+
+    - name: Recover owner-checked profile resources
+      block:
+        - name: Remove exact owner-labelled Heavy Podman resources
+          ansible.builtin.include_tasks: tasks/acceptance-container-cleanup.yml
+          when: workbench_acceptance_profile == 'heavy'
+      always:
+        - name: Remove exact owner-marked Heavy or Application workspace
+          ansible.builtin.include_tasks: tasks/acceptance-workspace-cleanup.yml
+          when: workbench_acceptance_profile in ['heavy', 'application']

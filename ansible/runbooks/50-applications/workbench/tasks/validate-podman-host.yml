@@ -1,0 +1,30 @@
+---
+- name: Read privileged Podman system socket enablement
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, podman.socket]
+  register: workbench_validation_system_podman_socket_enabled
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read privileged Podman system socket activity
+  ansible.builtin.command:
+    argv: [systemctl, is-active, podman.socket]
+  register: workbench_validation_system_podman_socket_active
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require the privileged Podman API socket to remain unavailable
+  ansible.builtin.assert:
+    that:
+      - not (workbench_acceptance.podman.system_socket_enabled | bool)
+      - workbench_validation_system_podman_socket_enabled.rc in [0, 1]
+      - workbench_validation_system_podman_socket_active.rc in [0, 3]
+      - workbench_validation_system_podman_socket_enabled.stdout | trim | length > 0
+      - workbench_validation_system_podman_socket_active.stdout | trim | length > 0
+      - workbench_validation_system_podman_socket_enabled.stdout | trim != 'enabled'
+      - workbench_validation_system_podman_socket_active.stdout | trim != 'active'
+    fail_msg: "The privileged Podman API socket must remain disabled and inactive."
+    quiet: true
+  changed_when: false
