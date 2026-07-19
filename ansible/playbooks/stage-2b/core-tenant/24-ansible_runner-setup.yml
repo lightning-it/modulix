@@ -1,0 +1,9 @@
+---
+- name: Setup ansible runner
+  hosts: ansible_runner
+  gather_facts: False
+  tasks:
+    - name: Setup ansible runner
+      ansible.builtin.debug:
+        msg: "There is nothing to do for now..."
+...

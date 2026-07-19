@@ -1,0 +1,10 @@
+---
+- name: Cloudflare Tunnel connector (token managed)
+  hosts: gateways
+  gather_facts: true
+  become: true
+
+  roles:
+    - role: lit.supplementary.cloudflared
+      vars:
+        cloudflared_show_status: true

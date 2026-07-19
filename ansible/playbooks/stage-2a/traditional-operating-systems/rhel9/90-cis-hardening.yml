@@ -1,0 +1,19 @@
+---
+# -----------------------------------------------------------------------------
+# RHEL9 - CIS One-Button Hardening (post Stage-2a base setup)
+#
+# Purpose:
+# - Apply CIS baseline via lit.rhel.cis_rhel9 (SSG/OSCAP wrapper)
+# - Produce reports to see what base setup missed and adjust base playbook accordingly
+# -----------------------------------------------------------------------------
+- name: CIS hardening (RHEL9)
+  hosts: all
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+
+  tasks:
+    - name: CIS (SSG/OSCAP wrapper)
+      ansible.builtin.include_role:
+        name: lit.rhel.cis_rhel9
+      tags: [cis, compliance]

@@ -1,0 +1,10 @@
+---
+- name: Setup squid proxy
+  hosts: proxy
+  gather_facts: True
+  roles:
+    - name: Execute role squid
+      role: squid
+      tags:
+        - squid
+...
