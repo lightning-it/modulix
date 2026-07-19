@@ -13,7 +13,7 @@
     - name: Render requirements.yml
       ansible.builtin.template:
         src: requirements.yml.j2
-        dest: ../../../requirements.yml
+        dest: "{{ playbook_dir }}/../../../requirements.yml"
         mode: "0444"
       tags:
         - always
