@@ -1,7 +1,7 @@
 # common playbook
 ## VAULT login
 ```bash
-VAULT_ADDR=https://ansible03.core.corp.l-it.io:8201 vault login
+VAULT_ADDR=https://<vault-host>:8200 vault login
 ```
 
 ## Print all vars

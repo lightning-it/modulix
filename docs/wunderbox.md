@@ -37,7 +37,7 @@ Install/update collections **in the ModuLix workspace** before running playbooks
 
 ### Install / update required collections
 
-Im Execution Environment (ansible-navigator):
+In Execution Environment (ansible-navigator):
 
 ```bash
 

@@ -18,7 +18,7 @@
   gather_facts: False
   pre_tasks:
     - name: Check if initial setup is needed
-      shell: "hostname; id"
+      ansible.windows.win_shell: "hostname; whoami"
       ignore_unreachable: True
       check_mode: False
       changed_when: False
@@ -27,7 +27,7 @@
       vars:
         ansible_winrm_port: 5986
     - name: Check if host is ready, but use different winrm port
-      shell: "hostname; id"
+      ansible.windows.win_shell: "hostname; whoami"
       ignore_unreachable: True
       check_mode: False
       changed_when: False

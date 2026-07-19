@@ -452,6 +452,7 @@ jobs:
                   pageInfo { hasNextPage endCursor }
                   nodes {
                     isResolved
+                    isOutdated
                     comments(first: 1) {
                       nodes { author { login } }
                     }
@@ -496,6 +497,7 @@ jobs:
                   '[
                     (.data.repository.pullRequest.reviewThreads.nodes // [])[]
                     | select(.isResolved == false)
+                    | select(.isOutdated != true)
                     | select(
                         (.comments.nodes[0].author.login // "") as $login
                         | ($login == $reviewer or $login == ($reviewer + "[bot]"))

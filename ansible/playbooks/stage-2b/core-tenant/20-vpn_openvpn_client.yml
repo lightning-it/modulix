@@ -3,11 +3,19 @@
   hosts: all
   become: true
   gather_facts: true
+  vars:
+    resolved_openvpn_vpn_server: "{{ ovpn_vpn_server | default((groups.get('vpn_server', []) | first | default('', true)), true) }}"
+  pre_tasks:
+    - name: Ensure OpenVPN server can be resolved
+      ansible.builtin.assert:
+        that:
+          - resolved_openvpn_vpn_server | length > 0
+        fail_msg: "Define ovpn_vpn_server or add at least one host to inventory group 'vpn_server'."
   roles:
   - role: openvpn
     vars:
       openvpn_relay_client: "{{ ovpn_openvpn_relay_client | default(false) }}"
-      openvpn_vpn_server: "{{ ovpn_vpn_server | default(groups['vpn_server'][0]) }}"
+      openvpn_vpn_server: "{{ resolved_openvpn_vpn_server }}"
 
       relay_client_config_name: "{{ ovpn_relay_client_config_name | default('') }}"
       relay_client_relay_client_ccd: "{{ ovpn_relay_client_ccd | default('') }}"

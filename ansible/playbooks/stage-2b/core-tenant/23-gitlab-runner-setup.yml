@@ -1,7 +1,7 @@
 ---
 - name: Setup gitlab omnibus
   hosts: gitlab_runner_omnibus
-   
+
   gather_facts: True
   roles:
     - name: Execute role gitlab_runner_omnibus
