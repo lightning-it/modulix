@@ -17,14 +17,12 @@ localhost
 [windows]
 {{ paas_winrm_host }}
 
-{% raw %}
 [windows:vars]
 ansible_user={{ paas_winrm_user }}
 ansible_password={{ paas_winrm_password }}
 ansible_connection=winrm
 ansible_port=5985
 ansible_winrm_transport=kerberos
-{% endraw %}
 {% endif %}
 
 [bootstrap]
