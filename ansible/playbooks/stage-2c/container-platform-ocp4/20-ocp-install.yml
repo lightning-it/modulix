@@ -1,0 +1,14 @@
+---
+- name: Setup OCP4 cluster
+  hosts: ocp
+  gather_facts: false
+  vars:
+    vmware_vsphere_destroy: false
+    vmware_vsphere_power_on: false
+  roles:
+    - role: lit.foundational.vmware_vsphere
+      tags:
+        - vmware_vsphere
+    - role: lit.ocp.install_agent
+      tags:
+        - ocp_install

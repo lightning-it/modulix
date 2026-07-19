@@ -1,0 +1,10 @@
+---
+- name: Print variables for all hosts in a group
+  hosts: all
+  gather_facts: false
+  tags:
+    - never
+  tasks:
+    - name: Print all variables for each host
+      debug:
+        var: hostvars[inventory_hostname]

@@ -1,0 +1,10 @@
+---
+- name: Configure Nexus
+  become: true
+  hosts: nexus
+  gather_facts: true
+  roles:
+    - name: Execute role sonatype_nexus
+      role: sonatype_nexus
+      tags:
+        - sonatype_nexus

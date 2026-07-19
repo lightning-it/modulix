@@ -1,0 +1,15 @@
+- name: Setup gitops
+  hosts: ocp
+  gather_facts: false
+  pre_tasks:
+    - name: Get kubeconfig for OCP cluster
+      ansible.builtin.include_role:
+        name: lit.ocp.install_agent
+        tasks_from: cluster_login.yml
+      tags: always
+  roles:
+    - role: lit.ocp.gitops_bootstrap
+      tags:
+        - gitops
+      vars:
+        gitops_bootstrap_approve: "{{ approve_all | default(false) }}"
