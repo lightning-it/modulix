@@ -1,0 +1,27 @@
+---
+- name: Setup OCP4 ansible host
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Install podman
+      ansible.builtin.package:
+        name: podman
+    - name: debug
+      debug:
+        var: ansible_distribution
+    - name: debug
+      debug:
+        var: ansible_distribution_major_version
+    - name: Enable a RHSM repository for RHEL8
+      community.general.rhsm_repository:
+        name: ansible-automation-platform-2.4-for-rhel-8-x86_64-rpms
+      when: ansible_distribution == "RedHat" and ansible_distribution_major_version == "8"
+    - name: Enable a RHSM repository for RHEL9
+      community.general.rhsm_repository:
+        name: ansible-automation-platform-2.4-for-rhel-9-x86_64-rpms
+      when: ansible_distribution == "RedHat" and ansible_distribution_major_version == "9"
+
+    - name: Install ansible-builder
+      ansible.builtin.package:
+        name: ansible-builder

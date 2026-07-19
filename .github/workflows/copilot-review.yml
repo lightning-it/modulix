@@ -43,6 +43,13 @@ jobs:
         contains(github.event.pull_request.labels.*.name, 'shared-assets-lit')) &&
       !(github.event.pull_request.user.login == 'litreleasebot' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.event.pull_request.head.ref, 'chore/sync-repository-quality-') &&
+        github.event.pull_request.base.ref == 'develop' &&
+        github.event.pull_request.title == 'chore: sync repository quality assets' &&
+        contains(github.event.pull_request.labels.*.name, 'chore') &&
+        contains(github.event.pull_request.labels.*.name, 'shared-assets-lit')) &&
+      !(github.event.pull_request.user.login == 'litreleasebot' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.head.ref == 'chore/sync-main-to-develop' &&
         github.event.pull_request.base.ref == 'develop' &&
         github.event.pull_request.title == 'chore: sync main back to develop') &&
@@ -109,6 +116,15 @@ jobs:
               <<<"${PR_LABELS}" >/dev/null; then
             trusted=true
             trusted_kind=shared-assets
+          elif [ "${PR_AUTHOR}" = "litreleasebot" ] \
+            && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
+            && [[ "${PR_HEAD}" == chore/sync-repository-quality-* ]] \
+            && [ "${PR_BASE}" = "develop" ] \
+            && [ "${PR_TITLE}" = "chore: sync repository quality assets" ] \
+            && jq -e 'index("chore") != null and index("shared-assets-lit") != null' \
+              <<<"${PR_LABELS}" >/dev/null; then
+            trusted=true
+            trusted_kind=repository-quality
           elif [ "${PR_AUTHOR}" = "litreleasebot" ] \
             && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
             && [ "${PR_HEAD}" = "chore/sync-main-to-develop" ] \

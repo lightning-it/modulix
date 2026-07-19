@@ -1,9 +1,9 @@
 ---
 collections:
   - name: ansible.posix
-    version: "2.1.0"
+    version: "2.2.2"
   - name: community.vmware
-    version: "5.10.0"
+    version: "6.2.0"
   - name: vmware.vmware
     version: "2.9.0"
   - name: community.crypto
