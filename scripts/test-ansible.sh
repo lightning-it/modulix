@@ -10,7 +10,7 @@ if [ -z "${IN_WUNDER_DEVTOOLS_EE:-}" ] && [ ! -f "/.dockerenv" ]; then
     echo "Missing wrapper: $WRAPPER" >&2
     exit 1
   fi
-  exec "$WRAPPER" env IN_WUNDER_DEVTOOLS_EE=1 "$0" "$@"
+  exec "$WRAPPER" env IN_WUNDER_DEVTOOLS_EE=1 scripts/test-ansible.sh "$@"
 fi
 
 echo "Linting YAML under ansible/..."
