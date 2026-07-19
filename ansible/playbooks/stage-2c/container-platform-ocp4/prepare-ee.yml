@@ -36,10 +36,9 @@
       changed_when: true
       register: _install_roles
       args:
-        chdir: ../../..
+        chdir: "{{ playbook_dir }}/../../.."
       tags:
         - galaxy_roles
-
     - name: Print warnings/errors from collection installation
       ansible.builtin.debug:
         var: _install_collections.stderr_lines
