@@ -27,10 +27,9 @@
       changed_when: true
       register: _install_collections
       args:
-        chdir: ../../..
+        chdir: "{{ playbook_dir }}/../../.."
       tags:
         - galaxy_collections
-
     - name: Install galaxy roles
       ansible.builtin.command:
         cmd: ansible-galaxy role install -r requirements.yml -g
