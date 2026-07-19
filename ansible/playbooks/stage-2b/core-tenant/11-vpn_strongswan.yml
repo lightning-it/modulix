@@ -2,5 +2,17 @@
 - name: strongSwan setup
   hosts: all
   become: true
+  pre_tasks:
+    - name: Validate required strongSwan inventory variables
+      ansible.builtin.assert:
+        that:
+          - strongswan__con_name is defined
+          - strongswan__left is defined
+          - strongswan__right is defined
+          - strongswan__leftsubnet is defined
+          - strongswan__rightsubnet is defined
+          - strongswan__psk is defined
+        fail_msg: Required strongSwan connection variables must be provided by inventory.
+      no_log: true
   roles:
     - role: strongswan
