@@ -16,7 +16,9 @@
           - incus_rhel9_profiles is sequence
           - incus_rhel9_profiles is not string
           - incus_rhel9_profiles | length > 0
-        fail_msg: "Define incus_rhel9_instances in the environment inventory."
+        fail_msg: >-
+          Define non-empty incus_rhel9_profiles and incus_rhel9_instances
+          sequences in the environment inventory.
         quiet: true
       tags: [always]
 
