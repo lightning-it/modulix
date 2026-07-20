@@ -10,6 +10,12 @@
       - aap_self_hosted_bootstrap_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
       - aap_self_hosted_bootstrap_project_version is not match('^CHANGE_ME')
       - aap_self_hosted_bootstrap_supplementary_version is match('^[0-9a-f]{40}$')
+      - >-
+        not (aap_self_hosted_bootstrap_manage_hosts_entry | bool)
+        or (
+          aap_self_hosted_bootstrap_host_address
+          | ansible.utils.ipaddr('address')
+        ) is string
       - aap_self_hosted_bootstrap_ee_image is string
       - aap_self_hosted_bootstrap_ee_image | trim | length > 0
       - aap_self_hosted_bootstrap_ee_image is not search('(?i):latest$')
@@ -95,6 +101,18 @@
       owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
       group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
       mode: "0700"
+
+- name: Ensure AAP FQDN resolves to the managed host address
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: >-
+      ^\S+\s+.*(?:^|\s){{ aap_self_hosted_bootstrap_fqdn | regex_escape }}(?:\s|$).*$
+    line: >-
+      {{ aap_self_hosted_bootstrap_host_address }}
+      {{ aap_self_hosted_bootstrap_fqdn }}
+      {{ aap_self_hosted_bootstrap_fqdn.split('.')[0] }}
+    state: present
+  when: aap_self_hosted_bootstrap_manage_hosts_entry | bool
 
 - name: Ensure owner-only rollout workspace exists
   ansible.builtin.file:
