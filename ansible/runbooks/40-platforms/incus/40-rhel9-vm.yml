@@ -1,0 +1,38 @@
+---
+- name: Create inventory-defined RHEL 9 installation VMs on Incus
+  hosts: "{{ incus_rhel9_vm_target | default('incus_hosts') }}"
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Validate RHEL 9 Incus VM definitions
+      ansible.builtin.assert:
+        that:
+          - incus_rhel9_instances is defined
+          - incus_rhel9_instances is sequence
+          - incus_rhel9_instances is not string
+          - incus_rhel9_instances | length > 0
+          - incus_rhel9_profiles is defined
+          - incus_rhel9_profiles is sequence
+          - incus_rhel9_profiles is not string
+          - incus_rhel9_profiles | length > 0
+        fail_msg: >-
+          Define non-empty incus_rhel9_profiles and incus_rhel9_instances
+          sequences in the environment inventory.
+        quiet: true
+      tags: [always]
+
+  roles:
+    - role: lit.ubuntu.incus
+      vars:
+        incus_packages: []
+        incus_update_apt_cache: false
+        incus_initialize: false
+        incus_profiles: "{{ incus_rhel9_profiles }}"
+      tags: [incus, incus_profiles, incus_rhel9]
+
+    - role: lit.ubuntu.incus_instance
+      vars:
+        incus_instance_items: "{{ incus_rhel9_instances }}"
+      tags: [incus, incus_rhel9]
+...
