@@ -296,7 +296,6 @@ configure_ssh_transport() {
   fi
   cmd+=(--eev "${staged_dir}:/runner/.ssh:ro")
   cmd+=(--senv "ANSIBLE_HOST_KEY_CHECKING=True")
-  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-oUserKnownHostsFile=/runner/.ssh/known_hosts")
   ensure_ee_identity_mapping
 }
 
