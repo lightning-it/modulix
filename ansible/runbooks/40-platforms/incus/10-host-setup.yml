@@ -5,6 +5,11 @@
   gather_facts: true
 
   roles:
+    - role: incus_host_idmap
+      tags:
+        - incus
+        - incus_idmap
+
     - role: lit.ubuntu.incus
       tags:
         - incus

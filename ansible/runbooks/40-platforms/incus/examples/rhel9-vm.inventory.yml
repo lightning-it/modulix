@@ -1,0 +1,36 @@
+---
+all:
+  children:
+    incus_hosts:
+      hosts:
+        incus-host.example.invalid:
+          ansible_user: automation
+          ansible_port: 22
+          incus_rhel9_instances:
+            - name: rhel9-aap
+              type: vm
+              empty: true
+              state: running
+              cloud_init_enabled: false
+              wait_for_ip: false
+              wait_for_ssh: false
+              profiles: []
+              limits:
+                cpu: "4"
+                memory: 32GiB
+              devices:
+                root:
+                  type: disk
+                  path: /
+                  pool: aap-storage
+                  size: 120GiB
+                eth0:
+                  type: nic
+                  network: incusbr0
+                  name: eth0
+                install:
+                  type: disk
+                  source: /srv/incus/images/rhel-9-x86_64-boot.iso
+                  readonly: "true"
+                  boot.priority: "10"
+...

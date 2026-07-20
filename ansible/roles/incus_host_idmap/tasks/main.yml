@@ -1,0 +1,32 @@
+---
+- name: Validate Incus host ID-map inputs
+  ansible.builtin.assert:
+    that:
+      - incus_host_idmap_owner | trim | length > 0
+      - incus_host_idmap_start | int >= 65536
+      - incus_host_idmap_count | int >= 10000000
+      - incus_host_idmap_files is sequence
+      - incus_host_idmap_files is not string
+      - incus_host_idmap_files | length == 2
+    fail_msg: "Define a valid Incus root SubUID/SubGID allocation of at least 10 million IDs."
+    quiet: true
+  when: incus_host_idmap_enabled | bool
+
+- name: Reconcile Incus host subordinate ID allocation
+  ansible.builtin.lineinfile:
+    path: "{{ item }}"
+    regexp: "^{{ incus_host_idmap_owner | regex_escape }}:"
+    line: >-
+      {{ incus_host_idmap_owner }}:{{ incus_host_idmap_start | int }}:{{ incus_host_idmap_count | int }}
+    owner: root
+    group: root
+    mode: "0644"
+    create: true
+  loop: "{{ incus_host_idmap_files }}"
+  notify: Restart Incus after subordinate ID changes
+  when: incus_host_idmap_enabled | bool
+
+- name: Apply Incus host ID-map changes before dependent roles
+  ansible.builtin.meta: flush_handlers
+  when: incus_host_idmap_enabled | bool
+...
