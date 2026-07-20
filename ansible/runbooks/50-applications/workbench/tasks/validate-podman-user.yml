@@ -29,6 +29,7 @@
 - name: Read rootless Podman state for {{ workbench_validation_podman_user }}
   ansible.builtin.command:
     argv: [podman, info, --format, json]
+    chdir: "{{ workbench_validation_podman_passwd.stdout.split(':')[5] }}"
   become: true
   become_user: "{{ workbench_validation_podman_user }}"
   environment:
