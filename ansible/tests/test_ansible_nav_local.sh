@@ -20,7 +20,13 @@ set -euo pipefail
     if [[ "${argument}" == *:/runner/.ssh:ro ]]; then
       staged_dir="${argument%:/runner/.ssh:ro}"
       printf 'SSH_STAGE_FILES=%s\n' "$(find "${staged_dir}" -maxdepth 1 -type f -printf '%f\n' | sort | paste -sd, -)"
-      printf 'SSH_STAGE_MODES=%s\n' "$(stat -c '%a' "${staged_dir}/id_selected" "${staged_dir}/known_hosts" | paste -sd, -)"
+      printf 'SSH_STAGE_MODES=%s\n' "$(
+        stat -c '%a' \
+          "${staged_dir}/config" \
+          "${staged_dir}/id_selected" \
+          "${staged_dir}/known_hosts" \
+          | paste -sd, -
+      )"
     fi
   done
 } > "${FAKE_NAV_OUTPUT}"
@@ -70,11 +76,9 @@ env \
 
 grep -Fxq 'ARG=ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected' "${ssh_output}"
 grep -Fxq 'ARG=ANSIBLE_HOST_KEY_CHECKING=True' "${ssh_output}"
-grep -Fxq \
-  'ARG=ANSIBLE_SSH_COMMON_ARGS=-o UserKnownHostsFile=/runner/.ssh/known_hosts -o StrictHostKeyChecking=yes' \
-  "${ssh_output}"
-grep -Fxq 'SSH_STAGE_FILES=id_selected,known_hosts' "${ssh_output}"
-grep -Fxq 'SSH_STAGE_MODES=400,400' "${ssh_output}"
+grep -Fxq 'ARG=ANSIBLE_SSH_ARGS=-F/runner/.ssh/config' "${ssh_output}"
+grep -Fxq 'SSH_STAGE_FILES=config,id_selected,known_hosts' "${ssh_output}"
+grep -Fxq 'SSH_STAGE_MODES=400,400,400' "${ssh_output}"
 if grep -Fq "${home}/.ssh" "${ssh_output}"; then
   echo "The complete SSH directory was mounted into the execution environment." >&2
   exit 1
