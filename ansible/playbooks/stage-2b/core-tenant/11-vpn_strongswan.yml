@@ -17,7 +17,7 @@
       ansible.builtin.assert:
         that:
           - strongswan__psk is defined
+          - strongswan__psk | string | length > 0
         fail_msg: The required strongSwan secret variable must be provided by inventory.
-      no_log: true
   roles:
     - role: strongswan
