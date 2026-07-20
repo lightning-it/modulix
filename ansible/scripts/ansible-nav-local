@@ -70,7 +70,7 @@ Environment:
   ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only file> (optional; requires known_hosts)
   ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<trusted file> (required for key or agent use)
   ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING=true|false (default: false; forwards only SSH_AUTH_SOCK)
-  ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
+  ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt> (one option per line)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
@@ -552,7 +552,11 @@ case "${subcommand}" in
       cmd+=(--eei "${nav_ee_image}")
     fi
     if [[ -n "${nav_ee_container_options}" ]]; then
-      cmd+=("--co=${nav_ee_container_options}")
+      while IFS= read -r nav_ee_container_option; do
+        if [[ -n "${nav_ee_container_option}" ]]; then
+          cmd+=("--co=${nav_ee_container_option}")
+        fi
+      done <<< "${nav_ee_container_options}"
     fi
     if [[ -n "${nav_pull_policy}" ]]; then
       cmd+=(--pp "${nav_pull_policy}")
