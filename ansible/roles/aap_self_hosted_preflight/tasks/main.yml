@@ -60,6 +60,7 @@
     argv: [timedatectl, show, --property=NTPSynchronized, --value]
   register: aap_self_hosted_preflight_ntp
   changed_when: false
+  check_mode: false
   failed_when: aap_self_hosted_preflight_ntp.rc != 0
 
 - name: Validate synchronized time
@@ -146,6 +147,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_git_tag
   changed_when: false
+  check_mode: false
   failed_when: false
 
 - name: Resolve checked-out automation commit
@@ -155,6 +157,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_git_commit
   changed_when: false
+  check_mode: false
 
 - name: Resolve automation worktree status
   ansible.builtin.command:
@@ -163,6 +166,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_git_status
   changed_when: false
+  check_mode: false
 
 - name: Resolve supplementary collection commit
   ansible.builtin.command:
@@ -171,6 +175,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_supplementary_commit
   changed_when: false
+  check_mode: false
 
 - name: Resolve supplementary collection worktree status
   ansible.builtin.command:
@@ -185,6 +190,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_supplementary_status
   changed_when: false
+  check_mode: false
 
 - name: Validate immutable automation checkout
   ansible.builtin.assert:
@@ -214,6 +220,7 @@
       - "{{ '{{' }}.Store.GraphRoot{{ '}}' }}"
   register: aap_self_hosted_preflight_graphroot
   changed_when: false
+  check_mode: false
 
 - name: Validate runtime-user Podman graph root
   ansible.builtin.assert:
@@ -229,6 +236,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_image_exists
   changed_when: false
+  check_mode: false
   failed_when: aap_self_hosted_preflight_image_exists.rc != 0
 
 - name: Inspect execution-environment platform
@@ -244,6 +252,7 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_image_platform
   changed_when: false
+  check_mode: false
 
 - name: Validate execution-environment platform
   ansible.builtin.assert:
