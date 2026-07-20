@@ -1,0 +1,26 @@
+---
+# Workstation-driven bootstrap for a self-hosted AAP rollout target.
+
+- name: Validate Incus instance recovery gate
+  hosts: aap_incus_hosts
+  gather_facts: false
+  any_errors_fatal: true
+
+  roles:
+    - role: aap_incus_snapshot_gate
+      tags:
+        - aap
+        - aap_bootstrap
+        - recovery
+
+- name: Bootstrap self-hosted AAP rollout workspace
+  hosts: aap_bootstrap_targets
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  roles:
+    - role: aap_self_hosted_bootstrap
+      tags:
+        - aap
+        - aap_bootstrap

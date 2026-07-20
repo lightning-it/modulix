@@ -5,6 +5,8 @@ inventory-owned values.
 
 ## Runbooks
 
+- `00-bootstrap-self-hosted.yml`: validate an Incus recovery snapshot and
+  bootstrap a target-specific self-hosted rollout workspace from a workstation.
 - `01-local-baseline-control.yml`: verify and prepare a customer-provided AAP
   host baseline from Machine A using inventory values.
 - `02-local-execution-control.yml`: drive the disconnected/local-execution AAP

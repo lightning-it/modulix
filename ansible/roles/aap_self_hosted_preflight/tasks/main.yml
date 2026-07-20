@@ -1,0 +1,212 @@
+---
+- name: Validate self-hosted controlled inputs
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_project_version is string
+      - aap_self_hosted_preflight_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
+      - aap_self_hosted_preflight_project_version is not match('^CHANGE_ME')
+      - aap_self_hosted_preflight_ee_image is string
+      - aap_self_hosted_preflight_ee_image | trim | length > 0
+      - aap_self_hosted_preflight_ee_image is not search('(?i):latest$')
+      - aap_self_hosted_preflight_ee_image is not search('CHANGE_ME')
+    fail_msg: >-
+      Supply the approved immutable automation tag and fixed execution-environment image.
+    quiet: true
+
+- name: Gather prepared-host facts
+  ansible.builtin.setup:
+    gather_subset:
+      - all
+
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Validate prepared RHEL identity and capacity
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'RedHat'
+      - ansible_facts.distribution_version is version(aap_self_hosted_preflight_minimum_rhel_version, '>=')
+      - ansible_facts.architecture == 'x86_64'
+      - ansible_facts.fqdn == aap_self_hosted_preflight_fqdn
+      - ansible_facts.processor_vcpus | int >= aap_self_hosted_preflight_minimum_vcpus | int
+      - ansible_facts.memtotal_mb | int >= aap_self_hosted_preflight_minimum_memory_mb | int
+      - (ansible_facts.selinux | default({})).status == 'enabled'
+      - (ansible_facts.selinux | default({})).mode == 'enforcing'
+      - ansible_facts.packages.get('ansible-core', [])[0].version is version('2.16.18', '>=')
+    fail_msg: Prepared RHEL host identity, capacity, SELinux, or ansible-core gate failed.
+    quiet: true
+
+- name: Resolve application filesystem
+  ansible.builtin.set_fact:
+    aap_self_hosted_preflight_appl_mount: >-
+      {{ ansible_facts.mounts | selectattr('mount', 'equalto', '/appl') | list | first | default({}) }}
+  changed_when: false
+
+- name: Validate application filesystem
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_appl_mount.fstype | default('') == 'xfs'
+      - >-
+        aap_self_hosted_preflight_appl_mount.size_available
+        | default(0) | int
+        >= (aap_self_hosted_preflight_appl_minimum_free_mb | int * 1048576)
+    fail_msg: /appl must be a separate XFS filesystem with the approved free capacity.
+    quiet: true
+
+- name: Read time synchronization state
+  ansible.builtin.command:
+    argv: [timedatectl, show, --property=NTPSynchronized, --value]
+  register: aap_self_hosted_preflight_ntp
+  changed_when: false
+  failed_when: aap_self_hosted_preflight_ntp.rc != 0
+
+- name: Validate synchronized time
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_ntp.stdout | trim | lower == 'yes'
+    fail_msg: The prepared host must report synchronized time.
+    quiet: true
+
+- name: Resolve required identities
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ item }}"
+  loop:
+    - "{{ aap_self_hosted_preflight_rollout_user }}"
+    - "{{ aap_self_hosted_preflight_install_user }}"
+
+- name: Read subordinate-ID maps
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - /etc/subuid
+    - /etc/subgid
+  register: aap_self_hosted_preflight_subid
+
+- name: Validate installation-user subordinate-ID maps
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.content | b64decode)
+        is search(
+          '(?m)^' ~ (aap_self_hosted_preflight_install_user | regex_escape)
+          ~ ':[0-9]+:[1-9][0-9]*$'
+        )
+    fail_msg: "{{ aap_self_hosted_preflight_install_user }} requires valid subuid and subgid entries."
+    quiet: true
+  loop: "{{ aap_self_hosted_preflight_subid.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Validate rollout workspace files
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop:
+    - {path: "{{ aap_self_hosted_preflight_project_dir }}/.git", type: directory, mode: ''}
+    - {path: "{{ aap_self_hosted_preflight_work_root }}/secrets/.vault-pass.txt", type: file, mode: '0600'}
+    - {path: "{{ aap_self_hosted_preflight_registry_auth_file }}", type: file, mode: '0600'}
+    - path: >-
+        /appl/home/{{ aap_self_hosted_preflight_rollout_user
+        }}/.ssh/svc_ansible_aap
+      type: file
+      mode: '0600'
+    - path: >-
+        /appl/home/{{ aap_self_hosted_preflight_rollout_user
+        }}/.ssh/known_hosts
+      type: file
+      mode: '0600'
+  register: aap_self_hosted_preflight_workspace
+
+- name: Require protected rollout workspace files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - >-
+        (item.item.type == 'directory' and item.stat.isdir | default(false))
+        or (item.item.type == 'file' and item.stat.isreg | default(false))
+      - item.item.mode | length == 0 or item.stat.mode == item.item.mode
+    fail_msg: "Rollout workspace control failed for {{ item.item.path }}."
+    quiet: true
+  loop: "{{ aap_self_hosted_preflight_workspace.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Resolve checked-out automation tag
+  ansible.builtin.command:
+    argv: [git, -C, "{{ aap_self_hosted_preflight_project_dir }}", describe, --tags, --exact-match, HEAD]
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_git_tag
+  changed_when: false
+
+- name: Resolve automation worktree status
+  ansible.builtin.command:
+    argv: [git, -C, "{{ aap_self_hosted_preflight_project_dir }}", status, --porcelain, --untracked-files=no]
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_git_status
+  changed_when: false
+
+- name: Validate immutable automation checkout
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_git_tag.stdout | trim == aap_self_hosted_preflight_project_version
+      - aap_self_hosted_preflight_git_status.stdout | trim | length == 0
+    fail_msg: The automation checkout is not at the approved clean tag.
+    quiet: true
+
+- name: Inspect runtime-user Podman graph root
+  ansible.builtin.command:
+    argv:
+      - sudo
+      - -iu
+      - "{{ aap_self_hosted_preflight_install_user }}"
+      - podman
+      - info
+      - --format
+      - "{{ '{{' }}.Store.GraphRoot{{ '}}' }}"
+  register: aap_self_hosted_preflight_graphroot
+  changed_when: false
+
+- name: Validate runtime-user Podman graph root
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_graphroot.stdout | trim == aap_self_hosted_preflight_expected_graphroot
+    fail_msg: The rootless Podman graph root differs from the approved path.
+    quiet: true
+
+- name: Check execution-environment image presence
+  ansible.builtin.command:
+    argv: [podman, image, exists, "{{ aap_self_hosted_preflight_ee_image }}"]
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_image_exists
+  changed_when: false
+  failed_when: aap_self_hosted_preflight_image_exists.rc != 0
+
+- name: Inspect execution-environment platform
+  ansible.builtin.command:
+    argv:
+      - podman
+      - image
+      - inspect
+      - "{{ aap_self_hosted_preflight_ee_image }}"
+      - --format
+      - "{{ '{{' }}.Os{{ '}}' }}/{{ '{{' }}.Architecture{{ '}}' }}"
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_image_platform
+  changed_when: false
+
+- name: Validate execution-environment platform
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_image_platform.stdout | default('') | trim == 'linux/amd64'
+    fail_msg: The approved execution environment must be linux/amd64.
+    quiet: true
+
+- name: Report self-hosted preflight success
+  ansible.builtin.debug:
+    msg: AAP_SELF_HOSTED_PREFLIGHT_OK
+  changed_when: false
