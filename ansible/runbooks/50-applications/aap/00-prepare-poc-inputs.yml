@@ -1,0 +1,13 @@
+---
+# Controller-local preparation of encrypted inputs for an explicitly approved PoC.
+
+- name: Prepare protected AAP PoC inputs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  roles:
+    - role: aap_poc_inputs
+      tags:
+        - aap
+        - aap_poc_inputs

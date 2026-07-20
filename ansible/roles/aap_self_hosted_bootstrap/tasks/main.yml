@@ -108,8 +108,12 @@
     repo: "{{ aap_self_hosted_bootstrap_project_repo }}"
     dest: "{{ aap_self_hosted_bootstrap_project_dir }}"
     version: "{{ aap_self_hosted_bootstrap_project_version }}"
-    depth: 1
-    single_branch: true
+    depth: >-
+      {{ 1 if not (aap_self_hosted_bootstrap_project_version
+                   is match('^[0-9a-f]{40}$')) else omit }}
+    single_branch: >-
+      {{ true if not (aap_self_hosted_bootstrap_project_version
+                      is match('^[0-9a-f]{40}$')) else omit }}
     update: true
   become: true
   become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"

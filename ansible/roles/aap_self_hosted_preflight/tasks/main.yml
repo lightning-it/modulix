@@ -139,6 +139,15 @@
   become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
   register: aap_self_hosted_preflight_git_tag
   changed_when: false
+  failed_when: false
+
+- name: Resolve checked-out automation commit
+  ansible.builtin.command:
+    argv: [git, -C, "{{ aap_self_hosted_preflight_project_dir }}", rev-parse, HEAD]
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_git_commit
+  changed_when: false
 
 - name: Resolve automation worktree status
   ansible.builtin.command:
@@ -151,7 +160,11 @@
 - name: Validate immutable automation checkout
   ansible.builtin.assert:
     that:
-      - aap_self_hosted_preflight_git_tag.stdout | trim == aap_self_hosted_preflight_project_version
+      - >-
+        (aap_self_hosted_preflight_git_tag.stdout | trim
+         == aap_self_hosted_preflight_project_version)
+        or (aap_self_hosted_preflight_git_commit.stdout | trim
+            == aap_self_hosted_preflight_project_version)
       - aap_self_hosted_preflight_git_status.stdout | trim | length == 0
     fail_msg: The automation checkout is not at the approved clean tag.
     quiet: true
