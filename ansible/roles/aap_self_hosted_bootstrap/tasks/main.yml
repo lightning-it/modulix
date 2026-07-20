@@ -182,11 +182,16 @@
       {{ (aap_self_hosted_bootstrap_host_public_key.content
           | b64decode).split()[0:2] | join(' ') }}
     state: present
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+
+- name: Protect trusted loopback host-key file
+  ansible.builtin.file:
+    path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/known_hosts"
+    state: file
     owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
     group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
     mode: "0600"
-  become: true
-  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
 
 - name: Copy protected rollout inputs
   ansible.builtin.copy:
