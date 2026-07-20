@@ -5,6 +5,7 @@
       - aap_self_hosted_preflight_project_version is string
       - aap_self_hosted_preflight_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
       - aap_self_hosted_preflight_project_version is not match('^CHANGE_ME')
+      - aap_self_hosted_preflight_supplementary_version is match('^[0-9a-f]{40}$')
       - aap_self_hosted_preflight_ee_image is string
       - aap_self_hosted_preflight_ee_image | trim | length > 0
       - aap_self_hosted_preflight_ee_image is not search('(?i):latest$')
@@ -163,6 +164,28 @@
   register: aap_self_hosted_preflight_git_status
   changed_when: false
 
+- name: Resolve supplementary collection commit
+  ansible.builtin.command:
+    argv: [git, -C, "{{ aap_self_hosted_preflight_supplementary_dir }}", rev-parse, HEAD]
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_supplementary_commit
+  changed_when: false
+
+- name: Resolve supplementary collection worktree status
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ aap_self_hosted_preflight_supplementary_dir }}"
+      - status
+      - --porcelain
+      - --untracked-files=no
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_rollout_user }}"
+  register: aap_self_hosted_preflight_supplementary_status
+  changed_when: false
+
 - name: Validate immutable automation checkout
   ansible.builtin.assert:
     that:
@@ -172,6 +195,10 @@
         or (aap_self_hosted_preflight_git_commit.stdout | trim
             == aap_self_hosted_preflight_project_version)
       - aap_self_hosted_preflight_git_status.stdout | trim | length == 0
+      - >-
+        aap_self_hosted_preflight_supplementary_commit.stdout | trim
+        == aap_self_hosted_preflight_supplementary_version
+      - aap_self_hosted_preflight_supplementary_status.stdout | trim | length == 0
     fail_msg: The automation checkout is not at the approved clean tag.
     quiet: true
 

@@ -6,6 +6,9 @@ aap_self_hosted_preflight_install_user: "{{ aap_deploy_install_user | default('s
 aap_self_hosted_preflight_work_root: "/appl/aap-rollout/{{ aap_self_hosted_preflight_fqdn }}"
 aap_self_hosted_preflight_project_dir: "{{ aap_self_hosted_preflight_work_root }}/project/modulix-automation"
 aap_self_hosted_preflight_project_version: ""
+aap_self_hosted_preflight_supplementary_version: ""
+aap_self_hosted_preflight_supplementary_dir: >-
+  {{ aap_self_hosted_preflight_project_dir }}/ansible/collections/ansible_collections/lit/supplementary
 aap_self_hosted_preflight_minimum_rhel_version: "9.6"
 aap_self_hosted_preflight_minimum_vcpus: 4
 aap_self_hosted_preflight_minimum_memory_mb: 32000

@@ -8,6 +8,11 @@ aap_self_hosted_bootstrap_remote_tmp: /appl/ansible-tmp
 aap_self_hosted_bootstrap_project_repo: ""
 aap_self_hosted_bootstrap_project_version: ""
 aap_self_hosted_bootstrap_project_dir: "{{ aap_self_hosted_bootstrap_work_root }}/project/modulix-automation"
+aap_self_hosted_bootstrap_supplementary_repo: >-
+  https://github.com/lightning-it/ansible-collection-supplementary.git
+aap_self_hosted_bootstrap_supplementary_version: ""
+aap_self_hosted_bootstrap_supplementary_dir: >-
+  {{ aap_self_hosted_bootstrap_project_dir }}/ansible/collections/ansible_collections/lit/supplementary
 aap_self_hosted_bootstrap_ssh_key_path: >-
   {{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/svc_ansible_aap
 aap_self_hosted_bootstrap_host_public_key_path: /etc/ssh/ssh_host_ed25519_key.pub

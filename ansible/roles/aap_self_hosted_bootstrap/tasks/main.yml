@@ -9,6 +9,7 @@
       - aap_self_hosted_bootstrap_project_version is string
       - aap_self_hosted_bootstrap_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
       - aap_self_hosted_bootstrap_project_version is not match('^CHANGE_ME')
+      - aap_self_hosted_bootstrap_supplementary_version is match('^[0-9a-f]{40}$')
       - aap_self_hosted_bootstrap_ee_image is string
       - aap_self_hosted_bootstrap_ee_image | trim | length > 0
       - aap_self_hosted_bootstrap_ee_image is not search('(?i):latest$')
@@ -115,6 +116,15 @@
     single_branch: >-
       {{ true if not (aap_self_hosted_bootstrap_project_version
                       is match('^[0-9a-f]{40}$')) else omit }}
+    update: true
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+
+- name: Check out the approved supplementary collection version
+  ansible.builtin.git:
+    repo: "{{ aap_self_hosted_bootstrap_supplementary_repo }}"
+    dest: "{{ aap_self_hosted_bootstrap_supplementary_dir }}"
+    version: "{{ aap_self_hosted_bootstrap_supplementary_version }}"
     update: true
   become: true
   become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
