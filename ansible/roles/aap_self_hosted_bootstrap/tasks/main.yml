@@ -182,6 +182,9 @@
       {{ (aap_self_hosted_bootstrap_host_public_key.content
           | b64decode).split()[0:2] | join(' ') }}
     state: present
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0600"
   become: true
   become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
 
