@@ -1,0 +1,19 @@
+---
+- name: Validate Incus profile inputs
+  ansible.builtin.assert:
+    that:
+      - incus_profile_items is sequence
+      - incus_profile_items is not string
+      - incus_profile_items | length > 0
+    fail_msg: "Define at least one inventory-owned Incus profile."
+    quiet: true
+  when: incus_profile_enabled | bool
+
+- name: Reconcile Incus profiles
+  ansible.builtin.include_tasks: profile.yml
+  loop: "{{ incus_profile_items }}"
+  loop_control:
+    loop_var: incus_profile_item
+    label: "{{ incus_profile_item.project }}/{{ incus_profile_item.name }}"
+  when: incus_profile_enabled | bool
+...
