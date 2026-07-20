@@ -69,6 +69,8 @@
     argv:
       - ansible-vault
       - encrypt
+      - --encrypt-vault-id
+      - default
       - --vault-password-file
       - "{{ aap_poc_inputs_vault_password_file }}"
       - "{{ aap_poc_inputs_vault_file }}"
