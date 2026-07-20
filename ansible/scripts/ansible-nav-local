@@ -285,39 +285,18 @@ configure_ssh_transport() {
   chmod 0700 "${staged_dir}"
   staged_known_hosts="${staged_dir}/known_hosts"
   install -m 0400 "${ssh_known_hosts_file}" "${staged_known_hosts}"
-  cat > "${staged_dir}/config" <<'EOF'
-Host *
-    UserKnownHostsFile /runner/.ssh/known_hosts
-    GlobalKnownHostsFile /dev/null
-    StrictHostKeyChecking yes
-EOF
   if [[ -n "${ssh_private_key_file}" ]]; then
     staged_key="${staged_dir}/id_selected"
     install -m 0400 "${ssh_private_key_file}" "${staged_key}"
     validate_owner_only_secret_file "${staged_key}" "staged SSH private key"
-    cat >> "${staged_dir}/config" <<'EOF'
-    IdentityFile /runner/.ssh/id_selected
-    IdentitiesOnly yes
-EOF
     cmd+=(--senv "ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected")
   else
     cmd+=(--eev "${SSH_AUTH_SOCK}:/runner/ssh-agent.sock:rw")
     cmd+=(--senv "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
   fi
-  chmod 0400 "${staged_dir}/config"
   cmd+=(--eev "${staged_dir}:/runner/.ssh:ro")
   cmd+=(--senv "ANSIBLE_HOST_KEY_CHECKING=True")
-  # Keep the repository's ssh_args (including ControlPersist) and add only the
-  # strict, container-local configuration file.
-  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config")
-  if [[ -n "${ANSIBLE_SSH_ARGS:-}" ]]; then
-    ssh_args_lower="${ANSIBLE_SSH_ARGS,,}"
-    if [[ "${ssh_args_lower}" =~ (stricthostkeychecking|userknownhostsfile|globalknownhostsfile|identityfile|identitiesonly) ]]; then
-      echo "ANSIBLE_SSH_ARGS must not override the enforced SSH trust or identity settings." >&2
-      exit 1
-    fi
-    cmd+=(--senv "ANSIBLE_SSH_ARGS=${ANSIBLE_SSH_ARGS}")
-  fi
+  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-oUserKnownHostsFile=/runner/.ssh/known_hosts")
   ensure_ee_identity_mapping
 }
 
