@@ -67,15 +67,16 @@
     database: passwd
     key: "{{ aap_self_hosted_bootstrap_rollout_user }}"
 
+- name: Record rollout account paths
+  ansible.builtin.set_fact:
+    aap_self_hosted_bootstrap_rollout_home: >-
+      {{ ansible_facts.getent_passwd[aap_self_hosted_bootstrap_rollout_user][4] }}
+  changed_when: false
+
 - name: Resolve installation user account
   ansible.builtin.getent:
     database: passwd
     key: "{{ aap_self_hosted_bootstrap_install_user }}"
-
-- name: Record rollout account paths
-  ansible.builtin.set_fact:
-    aap_self_hosted_bootstrap_rollout_home: "{{ getent_passwd[aap_self_hosted_bootstrap_rollout_user][4] }}"
-  changed_when: false
 
 - name: Ensure transport and rollout roots exist
   ansible.builtin.file:
