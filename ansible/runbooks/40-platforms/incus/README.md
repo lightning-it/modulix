@@ -29,7 +29,7 @@ root-owned subordinate UID/GID allocation required by Incus and restarts the
 daemon only when that allocation changes.
 
 Use `examples/rhel9-vm.inventory.yml` as the sanitized variable contract for
-RHEL installation VMs. Licensed RHEL media, activation keys, organization IDs,
+dedicated VM profiles and RHEL installation VMs. Licensed RHEL media, activation keys, organization IDs,
 passwords, and environment hostnames belong in protected environment inventory
 or Ansible Vault and must not be committed here. The runbook creates and boots
 the VM shell; unattended Kickstart inputs and post-installation snapshots remain

@@ -6,18 +6,13 @@ all:
         incus-host.example.invalid:
           ansible_user: automation
           ansible_port: 22
-          incus_rhel9_instances:
+          incus_rhel9_profiles:
             - name: rhel9-aap
-              type: vm
-              empty: true
-              state: running
-              cloud_init_enabled: false
-              wait_for_ip: false
-              wait_for_ssh: false
-              profiles: []
-              limits:
-                cpu: "4"
-                memory: 32GiB
+              project: default
+              description: RHEL 9 AAP installation VM defaults
+              config:
+                limits.cpu: "4"
+                limits.memory: 32GiB
               devices:
                 root:
                   type: disk
@@ -28,6 +23,17 @@ all:
                   type: nic
                   network: incusbr0
                   name: eth0
+          incus_rhel9_instances:
+            - name: rhel9-aap
+              type: vm
+              empty: true
+              state: running
+              cloud_init_enabled: false
+              wait_for_ip: false
+              wait_for_ssh: false
+              profiles:
+                - rhel9-aap
+              devices:
                 install:
                   type: disk
                   source: /srv/incus/images/rhel-9-x86_64-boot.iso

@@ -12,6 +12,10 @@
           - incus_rhel9_instances is sequence
           - incus_rhel9_instances is not string
           - incus_rhel9_instances | length > 0
+          - incus_rhel9_profiles is defined
+          - incus_rhel9_profiles is sequence
+          - incus_rhel9_profiles is not string
+          - incus_rhel9_profiles | length > 0
         fail_msg: "Define incus_rhel9_instances in the environment inventory."
         quiet: true
       tags: [always]
@@ -19,6 +23,15 @@
   roles:
     - role: incus_host_idmap
       tags: [incus, incus_idmap]
+
+    - role: lit.ubuntu.incus
+      vars:
+        incus_initialize: false
+        incus_packages: []
+        incus_profiles: "{{ incus_rhel9_profiles }}"
+        incus_services: []
+        incus_update_apt_cache: false
+      tags: [incus, incus_profiles, incus_rhel9]
 
     - role: lit.ubuntu.incus_instance
       vars:
