@@ -1,3 +1,4 @@
+---
 - name: Setup gitops
   hosts: ocp
   gather_facts: false
