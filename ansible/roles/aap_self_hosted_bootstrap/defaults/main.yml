@@ -29,6 +29,7 @@ aap_self_hosted_bootstrap_ee_image: ""
 aap_self_hosted_bootstrap_workspace_directories:
   - artifacts
   - etc
+  - etc/tls
   - logs
   - project
   - secrets
