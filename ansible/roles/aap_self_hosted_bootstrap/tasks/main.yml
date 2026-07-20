@@ -127,6 +127,14 @@
     group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
     mode: "0700"
 
+- name: Ensure rollout SSH directory exists
+  ansible.builtin.file:
+    path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh"
+    state: directory
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0700"
+
 - name: Generate dedicated rollout SSH key pair
   community.crypto.openssh_keypair:
     path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}"
