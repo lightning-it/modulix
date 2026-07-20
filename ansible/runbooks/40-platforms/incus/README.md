@@ -23,10 +23,10 @@ private ESXi artifact must be copied or downloaded first, then configure
 `incus_esxi_image_backup`. VMware ESXi media and derived artifacts are private
 licensed materials and must not be committed to the automation repositories.
 
-`10-host-setup.yml` and `40-rhel9-vm.yml` run the local
-`incus_host_idmap` role before other Incus roles. The role reconciles the
-root-owned subordinate UID/GID allocation required by Incus and restarts the
-daemon only when that allocation changes.
+`10-host-setup.yml` and `40-rhel9-vm.yml` use `lit.ubuntu.incus` to reconcile
+the root-owned subordinate UID/GID allocation required by Incus. The RHEL VM
+runbook also reconciles its inventory-defined Incus profiles through that
+collection role before creating instances.
 
 Use `examples/rhel9-vm.inventory.yml` as the sanitized variable contract for
 dedicated VM profiles and RHEL installation VMs. Licensed RHEL media, activation keys, organization IDs,

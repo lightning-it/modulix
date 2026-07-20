@@ -21,12 +21,12 @@
       tags: [always]
 
   roles:
-    - role: incus_host_idmap
-      tags: [incus, incus_idmap]
-
-    - role: incus_profile
+    - role: lit.ubuntu.incus
       vars:
-        incus_profile_items: "{{ incus_rhel9_profiles }}"
+        incus_packages: []
+        incus_update_apt_cache: false
+        incus_initialize: false
+        incus_profiles: "{{ incus_rhel9_profiles }}"
       tags: [incus, incus_profiles, incus_rhel9]
 
     - role: lit.ubuntu.incus_instance
