@@ -210,20 +210,22 @@
         aap_self_hosted_preflight_supplementary_commit.stdout | trim
         == aap_self_hosted_preflight_supplementary_version
       - aap_self_hosted_preflight_supplementary_status.stdout | trim | length == 0
-    fail_msg: The automation checkout is not at the approved clean tag.
+    fail_msg: >-
+      The automation checkout is not at the approved clean tag or commit, or
+      the supplementary collection is not at its approved clean commit.
     quiet: true
 
 - name: Inspect runtime-user Podman graph root
   ansible.builtin.command:
     argv:
-      - sudo
-      - -iu
-      - "{{ aap_self_hosted_preflight_install_user }}"
       - podman
       - info
       - --format
       - "{{ '{{' }}.Store.GraphRoot{{ '}}' }}"
   register: aap_self_hosted_preflight_graphroot
+  become: true
+  become_user: "{{ aap_self_hosted_preflight_install_user }}"
+  become_flags: "-i"
   changed_when: false
   check_mode: false
 

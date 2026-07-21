@@ -54,9 +54,9 @@
   no_log: true
   when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
 
-- name: Write new PoC secret values before immediate encryption
+- name: Write new PoC secret values to temporary file before encryption
   ansible.builtin.copy:
-    dest: "{{ aap_poc_inputs_vault_file }}"
+    dest: "{{ aap_poc_inputs_vault_file }}.tmp"
     content: "{{ aap_poc_inputs_generated | to_nice_yaml(indent=2) }}"
     mode: "0600"
   no_log: true
@@ -73,9 +73,21 @@
       - default
       - --vault-password-file
       - "{{ aap_poc_inputs_vault_password_file }}"
-      - "{{ aap_poc_inputs_vault_file }}"
+      - "{{ aap_poc_inputs_vault_file }}.tmp"
   register: aap_poc_inputs_encrypt
   changed_when: aap_poc_inputs_encrypt.rc == 0
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Publish encrypted PoC Vault file atomically
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ aap_poc_inputs_vault_file }}.tmp"
+      - "{{ aap_poc_inputs_vault_file }}"
+  changed_when: true
   no_log: true
   when:
     - not ansible_check_mode
