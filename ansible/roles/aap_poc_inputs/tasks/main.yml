@@ -54,6 +54,23 @@
   no_log: true
   when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
 
+- name: Inspect temporary PoC Vault path
+  ansible.builtin.stat:
+    path: "{{ aap_poc_inputs_vault_file }}.tmp"
+  register: aap_poc_inputs_vault_tmp_stat
+  no_log: true
+  when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Require unused temporary PoC Vault path
+  ansible.builtin.assert:
+    that:
+      - not (aap_poc_inputs_vault_tmp_stat.stat.exists | default(false))
+      - not (aap_poc_inputs_vault_tmp_stat.stat.islnk | default(false))
+    fail_msg: Refusing to write plaintext secrets to an existing temporary Vault path.
+    quiet: true
+  no_log: true
+  when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
 - name: Write new PoC secret values to temporary file before encryption
   ansible.builtin.copy:
     dest: "{{ aap_poc_inputs_vault_file }}.tmp"

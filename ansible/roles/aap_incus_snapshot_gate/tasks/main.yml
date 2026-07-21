@@ -30,19 +30,19 @@
 - name: Validate Incus instance and recovery snapshot
   ansible.builtin.assert:
     that:
-      - aap_incus_snapshot_gate_state.name == aap_incus_snapshot_gate_instance
-      - aap_incus_snapshot_gate_state.status == 'Running'
+      - aap_incus_snapshot_gate_state.get('name', '') == aap_incus_snapshot_gate_instance
+      - aap_incus_snapshot_gate_state.get('status', '') == 'Running'
       - >-
         aap_incus_snapshot_gate_expected_address
         in (
-          aap_incus_snapshot_gate_state.state.network.values()
+          aap_incus_snapshot_gate_state.get('state', {}).get('network', {}).values()
           | map(attribute='addresses') | flatten
           | selectattr('family', 'equalto', 'inet')
           | map(attribute='address') | list
         )
       - >-
         aap_incus_snapshot_gate_baseline_snapshot
-        in (aap_incus_snapshot_gate_state.snapshots | map(attribute='name') | list)
+        in (aap_incus_snapshot_gate_state.get('snapshots', []) | map(attribute='name') | list)
     fail_msg: The Incus instance, address, running state or recovery snapshot differs from approval.
     quiet: true
 

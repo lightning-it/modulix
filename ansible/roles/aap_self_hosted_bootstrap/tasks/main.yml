@@ -106,7 +106,7 @@
   ansible.builtin.lineinfile:
     path: /etc/hosts
     regexp: >-
-      ^\S+\s+.*(?:^|\s){{ aap_self_hosted_bootstrap_fqdn | regex_escape }}(?:\s|$).*$
+      ^\S+\s+(?:\S+\s+)*{{ aap_self_hosted_bootstrap_fqdn | regex_escape }}(?:\s|$).*$
     line: >-
       {{ aap_self_hosted_bootstrap_host_address }}
       {{ aap_self_hosted_bootstrap_fqdn }}
