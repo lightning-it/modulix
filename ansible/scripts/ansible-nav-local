@@ -311,6 +311,11 @@ EOF
   # strict, container-local configuration file.
   cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config")
   if [[ -n "${ANSIBLE_SSH_ARGS:-}" ]]; then
+    ssh_args_lower="${ANSIBLE_SSH_ARGS,,}"
+    if [[ "${ssh_args_lower}" =~ (stricthostkeychecking|userknownhostsfile|globalknownhostsfile|identityfile|identitiesonly) ]]; then
+      echo "ANSIBLE_SSH_ARGS must not override the enforced SSH trust or identity settings." >&2
+      exit 1
+    fi
     cmd+=(--senv "ANSIBLE_SSH_ARGS=${ANSIBLE_SSH_ARGS}")
   fi
   ensure_ee_identity_mapping

@@ -15,7 +15,7 @@
 
 - name: Run initial setup / user management
   hosts: all
-  gather_facts: False
+  gather_facts: false
   pre_tasks:
     - name: Check if initial setup is needed
       ansible.windows.win_shell: "hostname; whoami"
