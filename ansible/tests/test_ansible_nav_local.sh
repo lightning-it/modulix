@@ -15,6 +15,7 @@ cat > "${fake_bin}/ansible-navigator" <<'EOF'
 set -euo pipefail
 {
   printf 'COLLECTIONS=%s\n' "${ANSIBLE_COLLECTIONS_PATH:-}"
+  printf 'ROLES=%s\n' "${ANSIBLE_ROLES_PATH:-}"
   printf 'VAULT_PASSWORD_FILE=%s\n' "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
   printf 'ARG=%s\n' "$@"
   for argument in "$@"; do
@@ -63,6 +64,16 @@ if grep -Fq '/tmp/untrusted-overlay' "${ee_only_output}"; then
   echo "EE-only mode retained an inherited collection overlay." >&2
   exit 1
 fi
+grep -Fq '/runner/project/ansible/roles' "${ee_only_output}"
+
+project_overlay_output="${test_root}/project-overlay.out"
+env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${project_overlay_output}" \
+  "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=false" \
+  "${script}" run example.yml
+
+grep -Fq '/runner/project/ansible/collections' "${project_overlay_output}"
 
 key="${home}/selected-key"
 known_hosts="${home}/selected-known-hosts"
