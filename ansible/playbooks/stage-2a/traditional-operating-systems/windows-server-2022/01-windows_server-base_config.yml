@@ -48,7 +48,6 @@
   roles:
     - name: Execute initial user_management
       role: user_management
-      gather_facts: true
       vars:
         ansible_user: "{{ windows_bootstrap_username }}"
         ansible_password: "{{ windows_bootstrap_password }}"
