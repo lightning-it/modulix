@@ -5,7 +5,8 @@
       - aap_incus_snapshot_gate_instance | trim | length > 0
       - >-
         aap_incus_snapshot_gate_expected_address
-        is match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+        (aap_incus_snapshot_gate_expected_address
+         | ansible.utils.ipaddr('ipv4')) is string
       - aap_incus_snapshot_gate_baseline_snapshot | trim | length > 0
     fail_msg: Supply the exact Incus instance, IPv4 address and baseline snapshot.
     quiet: true

@@ -91,6 +91,28 @@
     database: passwd
     key: "{{ aap_self_hosted_preflight_install_user }}"
 
+- name: Inspect subordinate-ID map files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/subuid
+    - /etc/subgid
+  register: aap_self_hosted_preflight_subid_stats
+
+- name: Require safe subordinate-ID map files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(false))
+      - item.stat.size | int > 0
+    fail_msg: "Required subordinate-ID map is absent or unsafe: {{ item.item }}"
+    quiet: true
+  loop: "{{ aap_self_hosted_preflight_subid_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
 - name: Read subordinate-ID maps
   ansible.builtin.slurp:
     src: "{{ item }}"

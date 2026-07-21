@@ -6,6 +6,7 @@
       - aap_self_hosted_bootstrap_fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]+$')
       - aap_self_hosted_bootstrap_project_repo is string
       - aap_self_hosted_bootstrap_project_repo | trim | length > 0
+      - aap_self_hosted_bootstrap_project_repo is not search('(?i)CHANGE_ME')
       - aap_self_hosted_bootstrap_project_version is string
       - aap_self_hosted_bootstrap_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
       - aap_self_hosted_bootstrap_project_version is not match('^CHANGE_ME')
@@ -185,6 +186,22 @@
     key: "{{ aap_self_hosted_bootstrap_rollout_public_key.content | b64decode | trim }}"
     state: present
   no_log: true
+
+- name: Inspect locally trusted SSH host public-key file
+  ansible.builtin.stat:
+    path: "{{ aap_self_hosted_bootstrap_host_public_key_path }}"
+    follow: false
+  register: aap_self_hosted_bootstrap_host_public_key_stat
+
+- name: Require safe trusted SSH host public-key file
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_bootstrap_host_public_key_stat.stat.exists | default(false)
+      - aap_self_hosted_bootstrap_host_public_key_stat.stat.isreg | default(false)
+      - not (aap_self_hosted_bootstrap_host_public_key_stat.stat.islnk | default(false))
+      - aap_self_hosted_bootstrap_host_public_key_stat.stat.size | int > 0
+    fail_msg: The trusted SSH host public-key file is absent or unsafe.
+    quiet: true
 
 - name: Read locally trusted SSH host public key
   ansible.builtin.slurp:
