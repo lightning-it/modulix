@@ -174,6 +174,13 @@
     group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
     mode: "0700"
 
+- name: Inspect dedicated rollout public key
+  ansible.builtin.stat:
+    path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}.pub"
+    follow: false
+  register: aap_self_hosted_bootstrap_rollout_public_key_stat
+  no_log: true
+
 - name: Generate dedicated rollout SSH key pair
   community.crypto.openssh_keypair:
     path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}"
@@ -189,6 +196,9 @@
     src: "{{ aap_self_hosted_bootstrap_ssh_key_path }}.pub"
   register: aap_self_hosted_bootstrap_rollout_public_key
   no_log: true
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_rollout_public_key_stat.stat.exists | default(false))
 
 - name: Authorize dedicated rollout public key
   ansible.posix.authorized_key:
@@ -196,6 +206,9 @@
     key: "{{ aap_self_hosted_bootstrap_rollout_public_key.content | b64decode | trim }}"
     state: present
   no_log: true
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_rollout_public_key_stat.stat.exists | default(false))
 
 - name: Inspect locally trusted SSH host public-key file
   ansible.builtin.stat:
