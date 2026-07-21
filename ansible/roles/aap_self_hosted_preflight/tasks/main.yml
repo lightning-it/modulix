@@ -117,6 +117,7 @@
 - name: Validate rollout workspace files
   ansible.builtin.stat:
     path: "{{ item.path }}"
+    follow: false
   loop:
     - {path: "{{ aap_self_hosted_preflight_project_dir }}/.git", type: directory, mode: ''}
     - {path: "{{ aap_self_hosted_preflight_work_root }}/secrets/.vault-pass.txt", type: file, mode: '0600'}
