@@ -246,10 +246,12 @@
 - name: Protect trusted loopback host-key file
   ansible.builtin.file:
     path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/known_hosts"
-    state: file
+    state: touch
     owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
     group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
     mode: "0600"
+    access_time: preserve
+    modification_time: preserve
 
 - name: Copy protected rollout inputs
   ansible.builtin.copy:
