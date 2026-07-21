@@ -70,7 +70,7 @@ Environment:
   ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only file> (optional; requires known_hosts)
   ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<trusted file> (required for key or agent use)
   ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING=true|false (default: false; forwards only SSH_AUTH_SOCK)
-  ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt> (one option per line)
+  ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
@@ -285,17 +285,39 @@ configure_ssh_transport() {
   chmod 0700 "${staged_dir}"
   staged_known_hosts="${staged_dir}/known_hosts"
   install -m 0400 "${ssh_known_hosts_file}" "${staged_known_hosts}"
+  cat > "${staged_dir}/config" <<'EOF'
+Host *
+    UserKnownHostsFile /runner/.ssh/known_hosts
+    GlobalKnownHostsFile /dev/null
+    StrictHostKeyChecking yes
+EOF
   if [[ -n "${ssh_private_key_file}" ]]; then
     staged_key="${staged_dir}/id_selected"
     install -m 0400 "${ssh_private_key_file}" "${staged_key}"
     validate_owner_only_secret_file "${staged_key}" "staged SSH private key"
+    cat >> "${staged_dir}/config" <<'EOF'
+    IdentityFile /runner/.ssh/id_selected
+    IdentitiesOnly yes
+EOF
     cmd+=(--senv "ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected")
   else
     cmd+=(--eev "${SSH_AUTH_SOCK}:/runner/ssh-agent.sock:rw")
     cmd+=(--senv "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
   fi
+  chmod 0400 "${staged_dir}/config"
   cmd+=(--eev "${staged_dir}:/runner/.ssh:ro")
   cmd+=(--senv "ANSIBLE_HOST_KEY_CHECKING=True")
+  # Keep the repository's ssh_args (including ControlPersist) and add only the
+  # strict, container-local configuration file.
+  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config")
+  if [[ -n "${ANSIBLE_SSH_ARGS:-}" ]]; then
+    ssh_args_lower="${ANSIBLE_SSH_ARGS,,}"
+    if [[ "${ssh_args_lower}" =~ (stricthostkeychecking|userknownhostsfile|globalknownhostsfile|identityfile|identitiesonly) ]]; then
+      echo "ANSIBLE_SSH_ARGS must not override the enforced SSH trust or identity settings." >&2
+      exit 1
+    fi
+    cmd+=(--senv "ANSIBLE_SSH_ARGS=${ANSIBLE_SSH_ARGS}")
+  fi
   ensure_ee_identity_mapping
 }
 
@@ -478,8 +500,6 @@ export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTI
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
 collections_path_without_overlays="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
-roles_path="${REPO_ROOT}/roles:/runner/project/roles:/usr/share/ansible/roles:/runner/roles"
-export ANSIBLE_ROLES_PATH="${ANSIBLE_ROLES_PATH:-${roles_path}}"
 if [[ "${ee_only_collections}" == "true" ]]; then
   collections_path_without_overlays="/usr/share/ansible/collections:/usr/share/automation-controller/collections"
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
@@ -539,7 +559,6 @@ case "${subcommand}" in
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
     cmd+=(--ce "${nav_container_engine}")
     cmd+=(--senv "ANSIBLE_COLLECTIONS_PATH=${ANSIBLE_COLLECTIONS_PATH}")
-    cmd+=(--senv "ANSIBLE_ROLES_PATH=${ANSIBLE_ROLES_PATH}")
     # In RPM/runtime mode, runbooks live under /opt/modulix. Mirror that path
     # into the nested EE so imported runbooks resolve correctly.
     if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
@@ -552,15 +571,7 @@ case "${subcommand}" in
       cmd+=(--eei "${nav_ee_image}")
     fi
     if [[ -n "${nav_ee_container_options}" ]]; then
-      while IFS= read -r nav_ee_container_option; do
-        nav_ee_container_option="$(
-          printf '%s' "${nav_ee_container_option}" \
-            | sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
-        )"
-        if [[ -n "${nav_ee_container_option}" ]]; then
-          cmd+=("--co=${nav_ee_container_option}")
-        fi
-      done <<< "${nav_ee_container_options}"
+      cmd+=("--co=${nav_ee_container_options}")
     fi
     if [[ -n "${nav_pull_policy}" ]]; then
       cmd+=(--pp "${nav_pull_policy}")
