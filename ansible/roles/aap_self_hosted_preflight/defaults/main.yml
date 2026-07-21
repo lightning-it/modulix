@@ -1,6 +1,7 @@
 ---
 aap_self_hosted_preflight_enabled: false
-aap_self_hosted_preflight_fqdn: "{{ aap_fqdn | default(inventory_hostname, true) }}"
+aap_self_hosted_preflight_fqdn: >-
+  {{ aap_fqdn | default(ansible_fqdn | default(inventory_hostname, true), true) }}
 aap_self_hosted_preflight_rollout_user: svc_ansible
 aap_self_hosted_preflight_install_user: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
 aap_self_hosted_preflight_work_root: "/appl/aap-rollout/{{ aap_self_hosted_preflight_fqdn }}"

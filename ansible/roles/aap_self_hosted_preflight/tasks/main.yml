@@ -120,6 +120,7 @@
     - /etc/subuid
     - /etc/subgid
   register: aap_self_hosted_preflight_subid
+  no_log: true
 
 - name: Validate installation-user subordinate-ID maps
   ansible.builtin.assert:

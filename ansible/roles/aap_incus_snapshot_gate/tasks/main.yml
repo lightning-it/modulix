@@ -4,7 +4,6 @@
     that:
       - aap_incus_snapshot_gate_instance | trim | length > 0
       - >-
-        aap_incus_snapshot_gate_expected_address
         (aap_incus_snapshot_gate_expected_address
          | ansible.utils.ipaddr('ipv4')) is string
       - aap_incus_snapshot_gate_baseline_snapshot | trim | length > 0
