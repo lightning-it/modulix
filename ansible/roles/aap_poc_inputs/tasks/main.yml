@@ -93,6 +93,7 @@
       - default
       - --vault-password-file
       - "{{ aap_poc_inputs_vault_password_file }}"
+      - --
       - "{{ aap_poc_inputs_vault_file }}.tmp"
   register: aap_poc_inputs_encrypt
   changed_when: aap_poc_inputs_encrypt.rc == 0
@@ -105,6 +106,7 @@
   ansible.builtin.command:
     argv:
       - mv
+      - --
       - "{{ aap_poc_inputs_vault_file }}.tmp"
       - "{{ aap_poc_inputs_vault_file }}"
   changed_when: true
