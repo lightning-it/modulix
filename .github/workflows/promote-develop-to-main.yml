@@ -33,23 +33,6 @@ jobs:
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - name: Resolve release automation App bot identity
-        id: release-bot
-        env:
-          APP_SLUG: ${{ steps.release-app.outputs.app-slug }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          bot_json="$(gh api "users/${APP_SLUG}%5Bbot%5D")"
-          login="$(jq -r '.login // ""' <<<"$bot_json")"
-          bot_id="$(jq -r '.id // ""' <<<"$bot_json")"
-          if [ "$login" != "${APP_SLUG}[bot]" ] || ! [[ "$bot_id" =~ ^[0-9]+$ ]]; then
-            echo "::error::Unable to resolve the release automation App bot identity."
-            exit 1
-          fi
-          echo "login=$login" >>"$GITHUB_OUTPUT"
-          echo "email=${bot_id}+${login}@users.noreply.github.com" >>"$GITHUB_OUTPUT"
-
       - name: Create or update promotion PR
         env:
           RELEASE_TOKEN: ${{ steps.release-app.outputs.token }}
