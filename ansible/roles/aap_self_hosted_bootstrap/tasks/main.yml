@@ -108,7 +108,7 @@
     regexp: >-
       ^\S+\s+(?:\S+\s+)*{{ aap_self_hosted_bootstrap_fqdn | regex_escape }}(?:\s|$).*$
     line: >-
-      {{ aap_self_hosted_bootstrap_host_address }}
+      {{ aap_self_hosted_bootstrap_host_address | ansible.utils.ipaddr('address') }}
       {{ aap_self_hosted_bootstrap_fqdn }}
       {{ aap_self_hosted_bootstrap_fqdn.split('.')[0] }}
     state: present

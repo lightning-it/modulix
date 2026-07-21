@@ -13,7 +13,6 @@ aap_self_hosted_preflight_minimum_rhel_version: "9.6"
 aap_self_hosted_preflight_minimum_vcpus: 4
 aap_self_hosted_preflight_minimum_memory_mb: 32000
 aap_self_hosted_preflight_appl_minimum_free_mb: 80000
-aap_self_hosted_preflight_initial: false
 aap_self_hosted_preflight_registry_auth_file: "{{ aap_self_hosted_preflight_work_root }}/secrets/registry-auth.json"
 aap_self_hosted_preflight_ee_image: "{{ aap_ee_runtime_image | default('', true) }}"
 aap_self_hosted_preflight_expected_graphroot: >-
