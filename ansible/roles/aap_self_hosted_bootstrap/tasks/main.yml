@@ -267,6 +267,7 @@
   register: aap_self_hosted_bootstrap_image_exists
   changed_when: false
   failed_when: aap_self_hosted_bootstrap_image_exists.rc not in [0, 1]
+  check_mode: false
 
 - name: Pull approved execution-environment image when absent
   ansible.builtin.command:
@@ -281,5 +282,5 @@
   register: aap_self_hosted_bootstrap_image_pull
   changed_when: aap_self_hosted_bootstrap_image_pull.rc == 0
   when:
-    - aap_self_hosted_bootstrap_image_exists.rc == 1
     - not ansible_check_mode
+    - aap_self_hosted_bootstrap_image_exists.rc | default(0) == 1

@@ -130,6 +130,7 @@
       type: file
       mode: '0600'
   register: aap_self_hosted_preflight_workspace
+  no_log: true
 
 - name: Require protected rollout workspace files
   ansible.builtin.assert:
@@ -144,6 +145,7 @@
   loop: "{{ aap_self_hosted_preflight_workspace.results }}"
   loop_control:
     label: "{{ item.item.path }}"
+  no_log: true
 
 - name: Resolve checked-out automation tag
   ansible.builtin.command:

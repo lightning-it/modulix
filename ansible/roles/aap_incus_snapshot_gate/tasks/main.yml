@@ -24,7 +24,7 @@
 
 - name: Record Incus instance state
   ansible.builtin.set_fact:
-    aap_incus_snapshot_gate_state: "{{ (aap_incus_snapshot_gate_query.stdout | from_json | first) }}"
+    aap_incus_snapshot_gate_state: "{{ (aap_incus_snapshot_gate_query.stdout | from_json | first | default({})) }}"
   changed_when: false
 
 - name: Validate Incus instance and recovery snapshot

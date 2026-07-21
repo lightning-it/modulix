@@ -99,6 +99,7 @@
     content: "{\"auths\": {}}\n"
     mode: "0600"
     force: false
+  no_log: true
 
 - name: Reinspect encrypted PoC Vault output
   ansible.builtin.stat:
