@@ -1,4 +1,4 @@
-# aap_self_hosted_bootstrap_bootstrap
+# aap_self_hosted_bootstrap
 
 Bootstraps a target-specific self-hosted AAP workspace from a workstation over
 an already trusted SSH path. All environment values and protected file paths

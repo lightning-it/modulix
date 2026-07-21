@@ -553,6 +553,10 @@ case "${subcommand}" in
     fi
     if [[ -n "${nav_ee_container_options}" ]]; then
       while IFS= read -r nav_ee_container_option; do
+        nav_ee_container_option="$(
+          printf '%s' "${nav_ee_container_option}" \
+            | sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+        )"
         if [[ -n "${nav_ee_container_option}" ]]; then
           cmd+=("--co=${nav_ee_container_option}")
         fi

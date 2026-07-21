@@ -34,8 +34,13 @@
       - ansible_facts.memtotal_mb | int >= aap_self_hosted_preflight_minimum_memory_mb | int
       - (ansible_facts.selinux | default({})).status == 'enabled'
       - (ansible_facts.selinux | default({})).mode == 'enforcing'
-      - ansible_facts.packages.get('ansible-core', [])[0].version is version('2.16.18', '>=')
-    fail_msg: Prepared RHEL host identity, capacity, SELinux, or ansible-core gate failed.
+      - "'ansible-core' in ansible_facts.packages"
+      - >-
+        ansible_facts.packages.get('ansible-core', [{}])[0].version
+        | default('0') is version('2.16.18', '>=')
+    fail_msg: >-
+      Prepared RHEL host identity, capacity, SELinux, or ansible-core gate failed;
+      ansible-core must be installed at version 2.16.18 or newer.
     quiet: true
 
 - name: Resolve application filesystem
