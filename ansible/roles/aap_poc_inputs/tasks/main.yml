@@ -98,6 +98,7 @@
     dest: "{{ aap_poc_inputs_registry_auth_file }}"
     content: "{\"auths\": {}}\n"
     mode: "0600"
+    force: false
 
 - name: Reinspect encrypted PoC Vault output
   ansible.builtin.stat:
