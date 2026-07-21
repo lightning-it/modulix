@@ -288,6 +288,7 @@ configure_ssh_transport() {
   cat > "${staged_dir}/config" <<'EOF'
 Host *
     UserKnownHostsFile /runner/.ssh/known_hosts
+    GlobalKnownHostsFile /dev/null
     StrictHostKeyChecking yes
 EOF
   chmod 0400 "${staged_dir}/config"
