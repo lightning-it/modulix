@@ -1,0 +1,20 @@
+---
+aap_self_hosted_preflight_enabled: false
+aap_self_hosted_preflight_fqdn: >-
+  {{ aap_fqdn | default(ansible_fqdn | default(inventory_hostname, true), true) }}
+aap_self_hosted_preflight_rollout_user: svc_ansible
+aap_self_hosted_preflight_install_user: "{{ aap_deploy_install_user | default('svc_aap', true) }}"
+aap_self_hosted_preflight_work_root: "/appl/aap-rollout/{{ aap_self_hosted_preflight_fqdn }}"
+aap_self_hosted_preflight_project_dir: "{{ aap_self_hosted_preflight_work_root }}/project/modulix-automation"
+aap_self_hosted_preflight_project_version: ""
+aap_self_hosted_preflight_supplementary_version: ""
+aap_self_hosted_preflight_supplementary_dir: >-
+  {{ aap_self_hosted_preflight_project_dir }}/ansible/collections/ansible_collections/lit/supplementary
+aap_self_hosted_preflight_minimum_rhel_version: "9.6"
+aap_self_hosted_preflight_minimum_vcpus: 4
+aap_self_hosted_preflight_minimum_memory_mb: 32000
+aap_self_hosted_preflight_appl_minimum_free_mb: 80000
+aap_self_hosted_preflight_registry_auth_file: "{{ aap_self_hosted_preflight_work_root }}/secrets/registry-auth.json"
+aap_self_hosted_preflight_ee_image: "{{ aap_ee_runtime_image | default('', true) }}"
+aap_self_hosted_preflight_expected_graphroot: >-
+  /appl/home/{{ aap_self_hosted_preflight_install_user }}/.local/share/containers/storage

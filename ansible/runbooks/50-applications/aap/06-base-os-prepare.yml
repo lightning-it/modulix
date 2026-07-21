@@ -1,6 +1,6 @@
 ---
 # AAP base OS substrate preparation.
-# The reusable logic lives in lit.supplementary.aap_base_os and
+# The reusable logic lives in lit.supplementary.aap_host_prepare and
 # lit.supplementary.aap_preflight.
 
 - name: Prepare AAP base OS substrate
@@ -12,9 +12,10 @@
   tasks:
     - name: Prepare AAP base OS substrate
       ansible.builtin.include_role:
-        name: lit.supplementary.aap_base_os
+        name: lit.supplementary.aap_host_prepare
         apply:
-          tags: [aap, aap_base_os]
+          tags: [aap, aap_host_prepare, aap_base_os]
       tags:
         - aap
+        - aap_host_prepare
         - aap_base_os
