@@ -200,6 +200,7 @@ stage_secret_file_for_ee() {
   local source="${!var_name:-}"
   local staged_dir=""
   local staged_file=""
+  local staged_container_dir="/runner/.ansible-secrets"
 
   if [[ -z "${source}" ]]; then
     return 0
@@ -220,8 +221,8 @@ stage_secret_file_for_ee() {
   staged_file="${staged_dir}/ansible-vault-pass.txt"
   install -m 0400 "${source}" "${staged_file}"
   validate_owner_only_secret_file "${staged_file}" "staged ${var_name}"
-  export "${var_name}=${staged_file}"
-  cmd+=(--eev "${staged_dir}:${staged_dir}:ro")
+  export "${var_name}=${staged_container_dir}/ansible-vault-pass.txt"
+  cmd+=(--eev "${staged_dir}:${staged_container_dir}:ro")
   ensure_ee_identity_mapping
 }
 
