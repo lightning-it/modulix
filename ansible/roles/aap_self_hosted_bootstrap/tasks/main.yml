@@ -287,12 +287,6 @@
            }}/ansible/inventories/production/group_vars/aaps/aap.yml
       mode: "0600"
       secret: false
-    - src: "{{ aap_self_hosted_bootstrap_bundle_src }}"
-      dest: >-
-        {{ aap_self_hosted_bootstrap_work_root
-           }}/artifacts/aap-containerized-setup.tar.gz
-      mode: "0600"
-      secret: false
     - src: "{{ aap_self_hosted_bootstrap_manifest_src }}"
       dest: "{{ aap_self_hosted_bootstrap_work_root }}/artifacts/manifest.zip"
       mode: "0600"
@@ -300,6 +294,49 @@
   loop_control:
     label: "{{ item.dest }}"
   no_log: "{{ item.secret }}"
+
+- name: Inspect rollout artifact directory
+  ansible.builtin.stat:
+    path: "{{ aap_self_hosted_bootstrap_work_root }}/artifacts"
+  register: aap_self_hosted_bootstrap_artifact_dir_stat
+
+- name: Report planned setup-bundle transfer
+  ansible.builtin.debug:
+    msg: The approved AAP setup bundle would be transferred with streaming rsync.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not (aap_self_hosted_bootstrap_artifact_dir_stat.stat.isdir | default(false))
+
+- name: Transfer approved setup bundle with streaming checksum comparison
+  ansible.posix.synchronize:
+    src: "{{ aap_self_hosted_bootstrap_bundle_src }}"
+    dest: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+    mode: push
+    archive: false
+    checksum: true
+    compress: false
+    perms: false
+    times: false
+    rsync_opts:
+      - --chmod=F600
+  become: false
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_artifact_dir_stat.stat.isdir | default(false))
+
+- name: Protect staged setup bundle
+  ansible.builtin.file:
+    path: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+    state: file
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0600"
+  when: not ansible_check_mode
 
 - name: Check approved execution-environment image
   ansible.builtin.command:
