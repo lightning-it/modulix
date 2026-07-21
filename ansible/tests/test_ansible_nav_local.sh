@@ -27,6 +27,7 @@ set -euo pipefail
           "${staged_dir}/known_hosts" \
           | paste -sd, -
       )"
+      printf 'SSH_CONFIG=%s\n' "$(tr '\n' ';' < "${staged_dir}/config")"
     fi
   done
 } > "${FAKE_NAV_OUTPUT}"
@@ -76,9 +77,10 @@ env \
 
 grep -Fxq 'ARG=ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected' "${ssh_output}"
 grep -Fxq 'ARG=ANSIBLE_HOST_KEY_CHECKING=True' "${ssh_output}"
-grep -Fxq 'ARG=ANSIBLE_SSH_ARGS=-F/runner/.ssh/config' "${ssh_output}"
+grep -Fxq 'ARG=ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config' "${ssh_output}"
 grep -Fxq 'SSH_STAGE_FILES=config,id_selected,known_hosts' "${ssh_output}"
 grep -Fxq 'SSH_STAGE_MODES=400,400,400' "${ssh_output}"
+grep -Fxq 'SSH_CONFIG=Host *;    UserKnownHostsFile /runner/.ssh/known_hosts;    StrictHostKeyChecking yes;    IdentityFile /runner/.ssh/id_selected;    IdentitiesOnly yes;' "${ssh_output}"
 if grep -Fq "${home}/.ssh" "${ssh_output}"; then
   echo "The complete SSH directory was mounted into the execution environment." >&2
   exit 1
