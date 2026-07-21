@@ -4,11 +4,11 @@
   gather_facts: false
   tasks:
     # - name: Test required values
-      # ansible.builtin.assert:
-        # that:
-          # - zone is defined
-          # - base_domain is defined
-          # - cluster_id is defined
+    #   ansible.builtin.assert:
+    #     that:
+    #       - zone is defined
+    #       - base_domain is defined
+    #       - cluster_id is defined
 
     - name: Render requirements.yml
       ansible.builtin.template:

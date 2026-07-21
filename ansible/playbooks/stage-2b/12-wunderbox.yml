@@ -35,7 +35,8 @@
 #
 # - NGINX:
 #   - Internal-only (no internet). Publishes stable internal FQDN endpoints on 443.
-#   - During provisioning, services may be reached on their native ports (e.g., Vault 8200) until nginx_config is applied.
+#   - During provisioning, services may be reached on their native ports
+#     (e.g., Vault 8200) until nginx_config is applied.
 #   - Tag convenience: nginx_deploy is also tagged with nginx_config so `-t nginx_config` ensures nginx is present.
 # -----------------------------------------------------------------------------
 
@@ -147,4 +148,3 @@
         apply:
           tags: [nginx, nginx_config]
       tags: [nginx, nginx_config]
-  
