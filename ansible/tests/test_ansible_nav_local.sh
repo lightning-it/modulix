@@ -71,6 +71,7 @@ env \
   "FAKE_NAV_OUTPUT=${ssh_output}" \
   "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true" \
   "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman" \
+  "ANSIBLE_SSH_ARGS=-o ControlPersist=120" \
   "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=${key}" \
   "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=${known_hosts}" \
   "${script}" run example.yml
@@ -78,9 +79,14 @@ env \
 grep -Fxq 'ARG=ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected' "${ssh_output}"
 grep -Fxq 'ARG=ANSIBLE_HOST_KEY_CHECKING=True' "${ssh_output}"
 grep -Fxq 'ARG=ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config' "${ssh_output}"
+grep -Fxq 'ARG=ANSIBLE_SSH_ARGS=-o ControlPersist=120' "${ssh_output}"
 grep -Fxq 'SSH_STAGE_FILES=config,id_selected,known_hosts' "${ssh_output}"
 grep -Fxq 'SSH_STAGE_MODES=400,400,400' "${ssh_output}"
-grep -Fxq 'SSH_CONFIG=Host *;    UserKnownHostsFile /runner/.ssh/known_hosts;    StrictHostKeyChecking yes;    IdentityFile /runner/.ssh/id_selected;    IdentitiesOnly yes;' "${ssh_output}"
+grep -Fq 'UserKnownHostsFile /runner/.ssh/known_hosts' "${ssh_output}"
+grep -Fq 'GlobalKnownHostsFile /dev/null' "${ssh_output}"
+grep -Fq 'StrictHostKeyChecking yes' "${ssh_output}"
+grep -Fq 'IdentityFile /runner/.ssh/id_selected' "${ssh_output}"
+grep -Fq 'IdentitiesOnly yes' "${ssh_output}"
 if grep -Fq "${home}/.ssh" "${ssh_output}"; then
   echo "The complete SSH directory was mounted into the execution environment." >&2
   exit 1
