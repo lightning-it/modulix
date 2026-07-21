@@ -27,7 +27,7 @@ jobs:
   approve-shared-assets:
     name: Approve trusted shared-assets PR
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     permissions:
       checks: read
       contents: write
@@ -531,7 +531,7 @@ jobs:
 
           wait_for_required_checks() {
             local state
-            for _ in $(seq 1 60); do
+            for _ in $(seq 1 180); do
               if ! assert_live_safe; then
                 return 1
               fi
