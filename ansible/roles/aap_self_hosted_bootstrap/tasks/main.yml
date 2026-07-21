@@ -320,6 +320,7 @@
     compress: false
     perms: false
     times: false
+    use_ssh_args: true
     rsync_opts:
       - --chmod=F600
   become: false
