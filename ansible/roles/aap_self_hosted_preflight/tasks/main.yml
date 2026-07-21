@@ -83,7 +83,7 @@
 - name: Record rollout account home
   ansible.builtin.set_fact:
     aap_self_hosted_preflight_rollout_home: >-
-      {{ ansible_facts.getent_passwd[aap_self_hosted_preflight_rollout_user][4] }}
+      {{ ansible_facts.getent_passwd[aap_self_hosted_preflight_rollout_user][5] }}
   changed_when: false
 
 - name: Resolve installation identity

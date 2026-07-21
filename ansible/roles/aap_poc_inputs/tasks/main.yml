@@ -13,6 +13,7 @@
 - name: Validate owner-only Vault password file
   ansible.builtin.stat:
     path: "{{ aap_poc_inputs_vault_password_file }}"
+    follow: false
   register: aap_poc_inputs_vault_password_stat
   no_log: true
 
@@ -31,6 +32,7 @@
 - name: Inspect encrypted PoC Vault output
   ansible.builtin.stat:
     path: "{{ aap_poc_inputs_vault_file }}"
+    follow: false
   register: aap_poc_inputs_vault_stat
   no_log: true
 
@@ -57,6 +59,7 @@
 - name: Inspect temporary PoC Vault path
   ansible.builtin.stat:
     path: "{{ aap_poc_inputs_vault_file }}.tmp"
+    follow: false
   register: aap_poc_inputs_vault_tmp_stat
   no_log: true
   when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))

@@ -41,6 +41,7 @@
   ansible.builtin.stat:
     path: "{{ item.path }}"
     get_checksum: false
+    follow: false
   delegate_to: localhost
   become: false
   register: aap_self_hosted_bootstrap_source_stats
@@ -78,7 +79,7 @@
 - name: Record rollout account paths
   ansible.builtin.set_fact:
     aap_self_hosted_bootstrap_rollout_home: >-
-      {{ ansible_facts.getent_passwd[aap_self_hosted_bootstrap_rollout_user][4] }}
+      {{ ansible_facts.getent_passwd[aap_self_hosted_bootstrap_rollout_user][5] }}
   changed_when: false
 
 - name: Resolve installation user account
