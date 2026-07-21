@@ -83,8 +83,17 @@
 - name: Record rollout account home
   ansible.builtin.set_fact:
     aap_self_hosted_preflight_rollout_home: >-
-      {{ ansible_facts.getent_passwd[aap_self_hosted_preflight_rollout_user][5] }}
+      {{ ansible_facts.getent_passwd[aap_self_hosted_preflight_rollout_user][-2] }}
   changed_when: false
+
+- name: Validate rollout account home
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_rollout_home is string
+      - aap_self_hosted_preflight_rollout_home is match('^/[^/].*')
+      - aap_self_hosted_preflight_rollout_home != '/bin/bash'
+    fail_msg: The rollout account must have an absolute home directory.
+    quiet: true
 
 - name: Resolve installation identity
   ansible.builtin.getent:
