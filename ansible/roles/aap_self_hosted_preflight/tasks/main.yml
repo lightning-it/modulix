@@ -7,11 +7,11 @@
       - aap_self_hosted_preflight_project_version is not match('^CHANGE_ME')
       - aap_self_hosted_preflight_supplementary_version is match('^[0-9a-f]{40}$')
       - aap_self_hosted_preflight_ee_image is string
-      - aap_self_hosted_preflight_ee_image | trim | length > 0
-      - aap_self_hosted_preflight_ee_image is not search('(?i):latest$')
-      - aap_self_hosted_preflight_ee_image is not search('CHANGE_ME')
+      - >-
+        aap_self_hosted_preflight_ee_image
+        is match('^[A-Za-z0-9._/:+-]+@sha256:[0-9a-f]{64}$')
     fail_msg: >-
-      Supply the approved immutable automation tag and fixed execution-environment image.
+      Supply the approved immutable automation tag and digest-pinned execution-environment image.
     quiet: true
 
 - name: Gather prepared-host facts

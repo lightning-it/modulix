@@ -18,9 +18,9 @@
           | ansible.utils.ipaddr('address')
         ) is string
       - aap_self_hosted_bootstrap_ee_image is string
-      - aap_self_hosted_bootstrap_ee_image | trim | length > 0
-      - aap_self_hosted_bootstrap_ee_image is not search('(?i):latest$')
-      - aap_self_hosted_bootstrap_ee_image is not search('CHANGE_ME')
+      - >-
+        aap_self_hosted_bootstrap_ee_image
+        is match('^[A-Za-z0-9._/:+-]+@sha256:[0-9a-f]{64}$')
       - item is string
       - item | trim | length > 0
       - item is not match('^CHANGE_ME')
