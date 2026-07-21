@@ -1,5 +1,6 @@
 ---
 aap_self_hosted_preflight_enabled: false
+aap_self_hosted_preflight_phase: "{{ aap_preflight_phase | default('full') }}"
 aap_self_hosted_preflight_fqdn: >-
   {{ aap_fqdn | default(ansible_fqdn | default(inventory_hostname, true), true) }}
 aap_self_hosted_preflight_rollout_user: svc_ansible
