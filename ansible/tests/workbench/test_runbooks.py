@@ -202,6 +202,8 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             RUNBOOK_DIRECTORY / "tasks" / "validate-incus.yml"
         ).read_text(encoding="utf-8")
 
+        self.assertIn("volatile.initial_source", task_text)
+
         root_guard_index = task_names.index(
             "Require mapping-safe decoded Incus evidence roots"
         )
