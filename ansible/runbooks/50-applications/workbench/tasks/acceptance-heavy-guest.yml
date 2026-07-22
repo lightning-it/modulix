@@ -146,6 +146,12 @@
     - name: Apply the guest role twice and require second-run idempotence
       ansible.builtin.command:
         argv:
+          - /usr/bin/env
+          - >-
+            {{
+              'PATH=' ~ workbench_acceptance.python_environment.path ~ '/bin:'
+              ~ '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+            }}
           - "{{ workbench_acceptance_workspace }}/workbench-heavy-guest.sh"
           - >-
             {{ workbench_acceptance_workspace }}/guest-{{ workbench_heavy_guest_sequence }}-inventory.yml
@@ -160,11 +166,6 @@
       become_user: "{{ workbench_acceptance_operator }}"
       environment:
         HOME: "{{ workbench_acceptance_operator_home }}"
-        PATH: >-
-          {{
-            workbench_acceptance.python_environment.path
-            ~ '/bin:' ~ ansible_env.PATH
-          }}
       changed_when: true
       no_log: true
   always:
