@@ -37,6 +37,10 @@ case "$ansible_bin:$ansible_playbook_bin" in
     exit 2
     ;;
 esac
+if [ "$(dirname -- "$ansible_bin")" != "$(dirname -- "$ansible_playbook_bin")" ]; then
+  echo "Refusing Ansible executables from different isolated toolchains." >&2
+  exit 2
+fi
 if [ ! -x "$ansible_bin" ] || [ ! -x "$ansible_playbook_bin" ]; then
   echo "The isolated Ansible executables are unavailable." >&2
   exit 1
