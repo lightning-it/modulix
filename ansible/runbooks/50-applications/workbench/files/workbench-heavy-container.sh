@@ -68,10 +68,10 @@ fi
 
 buildah inspect --type image "$image" >"$artifacts/buildah-inspect.json"
 skopeo inspect "containers-storage:${image}" >"$artifacts/skopeo-inspect.json"
-buildah push "$image" "oci-archive:$context/image.oci.tar"
-trivy image --input "$context/image.oci.tar" --format json --output "$artifacts/trivy.json"
-syft "oci-archive:$context/image.oci.tar" --output "json=$artifacts/syft.json"
-grype "oci-archive:$context/image.oci.tar" --output json --file "$artifacts/grype.json"
+buildah push "$image" "docker-archive:$context/image.tar"
+trivy image --input "$context/image.tar" --format json --output "$artifacts/trivy.json"
+syft "docker-archive:$context/image.tar" --output "json=$artifacts/syft.json"
+grype "docker-archive:$context/image.tar" --output json --file "$artifacts/grype.json"
 
 for report in \
   buildah-inspect.json \
