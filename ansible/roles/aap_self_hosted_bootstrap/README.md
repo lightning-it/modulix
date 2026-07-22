@@ -1,5 +1,9 @@
 # aap_self_hosted_bootstrap
 
+The rollout execution environment and managed host must both provide `rsync`;
+the role validates this read-only prerequisite before streaming the AAP setup
+bundle.
+
 Bootstraps a target-specific self-hosted AAP workspace from a workstation over
 an already trusted SSH path. All environment values and protected file paths
 are inventory inputs. The role creates the workspace, checks out an immutable

@@ -222,6 +222,7 @@ stage_secret_file_for_ee() {
   install -m 0400 "${source}" "${staged_file}"
   validate_owner_only_secret_file "${staged_file}" "staged ${var_name}"
   export "${var_name}=${staged_container_dir}/ansible-vault-pass.txt"
+  cmd+=(--senv "${var_name}=${staged_container_dir}/ansible-vault-pass.txt")
   cmd+=(--eev "${staged_dir}:${staged_container_dir}:ro")
   ensure_ee_identity_mapping
 }
@@ -510,7 +511,11 @@ elif [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
 else
   export ANSIBLE_COLLECTIONS_PATH
 fi
-export ANSIBLE_ROLES_PATH="${roles_path_without_overlays}"
+if [[ -z "${ANSIBLE_ROLES_PATH:-}" ]]; then
+  export ANSIBLE_ROLES_PATH="${roles_path_without_overlays}"
+else
+  export ANSIBLE_ROLES_PATH
+fi
 mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}" "${ANSIBLE_LOCAL_TEMP}"
 if [[ -z "${collections_stamp_file}" ]]; then
   collections_stamp_file="${ANSIBLE_HOME}/collections.requirements.sha256"

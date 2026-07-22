@@ -308,6 +308,21 @@
     - ansible_check_mode
     - not (aap_self_hosted_bootstrap_artifact_dir_stat.stat.isdir | default(false))
 
+- name: Verify rsync is available in the rollout execution environment
+  ansible.builtin.command:
+    argv: [rsync, --version]
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+
+- name: Verify rsync is available on the managed host
+  ansible.builtin.command:
+    argv: [rsync, --version]
+  become: false
+  check_mode: false
+  changed_when: false
+
 - name: Transfer approved setup bundle with streaming checksum comparison
   ansible.posix.synchronize:
     src: "{{ aap_self_hosted_bootstrap_bundle_src }}"

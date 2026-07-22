@@ -66,6 +66,15 @@ if grep -Fq '/tmp/untrusted-overlay' "${ee_only_output}"; then
 fi
 grep -Fq '/runner/project/ansible/roles' "${ee_only_output}"
 
+custom_roles_output="${test_root}/custom-roles.out"
+env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${custom_roles_output}" \
+  "ANSIBLE_ROLES_PATH=/tmp/custom-roles" \
+  "${script}" run example.yml
+grep -Fxq 'ROLES=/tmp/custom-roles' "${custom_roles_output}"
+grep -Fxq 'ARG=ANSIBLE_ROLES_PATH=/tmp/custom-roles' "${custom_roles_output}"
+
 project_overlay_output="${test_root}/project-overlay.out"
 env \
   "${common_env[@]}" \
@@ -124,6 +133,9 @@ env \
 
 grep -Fxq \
   'VAULT_PASSWORD_FILE=/runner/.ansible-secrets/ansible-vault-pass.txt' \
+  "${vault_output}"
+grep -Fxq \
+  'ARG=ANSIBLE_VAULT_PASSWORD_FILE=/runner/.ansible-secrets/ansible-vault-pass.txt' \
   "${vault_output}"
 grep -Fxq 'VAULT_STAGE_FILES=ansible-vault-pass.txt' "${vault_output}"
 grep -Fxq 'VAULT_STAGE_MODE=400' "${vault_output}"
