@@ -266,8 +266,13 @@
         or workbench_incus_existing_pool_data.get('driver', '') == 'btrfs'
       - >-
         workbench_incus_device_fstype.stdout | trim != 'btrfs'
-        or workbench_incus_existing_pool_data.get('config', {}).get('source', '')
-        == workbench_incus_storage.device
+        or workbench_incus_storage.device in [
+          workbench_incus_existing_pool_data.get('config', {}).get('source', ''),
+          workbench_incus_existing_pool_data.get('config', {}).get(
+            'volatile.initial_source',
+            ''
+          )
+        ]
       - >-
         workbench_incus_device_mount.rc == 1
         or (workbench_incus_device_mount.stdout.split() + ['', ''])[0]

@@ -394,6 +394,9 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         storage_tasks = load_yaml(
             RUNBOOK_DIRECTORY / "tasks" / "incus-storage.yml"
         )
+        storage_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "incus-storage.yml"
+        ).read_text(encoding="utf-8")
         storage_names = [task["name"] for task in storage_tasks]
         storage_root_index = storage_names.index(
             "Require the dedicated Incus storage contract root"
@@ -423,6 +426,7 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "workbench_incus_declared_storage_pools | length == 1",
             storage_declaration,
         )
+        self.assertIn("volatile.initial_source", storage_text)
         for task in storage_tasks[:storage_pool_index]:
             self.assertNotIn(
                 "workbench_incus_declared_storage_pools[0]", repr(task)
