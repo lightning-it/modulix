@@ -203,6 +203,7 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("volatile.initial_source", task_text)
+        self.assertIn("item.key | replace('_', '-')", task_text)
 
         root_guard_index = task_names.index(
             "Require mapping-safe decoded Incus evidence roots"
@@ -254,7 +255,7 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "workbench_validation_incus_network_config.get('ipv6.address', none)",
             "workbench_validation_incus_profile_devices.get('eth0', none)",
             "workbench_validation_incus_profile_devices.get('root', none)",
-            "workbench_validation_incus_project_config.get('limits.' ~ item.key, none)",
+            "workbench_validation_incus_project_config.get(",
             "workbench_validation_incus_profile_config.get('limits.cpu', none)",
             "workbench_validation_incus_profile_config.get('limits.memory', none)",
             "workbench_validation_incus_profile_eth0.get('network', none)",

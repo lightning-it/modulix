@@ -371,7 +371,10 @@
   ansible.builtin.assert:
     that:
       - >-
-        workbench_validation_incus_project_config.get('limits.' ~ item.key, none)
+        workbench_validation_incus_project_config.get(
+          'limits.' ~ (item.key | replace('_', '-')),
+          none
+        )
         == item.value | string
     fail_msg: "Incus project limit {{ item.key }} has drifted."
     quiet: true
