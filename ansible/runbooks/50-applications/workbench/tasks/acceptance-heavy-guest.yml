@@ -160,6 +160,11 @@
       become_user: "{{ workbench_acceptance_operator }}"
       environment:
         HOME: "{{ workbench_acceptance_operator_home }}"
+        PATH: >-
+          {{
+            workbench_acceptance.python_environment.path
+            ~ '/bin:' ~ ansible_env.PATH
+          }}
       changed_when: true
       no_log: true
   always:

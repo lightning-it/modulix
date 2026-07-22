@@ -227,6 +227,7 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("Require a non-empty Heavy guest authorized_keys file", heavy_guest_text)
         self.assertIn("Wait for the Heavy guest SSH listener", heavy_guest_text)
+        self.assertIn("workbench_acceptance.python_environment.path", heavy_guest_text)
 
         root_guard_index = task_names.index(
             "Require mapping-safe decoded Incus evidence roots"
