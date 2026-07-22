@@ -33,10 +33,9 @@ case "$context:$artifacts" in
     exit 2
     ;;
 esac
-exec 2>"$artifacts/container-error.raw.log"
-
 umask 077
 mkdir -p "$context" "$artifacts"
+exec 2>"$artifacts/container-error.raw.log"
 printf '%s\n' "$expected_stdout" >"$context/payload.txt"
 cat >"$context/Containerfile" <<EOF
 FROM ${base_image}

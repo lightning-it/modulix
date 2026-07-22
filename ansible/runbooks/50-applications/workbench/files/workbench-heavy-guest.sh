@@ -28,7 +28,8 @@ case "$first_log:$second_log" in
     exit 2
     ;;
 esac
-exec 2>"$first_log"
+ansible_bin="$(realpath --canonicalize-existing -- "$ansible_bin")"
+ansible_playbook_bin="$(realpath --canonicalize-existing -- "$ansible_playbook_bin")"
 case "$ansible_bin:$ansible_playbook_bin" in
   /opt/lit/*/bin/ansible:/opt/lit/*/bin/ansible-playbook) ;;
   *)

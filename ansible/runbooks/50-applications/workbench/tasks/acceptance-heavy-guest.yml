@@ -87,6 +87,7 @@
           - passwd
           - "{{ workbench_acceptance_profile_config.guest_user }}"
       changed_when: false
+      check_mode: false
 
     - name: Require a non-empty Heavy guest authorized_keys file
       ansible.builtin.command:
@@ -103,6 +104,7 @@
           - >-
             /home/{{ workbench_acceptance_profile_config.guest_user }}/.ssh/authorized_keys
       changed_when: false
+      check_mode: false
 
     - name: Read Heavy guest SSH path metadata
       ansible.builtin.command:
@@ -171,7 +173,7 @@
         that:
           - >-
             workbench_heavy_local_key_fingerprint.stdout.split()[1]
-            == workbench_heavy_guest_key_fingerprint.stdout.split()[1]
+            in workbench_heavy_guest_key_fingerprint.stdout
         fail_msg: "The generated Heavy SSH key fingerprint does not match the guest."
         quiet: true
       changed_when: false

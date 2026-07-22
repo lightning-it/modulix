@@ -211,6 +211,7 @@
       - status
       - --wait
   changed_when: false
+  check_mode: false
   when: workbench_acceptance_cloud_init_enabled | default(false) | bool
 
 - name: Read resulting acceptance instance configuration
