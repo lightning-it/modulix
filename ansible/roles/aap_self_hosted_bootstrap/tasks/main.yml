@@ -324,9 +324,7 @@
     rsync_opts:
       - --chmod=F600
   become: false
-  when:
-    - not ansible_check_mode
-      or (aap_self_hosted_bootstrap_artifact_dir_stat.stat.isdir | default(false))
+  when: not ansible_check_mode
 
 - name: Protect staged setup bundle
   ansible.builtin.file:
