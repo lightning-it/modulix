@@ -295,10 +295,12 @@
     label: "{{ item.dest }}"
   no_log: "{{ item.secret }}"
 
-- name: Inspect rollout artifact directory
+- name: Inspect staged setup bundle
   ansible.builtin.stat:
-    path: "{{ aap_self_hosted_bootstrap_work_root }}/artifacts"
-  register: aap_self_hosted_bootstrap_artifact_dir_stat
+    path: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+  register: aap_self_hosted_bootstrap_bundle_stat
 
 - name: Report planned setup-bundle transfer
   ansible.builtin.debug:
@@ -306,7 +308,7 @@
   changed_when: true
   when:
     - ansible_check_mode
-    - not (aap_self_hosted_bootstrap_artifact_dir_stat.stat.isdir | default(false))
+    - not (aap_self_hosted_bootstrap_bundle_stat.stat.exists | default(false))
 
 - name: Verify rsync is available in the rollout execution environment
   ansible.builtin.command:
