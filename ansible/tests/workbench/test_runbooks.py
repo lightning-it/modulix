@@ -222,6 +222,11 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         self.assertEqual(network_task["retries"], 30)
         self.assertEqual(network_task["delay"], 2)
         self.assertIn("127.0.0.1", network_task["until"])
+        heavy_guest_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Require a non-empty Heavy guest authorized_keys file", heavy_guest_text)
+        self.assertIn("Wait for the Heavy guest SSH listener", heavy_guest_text)
 
         root_guard_index = task_names.index(
             "Require mapping-safe decoded Incus evidence roots"

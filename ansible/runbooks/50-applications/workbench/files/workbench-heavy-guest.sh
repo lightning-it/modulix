@@ -46,6 +46,7 @@ for _attempt in $(seq 1 60); do
   sleep 5
 done
 if [ "$ready" -ne 1 ]; then
+  ansible -i "$inventory" all -m ansible.builtin.ping >"$first_log" 2>&1 || true
   echo "Nested Ansible could not reach the ephemeral guest." >&2
   exit 1
 fi

@@ -77,6 +77,60 @@
         quiet: true
       changed_when: false
 
+    - name: Require the generated Heavy guest account
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - getent
+          - passwd
+          - "{{ workbench_acceptance_profile_config.guest_user }}"
+      changed_when: false
+
+    - name: Require a non-empty Heavy guest authorized_keys file
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - test
+          - -s
+          - >-
+            /home/{{ workbench_acceptance_profile_config.guest_user }}/.ssh/authorized_keys
+      changed_when: false
+
+    - name: Require the Heavy guest SSH service
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - systemctl
+          - is-active
+          - ssh
+      changed_when: false
+
+    - name: Wait for the Heavy guest SSH listener
+      ansible.builtin.wait_for:
+        host: "{{ workbench_heavy_guest_addresses | first }}"
+        port: 22
+        connect_timeout: 2
+        timeout: 120
+      changed_when: false
+
     - name: Write temporary Heavy guest inventory
       ansible.builtin.copy:
         dest: >-
