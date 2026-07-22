@@ -26,15 +26,19 @@
           - --format=json
       register: workbench_heavy_guest_list
       changed_when: false
+      failed_when: false
       check_mode: false
       until: >-
-        (
-          workbench_heavy_guest_list.stdout | from_json | first
-        ).state.network | dict2items
+        workbench_heavy_guest_list.rc == 0
+        and workbench_heavy_guest_list.stdout | trim | length > 0
+        and (
+          (workbench_heavy_guest_list.stdout | from_json | first).state.network
+          | dict2items
           | map(attribute='value.addresses') | flatten
           | selectattr('family', 'equalto', 'inet')
           | rejectattr('address', 'equalto', '127.0.0.1')
           | list | length > 0
+        )
       retries: 30
       delay: 2
 
