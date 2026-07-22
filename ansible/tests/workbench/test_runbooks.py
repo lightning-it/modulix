@@ -205,6 +205,12 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         self.assertIn("volatile.initial_source", task_text)
         self.assertIn("item.key | replace('_', '-')", task_text)
 
+        instance_start_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-instance-start.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Wait for generated cloud-init configuration to finish", instance_start_text)
+        self.assertIn("- timeout\n      - \"300\"", instance_start_text)
+
         heavy_guest_tasks = load_yaml(
             RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
         )

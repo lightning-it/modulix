@@ -195,6 +195,24 @@
   delay: 5
   until: workbench_acceptance_guest_ready.rc == 0
 
+- name: Wait for generated cloud-init configuration to finish
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "300"
+      - incus
+      - --force-local
+      - --project
+      - "{{ workbench_acceptance_profile_config.project }}"
+      - exec
+      - "{{ workbench_acceptance_current_instance_name }}"
+      - "--"
+      - cloud-init
+      - status
+      - --wait
+  changed_when: false
+  when: workbench_acceptance_cloud_init_enabled | default(false) | bool
+
 - name: Read resulting acceptance instance configuration
   ansible.builtin.command:
     argv:
