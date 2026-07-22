@@ -33,6 +33,7 @@ case "$context:$artifacts" in
     exit 2
     ;;
 esac
+exec 2>"$artifacts/container-error.raw.log"
 
 umask 077
 mkdir -p "$context" "$artifacts"
