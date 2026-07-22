@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 5 ]; then
-  echo "Usage: $0 INVENTORY PLAYBOOK FIRST_LOG SECOND_LOG LOCAL_TEMP" >&2
+if [ "$#" -ne 7 ]; then
+  echo "Usage: $0 INVENTORY PLAYBOOK FIRST_LOG SECOND_LOG LOCAL_TEMP ANSIBLE ANSIBLE_PLAYBOOK" >&2
   exit 2
 fi
 
@@ -11,6 +11,8 @@ playbook="$2"
 first_log="$3"
 second_log="$4"
 local_temp="$5"
+ansible_bin="$6"
+ansible_playbook_bin="$7"
 
 case "$inventory:$playbook:$local_temp" in
   /tmp/lit-workbench-acceptance/*:/tmp/lit-workbench-acceptance/*:/tmp/lit-workbench-acceptance/*) ;;
@@ -19,6 +21,17 @@ case "$inventory:$playbook:$local_temp" in
     exit 2
     ;;
 esac
+case "$ansible_bin:$ansible_playbook_bin" in
+  /opt/lit/*/bin/ansible:/opt/lit/*/bin/ansible-playbook) ;;
+  *)
+    echo "Refusing Ansible executables outside the isolated toolchain." >&2
+    exit 2
+    ;;
+esac
+if [ ! -x "$ansible_bin" ] || [ ! -x "$ansible_playbook_bin" ]; then
+  echo "The isolated Ansible executables are unavailable." >&2
+  exit 1
+fi
 case "$first_log:$second_log" in
   /home/*/artifacts/workbench-acceptance/*:/home/*/artifacts/workbench-acceptance/*) ;;
   *)
@@ -39,20 +52,20 @@ export LC_ALL=C.UTF-8
 
 ready=0
 for _attempt in $(seq 1 60); do
-  if ansible -i "$inventory" all -m ansible.builtin.ping >/dev/null 2>&1; then
+  if "$ansible_bin" -i "$inventory" all -m ansible.builtin.ping >/dev/null 2>&1; then
     ready=1
     break
   fi
   sleep 5
 done
 if [ "$ready" -ne 1 ]; then
-  ansible -i "$inventory" all -m ansible.builtin.ping >"$first_log" 2>&1 || true
+  "$ansible_bin" -i "$inventory" all -m ansible.builtin.ping >"$first_log" 2>&1 || true
   echo "Nested Ansible could not reach the ephemeral guest." >&2
   exit 1
 fi
 
-ansible-playbook -i "$inventory" "$playbook" >"$first_log" 2>&1
-ansible-playbook -i "$inventory" "$playbook" >"$second_log" 2>&1
+"$ansible_playbook_bin" -i "$inventory" "$playbook" >"$first_log" 2>&1
+"$ansible_playbook_bin" -i "$inventory" "$playbook" >"$second_log" 2>&1
 
 if ! grep -Eq 'changed=[1-9][0-9]*[[:space:]]+unreachable=0[[:space:]]+failed=0' "$first_log"; then
   echo "The first guest-role application did not produce a successful change." >&2
