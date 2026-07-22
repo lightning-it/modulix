@@ -33,9 +33,9 @@ case "$context:$artifacts" in
     exit 2
     ;;
 esac
-
 umask 077
 mkdir -p "$context" "$artifacts"
+exec 2>"$artifacts/container-error.raw.log"
 printf '%s\n' "$expected_stdout" >"$context/payload.txt"
 cat >"$context/Containerfile" <<EOF
 FROM ${base_image}
@@ -66,10 +66,14 @@ if [ "$actual_stdout" != "$expected_stdout" ]; then
 fi
 
 buildah inspect --type image "$image" >"$artifacts/buildah-inspect.json"
-skopeo inspect "containers-storage:${image}" >"$artifacts/skopeo-inspect.json"
-trivy image --format json --output "$artifacts/trivy.json" "$image"
-syft "podman:$image" --output "json=$artifacts/syft.json"
-grype "podman:$image" --output json --file "$artifacts/grype.json"
+buildah push "$image" "docker-archive:$context/image.tar"
+skopeo inspect "docker-archive:$context/image.tar" >"$artifacts/skopeo-inspect.json"
+echo "Scanning exported image with Trivy." >&2
+trivy image --input "$context/image.tar" --format json --output "$artifacts/trivy.json"
+echo "Generating exported-image SBOM with Syft." >&2
+syft "docker-archive:$context/image.tar" --output "json=$artifacts/syft.json"
+echo "Scanning exported-image SBOM with Grype." >&2
+grype "docker-archive:$context/image.tar" --output json --file "$artifacts/grype.json"
 
 for report in \
   buildah-inspect.json \

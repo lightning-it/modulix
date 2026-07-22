@@ -45,6 +45,18 @@ def normalized_task_module_names(task):
 class WorkbenchRunbookSafetyTests(unittest.TestCase):
     """Keep the single-target and cleanup safety boundaries reviewable."""
 
+    def test_python_package_validation_uses_canonical_names(self):
+        validation = (
+            RUNBOOK_DIRECTORY / "tasks" / "validate-tools.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "item.name | lower | regex_replace('[-_.]+', '-')", validation
+        )
+        self.assertIn(
+            "item.key | lower | regex_replace('[-_.]+', '-')", validation
+        )
+        self.assertIn("Reject colliding canonical Python package names", validation)
+
     def test_all_public_workbench_plays_are_serial_and_fail_closed(self):
         for name in (
             "20-ubuntu-setup.yml",
@@ -194,6 +206,40 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             RUNBOOK_DIRECTORY / "tasks" / "validate-incus.yml"
         ).read_text(encoding="utf-8")
 
+        self.assertIn("get('volatile.initial_source', none)", task_text)
+        self.assertIn("'limits.' ~ (item.key | replace('_', '-'))", task_text)
+
+        instance_start_tasks = load_yaml(
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-instance-start.yml"
+        )
+        cloud_init_wait = next(
+            task for task in instance_start_tasks
+            if task["name"] == "Wait for generated cloud-init configuration to finish"
+        )
+        self.assertEqual(
+            cloud_init_wait["ansible.builtin.command"]["argv"][:2],
+            ["timeout", "300"],
+        )
+        self.assertIs(cloud_init_wait["check_mode"], False)
+
+        heavy_guest_tasks = load_yaml(
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
+        )
+        network_task = next(
+            task
+            for task in heavy_guest_tasks[1]["block"]
+            if task["name"] == "Read Heavy guest network state"
+        )
+        self.assertEqual(network_task["retries"], 30)
+        self.assertEqual(network_task["delay"], 2)
+        self.assertIn("127.0.0.1", network_task["until"])
+        heavy_guest_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Require a non-empty Heavy guest authorized_keys file", heavy_guest_text)
+        self.assertIn("Wait for the Heavy guest SSH listener", heavy_guest_text)
+        self.assertIn("workbench_acceptance.python_environment.path", heavy_guest_text)
+
         root_guard_index = task_names.index(
             "Require mapping-safe decoded Incus evidence roots"
         )
@@ -244,7 +290,8 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "workbench_validation_incus_network_config.get('ipv6.address', none)",
             "workbench_validation_incus_profile_devices.get('eth0', none)",
             "workbench_validation_incus_profile_devices.get('root', none)",
-            "workbench_validation_incus_project_config.get('limits.' ~ item.key, none)",
+            "workbench_validation_incus_project_config.get(",
+            "'limits.' ~ (item.key | replace('_', '-'))",
             "workbench_validation_incus_profile_config.get('limits.cpu', none)",
             "workbench_validation_incus_profile_config.get('limits.memory', none)",
             "workbench_validation_incus_profile_eth0.get('network', none)",
@@ -383,6 +430,9 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         storage_tasks = load_yaml(
             RUNBOOK_DIRECTORY / "tasks" / "incus-storage.yml"
         )
+        storage_text = (
+            RUNBOOK_DIRECTORY / "tasks" / "incus-storage.yml"
+        ).read_text(encoding="utf-8")
         storage_names = [task["name"] for task in storage_tasks]
         storage_root_index = storage_names.index(
             "Require the dedicated Incus storage contract root"
@@ -412,6 +462,7 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "workbench_incus_declared_storage_pools | length == 1",
             storage_declaration,
         )
+        self.assertIn("volatile.initial_source", storage_text)
         for task in storage_tasks[:storage_pool_index]:
             self.assertNotIn(
                 "workbench_incus_declared_storage_pools[0]", repr(task)
