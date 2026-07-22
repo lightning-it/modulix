@@ -21,6 +21,14 @@ case "$inventory:$playbook:$local_temp" in
     exit 2
     ;;
 esac
+case "$first_log:$second_log" in
+  /home/*/artifacts/workbench-acceptance/*:/home/*/artifacts/workbench-acceptance/*) ;;
+  *)
+    echo "Refusing guest evidence paths outside the artifact namespace." >&2
+    exit 2
+    ;;
+esac
+exec 2>"$first_log"
 case "$ansible_bin:$ansible_playbook_bin" in
   /opt/lit/*/bin/ansible:/opt/lit/*/bin/ansible-playbook) ;;
   *)
@@ -32,13 +40,6 @@ if [ ! -x "$ansible_bin" ] || [ ! -x "$ansible_playbook_bin" ]; then
   echo "The isolated Ansible executables are unavailable." >&2
   exit 1
 fi
-case "$first_log:$second_log" in
-  /home/*/artifacts/workbench-acceptance/*:/home/*/artifacts/workbench-acceptance/*) ;;
-  *)
-    echo "Refusing guest evidence paths outside the artifact namespace." >&2
-    exit 2
-    ;;
-esac
 
 mkdir -p "$local_temp"
 export ANSIBLE_LOCAL_TEMP="$local_temp"
