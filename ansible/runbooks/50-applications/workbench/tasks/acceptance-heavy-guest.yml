@@ -27,6 +27,20 @@
       register: workbench_heavy_guest_list
       changed_when: false
       check_mode: false
+      until: >-
+        {%- set guests = workbench_heavy_guest_list.stdout | from_json -%}
+        {%- set guest = guests | first | default({}) -%}
+        {%- set state = guest.get('state', {}) if guest is mapping else {} -%}
+        {%- set network = state.get('network', {}) if state is mapping else {} -%}
+        {{
+          network | dict2items
+          | map(attribute='value.addresses') | flatten
+          | selectattr('family', 'equalto', 'inet')
+          | rejectattr('address', 'equalto', '127.0.0.1')
+          | list | length > 0
+        }}
+      retries: 30
+      delay: 2
 
     - name: Require Heavy guest list evidence
       ansible.builtin.assert:

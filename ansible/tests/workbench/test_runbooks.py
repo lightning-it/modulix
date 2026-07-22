@@ -205,6 +205,18 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         self.assertIn("volatile.initial_source", task_text)
         self.assertIn("item.key | replace('_', '-')", task_text)
 
+        heavy_guest_tasks = load_yaml(
+            RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
+        )
+        network_task = next(
+            task
+            for task in heavy_guest_tasks[1]["block"]
+            if task["name"] == "Read Heavy guest network state"
+        )
+        self.assertEqual(network_task["retries"], 30)
+        self.assertEqual(network_task["delay"], 2)
+        self.assertIn("127.0.0.1", network_task["until"])
+
         root_guard_index = task_names.index(
             "Require mapping-safe decoded Incus evidence roots"
         )
