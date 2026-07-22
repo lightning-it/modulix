@@ -67,10 +67,13 @@ if [ "$actual_stdout" != "$expected_stdout" ]; then
 fi
 
 buildah inspect --type image "$image" >"$artifacts/buildah-inspect.json"
-skopeo inspect "containers-storage:${image}" >"$artifacts/skopeo-inspect.json"
 buildah push "$image" "docker-archive:$context/image.tar"
+skopeo inspect "docker-archive:$context/image.tar" >"$artifacts/skopeo-inspect.json"
+echo "Scanning exported image with Trivy." >&2
 trivy image --input "$context/image.tar" --format json --output "$artifacts/trivy.json"
+echo "Generating exported-image SBOM with Syft." >&2
 syft "docker-archive:$context/image.tar" --output "json=$artifacts/syft.json"
+echo "Scanning exported-image SBOM with Grype." >&2
 grype "docker-archive:$context/image.tar" --output json --file "$artifacts/grype.json"
 
 for report in \
