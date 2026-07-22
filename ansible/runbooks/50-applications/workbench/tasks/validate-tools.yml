@@ -87,7 +87,10 @@
     workbench_validation_python_package_map: >-
       {{
         workbench_validation_python_package_map
-        | combine({(item.name | lower): (item.version | string)})
+        | combine({
+            (item.name | lower | regex_replace('[-_.]+', '-')):
+            (item.version | string)
+          })
       }}
   loop: "{{ workbench_validation_python_packages.stdout | from_json }}"
   loop_control:
@@ -97,8 +100,13 @@
 - name: Require declared isolated Python package versions
   ansible.builtin.assert:
     that:
-      - item.key | lower in workbench_validation_python_package_map
-      - workbench_validation_python_package_map.get(item.key | lower, '') == (item.value | string)
+      - >-
+        item.key | lower | regex_replace('[-_.]+', '-')
+        in workbench_validation_python_package_map
+      - >-
+        workbench_validation_python_package_map.get(
+          item.key | lower | regex_replace('[-_.]+', '-'), ''
+        ) == (item.value | string)
     fail_msg: "Python package {{ item.key }} is absent or has version drift."
     quiet: true
   loop: "{{ workbench_acceptance.python_environment.packages | dict2items }}"

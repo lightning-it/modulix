@@ -45,6 +45,14 @@ def normalized_task_module_names(task):
 class WorkbenchRunbookSafetyTests(unittest.TestCase):
     """Keep the single-target and cleanup safety boundaries reviewable."""
 
+    def test_python_package_validation_uses_canonical_names(self):
+        validation = (
+            RUNBOOK_DIRECTORY / "tasks" / "validate-tools.yml"
+        ).read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            validation.count("regex_replace('[-_.]+', '-')"), 3
+        )
+
     def test_all_public_workbench_plays_are_serial_and_fail_closed(self):
         for name in (
             "20-ubuntu-setup.yml",
