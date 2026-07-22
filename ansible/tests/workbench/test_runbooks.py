@@ -49,9 +49,13 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
         validation = (
             RUNBOOK_DIRECTORY / "tasks" / "validate-tools.yml"
         ).read_text(encoding="utf-8")
-        self.assertGreaterEqual(
-            validation.count("regex_replace('[-_.]+', '-')"), 3
+        self.assertIn(
+            "item.name | lower | regex_replace('[-_.]+', '-')", validation
         )
+        self.assertIn(
+            "item.key | lower | regex_replace('[-_.]+', '-')", validation
+        )
+        self.assertIn("Reject colliding canonical Python package names", validation)
 
     def test_all_public_workbench_plays_are_serial_and_fail_closed(self):
         for name in (
@@ -202,14 +206,21 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             RUNBOOK_DIRECTORY / "tasks" / "validate-incus.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("volatile.initial_source", task_text)
-        self.assertIn("item.key | replace('_', '-')", task_text)
+        self.assertIn("get('volatile.initial_source', none)", task_text)
+        self.assertIn("'limits.' ~ (item.key | replace('_', '-'))", task_text)
 
-        instance_start_text = (
+        instance_start_tasks = load_yaml(
             RUNBOOK_DIRECTORY / "tasks" / "acceptance-instance-start.yml"
-        ).read_text(encoding="utf-8")
-        self.assertIn("Wait for generated cloud-init configuration to finish", instance_start_text)
-        self.assertIn("- timeout\n      - \"300\"", instance_start_text)
+        )
+        cloud_init_wait = next(
+            task for task in instance_start_tasks
+            if task["name"] == "Wait for generated cloud-init configuration to finish"
+        )
+        self.assertEqual(
+            cloud_init_wait["ansible.builtin.command"]["argv"][:2],
+            ["timeout", "300"],
+        )
+        self.assertIs(cloud_init_wait["check_mode"], False)
 
         heavy_guest_tasks = load_yaml(
             RUNBOOK_DIRECTORY / "tasks" / "acceptance-heavy-guest.yml"
@@ -280,6 +291,7 @@ class WorkbenchRunbookSafetyTests(unittest.TestCase):
             "workbench_validation_incus_profile_devices.get('eth0', none)",
             "workbench_validation_incus_profile_devices.get('root', none)",
             "workbench_validation_incus_project_config.get(",
+            "'limits.' ~ (item.key | replace('_', '-'))",
             "workbench_validation_incus_profile_config.get('limits.cpu', none)",
             "workbench_validation_incus_profile_config.get('limits.memory', none)",
             "workbench_validation_incus_profile_eth0.get('network', none)",
