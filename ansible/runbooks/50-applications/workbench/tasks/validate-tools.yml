@@ -38,7 +38,14 @@
       - item.item.argv | length > 0
       - item.item.version_regex | default('') | length > 0
       - item.rc == 0
-      - (item.stdout ~ "\n" ~ item.stderr) is search(item.item.version_regex)
+      - >-
+        (
+          (item.stdout_lines | default([]))
+          + (item.stderr_lines | default([]))
+        )
+        | select('search', item.item.version_regex)
+        | list
+        | length > 0
     fail_msg: >-
       Tool probe failed or returned an unexpected version for
       {{ item.item.name | default('unnamed tool') }} from
