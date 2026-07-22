@@ -79,8 +79,17 @@
 - name: Record rollout account paths
   ansible.builtin.set_fact:
     aap_self_hosted_bootstrap_rollout_home: >-
-      {{ ansible_facts.getent_passwd[aap_self_hosted_bootstrap_rollout_user][5] }}
+      {{ ansible_facts.getent_passwd[aap_self_hosted_bootstrap_rollout_user][-2] }}
   changed_when: false
+
+- name: Validate rollout account home
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_bootstrap_rollout_home is string
+      - aap_self_hosted_bootstrap_rollout_home is match('^/[^/].*')
+      - aap_self_hosted_bootstrap_rollout_home != '/bin/bash'
+    fail_msg: The rollout account must have an absolute home directory.
+    quiet: true
 
 - name: Resolve installation user account
   ansible.builtin.getent:
@@ -165,6 +174,13 @@
     group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
     mode: "0700"
 
+- name: Inspect dedicated rollout public key
+  ansible.builtin.stat:
+    path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}.pub"
+    follow: false
+  register: aap_self_hosted_bootstrap_rollout_public_key_stat
+  no_log: true
+
 - name: Generate dedicated rollout SSH key pair
   community.crypto.openssh_keypair:
     path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}"
@@ -180,6 +196,9 @@
     src: "{{ aap_self_hosted_bootstrap_ssh_key_path }}.pub"
   register: aap_self_hosted_bootstrap_rollout_public_key
   no_log: true
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_rollout_public_key_stat.stat.exists | default(false))
 
 - name: Authorize dedicated rollout public key
   ansible.posix.authorized_key:
@@ -187,6 +206,9 @@
     key: "{{ aap_self_hosted_bootstrap_rollout_public_key.content | b64decode | trim }}"
     state: present
   no_log: true
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_rollout_public_key_stat.stat.exists | default(false))
 
 - name: Inspect locally trusted SSH host public-key file
   ansible.builtin.stat:
@@ -224,10 +246,12 @@
 - name: Protect trusted loopback host-key file
   ansible.builtin.file:
     path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/known_hosts"
-    state: file
+    state: touch
     owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
     group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
     mode: "0600"
+    access_time: preserve
+    modification_time: preserve
 
 - name: Copy protected rollout inputs
   ansible.builtin.copy:
@@ -263,12 +287,6 @@
            }}/ansible/inventories/production/group_vars/aaps/aap.yml
       mode: "0600"
       secret: false
-    - src: "{{ aap_self_hosted_bootstrap_bundle_src }}"
-      dest: >-
-        {{ aap_self_hosted_bootstrap_work_root
-           }}/artifacts/aap-containerized-setup.tar.gz
-      mode: "0600"
-      secret: false
     - src: "{{ aap_self_hosted_bootstrap_manifest_src }}"
       dest: "{{ aap_self_hosted_bootstrap_work_root }}/artifacts/manifest.zip"
       mode: "0600"
@@ -276,6 +294,65 @@
   loop_control:
     label: "{{ item.dest }}"
   no_log: "{{ item.secret }}"
+
+- name: Inspect staged setup bundle
+  ansible.builtin.stat:
+    path: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+  register: aap_self_hosted_bootstrap_bundle_stat
+
+- name: Report planned setup-bundle transfer
+  ansible.builtin.debug:
+    msg: The approved AAP setup bundle would be transferred with streaming rsync.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not (aap_self_hosted_bootstrap_bundle_stat.stat.exists | default(false))
+
+- name: Verify rsync is available in the rollout execution environment
+  ansible.builtin.command:
+    argv: [rsync, --version]
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+
+- name: Verify rsync is available on the managed host
+  ansible.builtin.command:
+    argv: [rsync, --version]
+  become: false
+  check_mode: false
+  changed_when: false
+
+- name: Transfer approved setup bundle with streaming checksum comparison
+  ansible.posix.synchronize:
+    src: "{{ aap_self_hosted_bootstrap_bundle_src }}"
+    dest: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+    mode: push
+    archive: false
+    checksum: true
+    compress: false
+    perms: false
+    times: false
+    use_ssh_args: true
+    rsync_opts:
+      - --chmod=F600
+  become: false
+  when: not ansible_check_mode
+
+- name: Protect staged setup bundle
+  ansible.builtin.file:
+    path: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+    state: file
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0600"
+  when: not ansible_check_mode
 
 - name: Check approved execution-environment image
   ansible.builtin.command:

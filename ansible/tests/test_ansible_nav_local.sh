@@ -15,6 +15,8 @@ cat > "${fake_bin}/ansible-navigator" <<'EOF'
 set -euo pipefail
 {
   printf 'COLLECTIONS=%s\n' "${ANSIBLE_COLLECTIONS_PATH:-}"
+  printf 'ROLES=%s\n' "${ANSIBLE_ROLES_PATH:-}"
+  printf 'VAULT_PASSWORD_FILE=%s\n' "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
   printf 'ARG=%s\n' "$@"
   for argument in "$@"; do
     if [[ "${argument}" == *:/runner/.ssh:ro ]]; then
@@ -28,6 +30,11 @@ set -euo pipefail
           | paste -sd, -
       )"
       printf 'SSH_CONFIG=%s\n' "$(tr '\n' ';' < "${staged_dir}/config")"
+    fi
+    if [[ "${argument}" == *:/runner/.ansible-secrets:ro ]]; then
+      staged_dir="${argument%:/runner/.ansible-secrets:ro}"
+      printf 'VAULT_STAGE_FILES=%s\n' "$(find "${staged_dir}" -maxdepth 1 -type f -printf '%f\n' | sort | paste -sd, -)"
+      printf 'VAULT_STAGE_MODE=%s\n' "$(stat -c '%a' "${staged_dir}/ansible-vault-pass.txt")"
     fi
   done
 } > "${FAKE_NAV_OUTPUT}"
@@ -57,6 +64,25 @@ if grep -Fq '/tmp/untrusted-overlay' "${ee_only_output}"; then
   echo "EE-only mode retained an inherited collection overlay." >&2
   exit 1
 fi
+grep -Fq '/runner/project/ansible/roles' "${ee_only_output}"
+
+custom_roles_output="${test_root}/custom-roles.out"
+env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${custom_roles_output}" \
+  "ANSIBLE_ROLES_PATH=/tmp/custom-roles" \
+  "${script}" run example.yml
+grep -Fxq 'ROLES=/tmp/custom-roles' "${custom_roles_output}"
+grep -Fxq 'ARG=ANSIBLE_ROLES_PATH=/tmp/custom-roles' "${custom_roles_output}"
+
+project_overlay_output="${test_root}/project-overlay.out"
+env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${project_overlay_output}" \
+  "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=false" \
+  "${script}" run example.yml
+
+grep -Fq '/runner/project/ansible/collections' "${project_overlay_output}"
 
 key="${home}/selected-key"
 known_hosts="${home}/selected-known-hosts"
@@ -91,6 +117,28 @@ if grep -Fq "${home}/.ssh" "${ssh_output}"; then
   echo "The complete SSH directory was mounted into the execution environment." >&2
   exit 1
 fi
+
+vault_password_file="${home}/vault-pass.txt"
+printf '%s\n' 'fixture-vault-password' > "${vault_password_file}"
+chmod 0600 "${vault_password_file}"
+
+vault_output="${test_root}/vault.out"
+env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${vault_output}" \
+  "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true" \
+  "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman" \
+  "ANSIBLE_VAULT_PASSWORD_FILE=${vault_password_file}" \
+  "${script}" run example.yml
+
+grep -Fxq \
+  'VAULT_PASSWORD_FILE=/runner/.ansible-secrets/ansible-vault-pass.txt' \
+  "${vault_output}"
+grep -Fxq \
+  'ARG=ANSIBLE_VAULT_PASSWORD_FILE=/runner/.ansible-secrets/ansible-vault-pass.txt' \
+  "${vault_output}"
+grep -Fxq 'VAULT_STAGE_FILES=ansible-vault-pass.txt' "${vault_output}"
+grep -Fxq 'VAULT_STAGE_MODE=400' "${vault_output}"
 
 if env \
   "${common_env[@]}" \

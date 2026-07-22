@@ -3,6 +3,7 @@
   ansible.builtin.assert:
     that:
       - aap_self_hosted_preflight_project_version is string
+      - aap_self_hosted_preflight_phase in ['initial', 'full']
       - aap_self_hosted_preflight_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
       - aap_self_hosted_preflight_project_version is not match('^CHANGE_ME')
       - aap_self_hosted_preflight_supplementary_version is match('^[0-9a-f]{40}$')
@@ -83,8 +84,17 @@
 - name: Record rollout account home
   ansible.builtin.set_fact:
     aap_self_hosted_preflight_rollout_home: >-
-      {{ ansible_facts.getent_passwd[aap_self_hosted_preflight_rollout_user][5] }}
+      {{ ansible_facts.getent_passwd[aap_self_hosted_preflight_rollout_user][-2] }}
   changed_when: false
+
+- name: Validate rollout account home
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_preflight_rollout_home is string
+      - aap_self_hosted_preflight_rollout_home is match('^/[^/].*')
+      - aap_self_hosted_preflight_rollout_home != '/bin/bash'
+    fail_msg: The rollout account must have an absolute home directory.
+    quiet: true
 
 - name: Resolve installation identity
   ansible.builtin.getent:
@@ -254,6 +264,7 @@
   become_flags: "-i"
   changed_when: false
   check_mode: false
+  when: aap_self_hosted_preflight_phase == 'full'
 
 - name: Validate runtime-user Podman graph root
   ansible.builtin.assert:
@@ -261,6 +272,7 @@
       - aap_self_hosted_preflight_graphroot.stdout | trim == aap_self_hosted_preflight_expected_graphroot
     fail_msg: The rootless Podman graph root differs from the approved path.
     quiet: true
+  when: aap_self_hosted_preflight_phase == 'full'
 
 - name: Check execution-environment image presence
   ansible.builtin.command:

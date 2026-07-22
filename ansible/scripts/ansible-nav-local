@@ -200,6 +200,7 @@ stage_secret_file_for_ee() {
   local source="${!var_name:-}"
   local staged_dir=""
   local staged_file=""
+  local staged_container_dir="/runner/.ansible-secrets"
 
   if [[ -z "${source}" ]]; then
     return 0
@@ -220,8 +221,9 @@ stage_secret_file_for_ee() {
   staged_file="${staged_dir}/ansible-vault-pass.txt"
   install -m 0400 "${source}" "${staged_file}"
   validate_owner_only_secret_file "${staged_file}" "staged ${var_name}"
-  export "${var_name}=${staged_file}"
-  cmd+=(--eev "${staged_dir}:${staged_dir}:ro")
+  export "${var_name}=${staged_container_dir}/ansible-vault-pass.txt"
+  cmd+=(--senv "${var_name}=${staged_container_dir}/ansible-vault-pass.txt")
+  cmd+=(--eev "${staged_dir}:${staged_container_dir}:ro")
   ensure_ee_identity_mapping
 }
 
@@ -499,7 +501,8 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
 export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-${ANSIBLE_HOME}/tmp}"
-collections_path_without_overlays="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+collections_path_without_overlays="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/ansible/collections-dev:/runner/project/ansible/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+roles_path_without_overlays="${REPO_ROOT}/roles:/runner/project/ansible/roles:/runner/project/roles:/usr/share/ansible/roles:/runner/roles"
 if [[ "${ee_only_collections}" == "true" ]]; then
   collections_path_without_overlays="/usr/share/ansible/collections:/usr/share/automation-controller/collections"
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
@@ -507,6 +510,11 @@ elif [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
 else
   export ANSIBLE_COLLECTIONS_PATH
+fi
+if [[ -z "${ANSIBLE_ROLES_PATH:-}" ]]; then
+  export ANSIBLE_ROLES_PATH="${roles_path_without_overlays}"
+else
+  export ANSIBLE_ROLES_PATH
 fi
 mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}" "${ANSIBLE_LOCAL_TEMP}"
 if [[ -z "${collections_stamp_file}" ]]; then
@@ -559,6 +567,7 @@ case "${subcommand}" in
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
     cmd+=(--ce "${nav_container_engine}")
     cmd+=(--senv "ANSIBLE_COLLECTIONS_PATH=${ANSIBLE_COLLECTIONS_PATH}")
+    cmd+=(--senv "ANSIBLE_ROLES_PATH=${ANSIBLE_ROLES_PATH}")
     # In RPM/runtime mode, runbooks live under /opt/modulix. Mirror that path
     # into the nested EE so imported runbooks resolve correctly.
     if [[ "${nav_ee_enabled}" == "true" && "${REPO_ROOT}" == "/opt/modulix/ansible" && -d "/opt/modulix" ]]; then
