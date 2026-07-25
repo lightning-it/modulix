@@ -69,7 +69,7 @@ podman run --rm \
   -v "$PWD":/workspace:Z \
   -w /workspace \
   quay.io/l-it/ee-wunder-devtools-ubi9:v1.9.4 \
-  bash -lc 'set -euo pipefail; tmpdir=$(mktemp -d); cp -a /workspace/. "$tmpdir"/; cd "$tmpdir"; rpmspec -P packaging/rpm/modulix-automation-runtime.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1; cp -f packaging/rpm/dist/*.src.rpm /workspace/packaging/rpm/dist/'
+  bash -lc 'set -euo pipefail; tmpdir=$(mktemp -d); tar -C /workspace --exclude=./.git --exclude=./ansible/.secrets --exclude=./ansible/.tmp -cf - . | tar -C "$tmpdir" -xf -; cd "$tmpdir"; rpmspec -P packaging/rpm/modulix-automation-runtime.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1; cp -f packaging/rpm/dist/*.src.rpm /workspace/packaging/rpm/dist/'
 ```
 
 ## RPM validation fallback

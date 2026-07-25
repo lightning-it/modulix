@@ -1,7 +1,7 @@
 ---
 - name: Microsoft Active Directory Setup
   hosts: dc
-  gather_facts: True
+  gather_facts: true
   roles:
     - name: Execute role active_directory
       role: active_directory

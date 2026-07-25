@@ -1,0 +1,52 @@
+---
+- name: Validate Incus recovery-gate inputs
+  ansible.builtin.assert:
+    that:
+      - aap_incus_snapshot_gate_instance is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+      - >-
+        (aap_incus_snapshot_gate_expected_address
+         | ansible.utils.ipaddr('ipv4')) is string
+      - aap_incus_snapshot_gate_baseline_snapshot is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+    fail_msg: Supply the exact Incus instance, IPv4 address and baseline snapshot.
+    quiet: true
+
+- name: Read Incus instance state and snapshots
+  ansible.builtin.command:
+    argv:
+      - incus
+      - list
+      - "{{ aap_incus_snapshot_gate_instance }}"
+      - --format
+      - json
+  register: aap_incus_snapshot_gate_query
+  changed_when: false
+  check_mode: false
+
+- name: Record Incus instance state
+  ansible.builtin.set_fact:
+    aap_incus_snapshot_gate_state: "{{ (aap_incus_snapshot_gate_query.stdout | from_json | first | default({})) }}"
+  changed_when: false
+
+- name: Validate Incus instance and recovery snapshot
+  ansible.builtin.assert:
+    that:
+      - aap_incus_snapshot_gate_state.get('name', '') == aap_incus_snapshot_gate_instance
+      - aap_incus_snapshot_gate_state.get('status', '') == 'Running'
+      - >-
+        aap_incus_snapshot_gate_expected_address
+        in (
+          aap_incus_snapshot_gate_state.get('state', {}).get('network', {}).values()
+          | map(attribute='addresses') | flatten
+          | selectattr('family', 'equalto', 'inet')
+          | map(attribute='address') | list
+        )
+      - >-
+        aap_incus_snapshot_gate_baseline_snapshot
+        in (aap_incus_snapshot_gate_state.get('snapshots', []) | map(attribute='name') | list)
+    fail_msg: The Incus instance, address, running state or recovery snapshot differs from approval.
+    quiet: true
+
+- name: Report Incus recovery gate success
+  ansible.builtin.debug:
+    msg: AAP_INCUS_RECOVERY_GATE_OK
+  changed_when: false

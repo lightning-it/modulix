@@ -70,6 +70,10 @@
         name: lit.supplementary.aap_cac
         apply:
           tags: [aap, aap_cac]
+      # CaC authentication creates and revokes a short-lived gateway token.
+      # The initial deployment check cannot obtain that token because the
+      # platform is not installed yet and check mode must not mutate it.
+      when: not ansible_check_mode
       tags:
         - aap
         - aap_cac

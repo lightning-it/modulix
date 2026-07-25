@@ -1,0 +1,36 @@
+---
+aap_self_hosted_bootstrap_fqdn: ""
+aap_self_hosted_bootstrap_rollout_user: svc_ansible
+aap_self_hosted_bootstrap_rollout_group: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+aap_self_hosted_bootstrap_install_user: svc_aap
+aap_self_hosted_bootstrap_work_root: "/appl/aap-rollout/{{ aap_self_hosted_bootstrap_fqdn }}"
+aap_self_hosted_bootstrap_remote_tmp: /appl/ansible-tmp
+aap_self_hosted_bootstrap_manage_hosts_entry: false
+aap_self_hosted_bootstrap_host_address: ""
+aap_self_hosted_bootstrap_project_repo: ""
+aap_self_hosted_bootstrap_project_version: ""
+aap_self_hosted_bootstrap_project_dir: "{{ aap_self_hosted_bootstrap_work_root }}/project/modulix-automation"
+aap_self_hosted_bootstrap_supplementary_repo: >-
+  https://github.com/lightning-it/ansible-collection-supplementary.git
+aap_self_hosted_bootstrap_supplementary_version: ""
+aap_self_hosted_bootstrap_supplementary_dir: >-
+  {{ aap_self_hosted_bootstrap_project_dir }}/ansible/collections/ansible_collections/lit/supplementary
+aap_self_hosted_bootstrap_ssh_key_path: >-
+  {{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/svc_ansible_aap
+aap_self_hosted_bootstrap_host_public_key_path: /etc/ssh/ssh_host_ed25519_key.pub
+aap_self_hosted_bootstrap_registry_auth_src: ""
+aap_self_hosted_bootstrap_vault_password_src: ""
+aap_self_hosted_bootstrap_encrypted_vault_src: ""
+aap_self_hosted_bootstrap_inventory_src: ""
+aap_self_hosted_bootstrap_group_vars_src: ""
+aap_self_hosted_bootstrap_bundle_src: ""
+aap_self_hosted_bootstrap_manifest_src: ""
+aap_self_hosted_bootstrap_ee_image: ""
+aap_self_hosted_bootstrap_workspace_directories:
+  - artifacts
+  - etc
+  - etc/tls
+  - logs
+  - project
+  - secrets
+  - tmp

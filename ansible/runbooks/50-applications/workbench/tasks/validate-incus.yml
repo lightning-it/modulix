@@ -319,8 +319,11 @@
         workbench_validation_incus_storage_data.get('driver', none)
         == workbench_acceptance.incus.storage_pool.driver
       - >-
-        workbench_validation_incus_storage_config.get('source', none)
-        == workbench_acceptance.incus.storage_pool.source
+        workbench_acceptance.incus.storage_pool.source
+        in [
+          workbench_validation_incus_storage_config.get('source', none),
+          workbench_validation_incus_storage_config.get('volatile.initial_source', none)
+        ]
       - >-
         workbench_validation_incus_network_data.get('type', none)
         == workbench_acceptance.incus.network.type
@@ -368,7 +371,10 @@
   ansible.builtin.assert:
     that:
       - >-
-        workbench_validation_incus_project_config.get('limits.' ~ item.key, none)
+        workbench_validation_incus_project_config.get(
+          'limits.' ~ (item.key | replace('_', '-')),
+          none
+        )
         == item.value | string
     fail_msg: "Incus project limit {{ item.key }} has drifted."
     quiet: true

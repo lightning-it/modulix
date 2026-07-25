@@ -38,7 +38,14 @@
       - item.item.argv | length > 0
       - item.item.version_regex | default('') | length > 0
       - item.rc == 0
-      - (item.stdout ~ "\n" ~ item.stderr) is search(item.item.version_regex)
+      - >-
+        (
+          (item.stdout_lines | default([]))
+          + (item.stderr_lines | default([]))
+        )
+        | select('search', item.item.version_regex)
+        | list
+        | length > 0
     fail_msg: >-
       Tool probe failed or returned an unexpected version for
       {{ item.item.name | default('unnamed tool') }} from
@@ -75,23 +82,43 @@
   ansible.builtin.set_fact:
     workbench_validation_python_package_map: {}
   changed_when: false
+
 - name: Build normalized Python package map
   ansible.builtin.set_fact:
     workbench_validation_python_package_map: >-
       {{
         workbench_validation_python_package_map
-        | combine({(item.name | lower): (item.version | string)})
+        | combine({
+            (item.name | lower | regex_replace('[-_.]+', '-')):
+            (item.version | string)
+          })
       }}
   loop: "{{ workbench_validation_python_packages.stdout | from_json }}"
   loop_control:
     label: "{{ item.name }}"
   changed_when: false
 
+- name: Reject colliding canonical Python package names
+  ansible.builtin.assert:
+    that:
+      - >-
+        workbench_validation_python_package_map | length
+        == workbench_validation_python_packages.stdout | from_json | length
+    fail_msg: >-
+      Python package inventory contains names that collide after canonicalization.
+    quiet: true
+  changed_when: false
+
 - name: Require declared isolated Python package versions
   ansible.builtin.assert:
     that:
-      - item.key | lower in workbench_validation_python_package_map
-      - workbench_validation_python_package_map.get(item.key | lower, '') == (item.value | string)
+      - >-
+        item.key | lower | regex_replace('[-_.]+', '-')
+        in workbench_validation_python_package_map
+      - >-
+        workbench_validation_python_package_map.get(
+          item.key | lower | regex_replace('[-_.]+', '-'), ''
+        ) == (item.value | string)
     fail_msg: "Python package {{ item.key }} is absent or has version drift."
     quiet: true
   loop: "{{ workbench_acceptance.python_environment.packages | dict2items }}"

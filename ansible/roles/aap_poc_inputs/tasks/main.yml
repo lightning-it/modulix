@@ -1,0 +1,149 @@
+---
+- name: Validate explicit PoC input generation approval
+  ansible.builtin.assert:
+    that:
+      - aap_poc_inputs_enabled | bool
+      - aap_poc_inputs_vault_password_file | trim | length > 0
+      - aap_poc_inputs_vault_file | trim | length > 0
+      - aap_poc_inputs_registry_auth_file | trim | length > 0
+      - aap_poc_inputs_password_length | int >= 16
+    fail_msg: Enable PoC generation explicitly and provide protected output paths.
+    quiet: true
+
+- name: Validate owner-only Vault password file
+  ansible.builtin.stat:
+    path: "{{ aap_poc_inputs_vault_password_file }}"
+    follow: false
+  register: aap_poc_inputs_vault_password_stat
+  no_log: true
+
+- name: Require safe Vault password file
+  ansible.builtin.assert:
+    that:
+      - aap_poc_inputs_vault_password_stat.stat.exists | default(false)
+      - aap_poc_inputs_vault_password_stat.stat.isreg | default(false)
+      - not (aap_poc_inputs_vault_password_stat.stat.islnk | default(false))
+      - aap_poc_inputs_vault_password_stat.stat.mode == '0600'
+      - aap_poc_inputs_vault_password_stat.stat.size | int > 0
+    fail_msg: The Vault password file must be a nonempty owner-only regular file.
+    quiet: true
+  no_log: true
+
+- name: Inspect encrypted PoC Vault output
+  ansible.builtin.stat:
+    path: "{{ aap_poc_inputs_vault_file }}"
+    follow: false
+  register: aap_poc_inputs_vault_stat
+  no_log: true
+
+- name: Generate PoC secret values only when Vault output is absent
+  ansible.builtin.set_fact:
+    aap_poc_inputs_generated:
+      aap_gateway_admin_password_input: >-
+        {{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+      aap_controller_admin_password_input: >-
+        {{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+      aap_hub_admin_password_input: >-
+        {{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+      aap_eda_admin_password_input: >-
+        {{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+      aap_postgresql_admin_password_input: >-
+        {{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+      aap_breakglass_password_input: >-
+        {{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+      rh_offline_token: >-
+        poc-{{ lookup('community.general.random_string', length=aap_poc_inputs_password_length, special=false) }}
+  no_log: true
+  when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Inspect temporary PoC Vault path
+  ansible.builtin.stat:
+    path: "{{ aap_poc_inputs_vault_file }}.tmp"
+    follow: false
+  register: aap_poc_inputs_vault_tmp_stat
+  no_log: true
+  when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Require unused temporary PoC Vault path
+  ansible.builtin.assert:
+    that:
+      - not (aap_poc_inputs_vault_tmp_stat.stat.exists | default(false))
+      - not (aap_poc_inputs_vault_tmp_stat.stat.islnk | default(false))
+    fail_msg: Refusing to write plaintext secrets to an existing temporary Vault path.
+    quiet: true
+  no_log: true
+  when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Write new PoC secret values to temporary file before encryption
+  ansible.builtin.copy:
+    dest: "{{ aap_poc_inputs_vault_file }}.tmp"
+    content: "{{ aap_poc_inputs_generated | to_nice_yaml(indent=2) }}"
+    mode: "0600"
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Encrypt new PoC Vault file
+  ansible.builtin.command:
+    argv:
+      - ansible-vault
+      - encrypt
+      - --encrypt-vault-id
+      - default
+      - --vault-password-file
+      - "{{ aap_poc_inputs_vault_password_file }}"
+      - --
+      - "{{ aap_poc_inputs_vault_file }}.tmp"
+  register: aap_poc_inputs_encrypt
+  changed_when: aap_poc_inputs_encrypt.rc == 0
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Publish encrypted PoC Vault file atomically
+  ansible.builtin.command:
+    argv:
+      - mv
+      - --
+      - "{{ aap_poc_inputs_vault_file }}.tmp"
+      - "{{ aap_poc_inputs_vault_file }}"
+  changed_when: true
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+
+- name: Create public-registry auth contract
+  ansible.builtin.copy:
+    dest: "{{ aap_poc_inputs_registry_auth_file }}"
+    content: "{\"auths\": {}}\n"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Reinspect encrypted PoC Vault output
+  ansible.builtin.stat:
+    path: "{{ aap_poc_inputs_vault_file }}"
+  register: aap_poc_inputs_final_vault_stat
+  no_log: true
+
+- name: Read encrypted PoC Vault output
+  ansible.builtin.slurp:
+    src: "{{ aap_poc_inputs_vault_file }}"
+  register: aap_poc_inputs_vault_ciphertext
+  no_log: true
+  when: aap_poc_inputs_final_vault_stat.stat.exists | default(false)
+
+- name: Require encrypted PoC Vault output
+  ansible.builtin.assert:
+    that:
+      - >-
+        (ansible_check_mode
+         and not (aap_poc_inputs_final_vault_stat.stat.exists | default(false)))
+        or ((aap_poc_inputs_vault_ciphertext.content | default('') | b64decode)
+            is match('^\$ANSIBLE_VAULT;'))
+    fail_msg: The generated PoC secret file is not Ansible Vault ciphertext.
+    quiet: true
+  no_log: true

@@ -13,6 +13,18 @@
   gather_facts: false
   any_errors_fatal: true
 
+  pre_tasks:
+    - name: Run optional self-hosted rollout gate
+      ansible.builtin.include_role:
+        name: aap_self_hosted_preflight
+        apply:
+          tags: [aap, aap_preflight, aap_self_hosted]
+      when: aap_self_hosted_preflight_enabled | default(false) | bool
+      tags:
+        - aap
+        - aap_preflight
+        - aap_self_hosted
+
   roles:
     - role: lit.supplementary.aap_preflight
       tags:
