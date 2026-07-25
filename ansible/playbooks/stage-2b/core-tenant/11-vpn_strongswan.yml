@@ -14,6 +14,7 @@
         fail_msg: Required strongSwan connection variables must be provided by inventory.
 
     - name: Validate required strongSwan secret variable
+      no_log: true
       ansible.builtin.assert:
         that:
           - strongswan__psk is defined
