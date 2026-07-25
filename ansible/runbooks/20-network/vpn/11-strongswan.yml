@@ -2,12 +2,34 @@
 - name: strongSwan setup
   hosts: all
   become: true
+  pre_tasks:
+    - name: Validate required strongSwan inventory variables
+      ansible.builtin.assert:
+        that:
+          - strongswan__con_name is defined
+          - strongswan__con_name is not none
+          - strongswan__con_name | string | trim | length > 0
+          - strongswan__left is defined
+          - strongswan__left is not none
+          - strongswan__left | string | trim | length > 0
+          - strongswan__right is defined
+          - strongswan__right is not none
+          - strongswan__right | string | trim | length > 0
+          - strongswan__leftsubnet is defined
+          - strongswan__leftsubnet is not none
+          - strongswan__leftsubnet | string | trim | length > 0
+          - strongswan__rightsubnet is defined
+          - strongswan__rightsubnet is not none
+          - strongswan__rightsubnet | string | trim | length > 0
+        fail_msg: Required strongSwan connection variables must be provided by inventory.
+
+    - name: Validate required strongSwan secret variable
+      no_log: true
+      ansible.builtin.assert:
+        that:
+          - strongswan__psk is defined
+          - strongswan__psk is not none
+          - strongswan__psk | string | trim | length > 0
+        fail_msg: The required strongSwan secret variable must be provided by inventory.
   roles:
     - role: strongswan
-      vars:
-        strongwan__con_name: lit-mhb
-        strongswan__left: 91.107.204.220
-        strongswan__right: 178.15.45.53
-        strongswan__leftsubnet: 10.10.30.2/32
-        strongswan__rightsubnet: 192.168.253.64/32
-        strongswan__psk: PSH1R238EagTTKQLLLwm
