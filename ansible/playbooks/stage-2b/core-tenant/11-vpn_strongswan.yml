@@ -3,12 +3,12 @@
   hosts: all
   become: true
   vars:
-    strongswan__con_name: "{{ strongswan_con_name }}"
-    strongswan__left: "{{ strongswan_left }}"
-    strongswan__right: "{{ strongswan_right }}"
-    strongswan__leftsubnet: "{{ strongswan_leftsubnet }}"
-    strongswan__rightsubnet: "{{ strongswan_rightsubnet }}"
-    strongswan__psk: "{{ vault__strongswan__psk }}"
+    strongswan__con_name: "{{ strongswan_con_name | default('') }}"
+    strongswan__left: "{{ strongswan_left | default('') }}"
+    strongswan__right: "{{ strongswan_right | default('') }}"
+    strongswan__leftsubnet: "{{ strongswan_leftsubnet | default('') }}"
+    strongswan__rightsubnet: "{{ strongswan_rightsubnet | default('') }}"
+    strongswan__psk: "{{ vault__strongswan__psk | default('') }}"
   pre_tasks:
     - name: Validate required strongSwan inventory variables
       ansible.builtin.assert:
