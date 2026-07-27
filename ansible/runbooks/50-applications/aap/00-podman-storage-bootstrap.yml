@@ -12,7 +12,6 @@
     aap_podman_bootstrap_user: "{{ lookup('ansible.builtin.env', 'USER') }}"
     aap_podman_bootstrap_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
     aap_podman_bootstrap_graphroot: /appl/podman/storage
-    aap_podman_bootstrap_runroot: /appl/podman/runroot
     aap_podman_bootstrap_tmpdir: /appl/tmp
     aap_podman_bootstrap_storage_conf: >-
       {{ aap_podman_bootstrap_home }}/.config/containers/storage.conf
@@ -25,7 +24,6 @@
           - aap_podman_bootstrap_user != "root"
           - aap_podman_bootstrap_home is match("^/")
           - aap_podman_bootstrap_graphroot is match("^/")
-          - aap_podman_bootstrap_runroot is match("^/")
           - aap_podman_bootstrap_tmpdir is match("^/")
         fail_msg: >-
           Run this playbook as the non-root installation account with an
@@ -36,6 +34,44 @@
       ansible.builtin.command:
         argv: [/usr/bin/true]
       changed_when: false
+
+    - name: Read installation account UID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --user
+          - "{{ aap_podman_bootstrap_user }}"
+      register: aap_podman_bootstrap_uid
+      changed_when: false
+
+    - name: Define rootless Podman runtime paths
+      ansible.builtin.set_fact:
+        aap_podman_bootstrap_runtime_dir: >-
+          /run/user/{{ aap_podman_bootstrap_uid.stdout | trim }}
+        aap_podman_bootstrap_runroot: >-
+          /run/user/{{ aap_podman_bootstrap_uid.stdout | trim }}/containers
+
+    - name: Read installation account linger state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/loginctl
+          - show-user
+          - "{{ aap_podman_bootstrap_user }}"
+          - --property=Linger
+          - --value
+      register: aap_podman_bootstrap_linger
+      changed_when: false
+      failed_when: false
+
+    - name: Enable systemd linger for rootless Podman
+      become: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/loginctl
+          - enable-linger
+          - "{{ aap_podman_bootstrap_user }}"
+      when: aap_podman_bootstrap_linger.stdout | trim != "yes"
+      changed_when: true
 
     - name: Check fuse-overlayfs availability
       ansible.builtin.stat:
@@ -55,7 +91,7 @@
           owner: "{{ aap_podman_bootstrap_user }}"
           group: "{{ aap_podman_bootstrap_user }}"
           mode: "0700"
-        - path: "{{ aap_podman_bootstrap_runroot }}"
+        - path: "{{ aap_podman_bootstrap_runtime_dir }}"
           owner: "{{ aap_podman_bootstrap_user }}"
           group: "{{ aap_podman_bootstrap_user }}"
           mode: "0700"
@@ -86,10 +122,7 @@
           - --recursive
           - --type
           - container_var_lib_t
-          - "{{ item }}"
-      loop:
-        - "{{ aap_podman_bootstrap_graphroot }}"
-        - "{{ aap_podman_bootstrap_runroot }}"
+          - "{{ aap_podman_bootstrap_graphroot }}"
       changed_when: true
       when:
         - aap_podman_bootstrap_selinux.rc == 0
@@ -155,4 +188,5 @@
         fail_msg: >-
           Podman did not activate the configured graphroot and runroot.
         success_msg: >-
-          Rootless Podman storage is active below /appl.
+          Rootless Podman uses persistent storage below /appl and its
+          transient runroot below /run/user.
