@@ -44,27 +44,43 @@
           - _lit_atlas_retention.keys() | list | sort == ['backup', 'loki', 'prometheus', 'rsyslog']
           - _lit_atlas_retention.values() | select('string') | list | length == 4
           - _lit_atlas_off_host_backup is mapping
-          - _lit_atlas_off_host_backup.approved | bool
-          - _lit_atlas_off_host_backup.provisioned | bool
-          - _lit_atlas_off_host_backup.protocol == 's3'
-          - _lit_atlas_off_host_backup.schedule == 'daily'
-          - _lit_atlas_off_host_backup.rpo_hours | int == 24
-          - _lit_atlas_off_host_backup.rto_hours | int == 8
-          - _lit_atlas_off_host_backup.restore_test_interval_days | int == 90
-          - _lit_atlas_off_host_backup.restore_test_after_material_change | bool
-          - _lit_atlas_off_host_backup.client_side_encryption == 'required'
-          - _lit_atlas_off_host_backup.versioning | bool
-          - _lit_atlas_off_host_backup.object_lock.enabled_at_creation | bool
-          - _lit_atlas_off_host_backup.object_lock.mode == 'governance'
-          - _lit_atlas_off_host_backup.object_lock.retention_days | int == 30
-          - _lit_atlas_alerting is mapping
-          - _lit_atlas_alerting.owner == 'platform_operations'
+          - _lit_atlas_off_host_backup.approved | default(false) | bool
+          - _lit_atlas_off_host_backup.provisioned | default(false) | bool
+          - _lit_atlas_off_host_backup.protocol | default('') == 's3'
+          - _lit_atlas_off_host_backup.schedule | default('') == 'daily'
+          - _lit_atlas_off_host_backup.rpo_hours | default(0) | int == 24
+          - _lit_atlas_off_host_backup.rto_hours | default(0) | int == 8
           - >-
-            _lit_atlas_alerting.escalation
+            _lit_atlas_off_host_backup.restore_test_interval_days
+            | default(0) | int == 90
+          - >-
+            _lit_atlas_off_host_backup.restore_test_after_material_change
+            | default(false) | bool
+          - >-
+            _lit_atlas_off_host_backup.client_side_encryption
+            | default('') == 'required'
+          - _lit_atlas_off_host_backup.versioning | default(false) | bool
+          - >-
+            (_lit_atlas_off_host_backup.object_lock | default({}))
+            .enabled_at_creation | default(false) | bool
+          - >-
+            (_lit_atlas_off_host_backup.object_lock | default({}))
+            .mode | default('') == 'governance'
+          - >-
+            (_lit_atlas_off_host_backup.object_lock | default({}))
+            .retention_days | default(0) | int == 30
+          - _lit_atlas_alerting is mapping
+          - _lit_atlas_alerting.owner | default('') == 'platform_operations'
+          - >-
+            _lit_atlas_alerting.escalation | default([])
             == ['platform_operations', 'incident_commander',
                 'information_security', 'atlas_service_owner']
-          - _lit_atlas_alerting.receiver_secret_source == 'hashicorp_vault'
-          - _lit_atlas_alerting.receiver_secret_kv_path | trim | length > 0
+          - >-
+            _lit_atlas_alerting.receiver_secret_source | default('')
+            == 'hashicorp_vault'
+          - >-
+            _lit_atlas_alerting.receiver_secret_kv_path | default('')
+            | trim | length > 0
           - _lit_atlas_images is mapping
           - >-
             _lit_atlas_images.keys() | list | sort

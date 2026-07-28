@@ -33,7 +33,6 @@
         - pvs
         - smartctl
         - swapon
-        - wipefs
       tags: [always]
 
   tasks:
