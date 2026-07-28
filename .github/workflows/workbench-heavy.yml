@@ -23,7 +23,7 @@ jobs:
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
-    uses: lightning-it/modulix-validation/.github/workflows/ansible-runbook-heavy-profile.yml@3e6a84554bf68c31c089a66fda6129d8f6bfa37e
+    uses: lightning-it/modulix-validation/.github/workflows/ansible-runbook-heavy-profile.yml@ff2df05dde69b15019024a177f64cb7ce9ddd315
     with:
       source-sha: ${{ github.event.pull_request.head.sha || github.sha }}
       inventory-path: ${{ vars.WORKBENCH_HEAVY_INVENTORY_PATH }}
