@@ -6,7 +6,7 @@ name: Copilot review gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, edited]
 
 permissions:
   contents: read
@@ -33,14 +33,11 @@ jobs:
       !(github.event.pull_request.user.login == 'renovate[bot]' &&
         startsWith(github.event.pull_request.head.ref, 'renovate/') &&
         github.event.pull_request.base.ref == 'develop') &&
-      !(github.event.pull_request.user.login == 'lightning-it-release-automation[bot]' &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
+      !(github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.head.ref == 'chore/sync-main-to-develop' &&
         github.event.pull_request.base.ref == 'develop' &&
         github.event.pull_request.title == 'chore: sync main back to develop') &&
-      !((github.event.pull_request.user.login == 'lightning-it-release-automation[bot]' ||
-          (github.event.pull_request.user.login == 'ghost' &&
-            github.event.pull_request.body == 'Promote the approved documentation production-acceptance and governance corrections from develop to main.')) &&
+      !(github.event.pull_request.user.login == 'lightning-it-release-automation[bot]' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.head.ref == 'develop' &&
         github.event.pull_request.base.ref == 'main' &&
@@ -140,7 +137,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_BASE: ${{ github.event.pull_request.base.ref }}
-          PR_BODY: ${{ github.event.pull_request.body }}
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
@@ -216,8 +212,7 @@ jobs:
               <<<"${live_pr}" >/dev/null; then
             trusted=true
             trusted_kind=repository-quality
-          elif [ "${PR_AUTHOR}" = "lightning-it-release-automation[bot]" ] \
-            && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
+          elif [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
             && [ "${PR_HEAD}" = "chore/sync-main-to-develop" ] \
             && [ "${PR_BASE}" = "develop" ] \
             && [ "${PR_TITLE}" = "chore: sync main back to develop" ]; then
@@ -236,9 +231,7 @@ jobs:
               trusted=true
               trusted_kind=release-backsync
             fi
-          elif { [ "${PR_AUTHOR}" = "lightning-it-release-automation[bot]" ] \
-              || { [ "${PR_AUTHOR}" = "ghost" ] \
-                && [ "${PR_BODY}" = "Promote the approved documentation production-acceptance and governance corrections from develop to main." ]; }; } \
+          elif [ "${PR_AUTHOR}" = "lightning-it-release-automation[bot]" ] \
             && [ "${PR_HEAD_REPO}" = "${REPOSITORY}" ] \
             && [ "${PR_HEAD}" = "develop" ] \
             && [ "${PR_BASE}" = "main" ] \
@@ -554,7 +547,7 @@ jobs:
                         (.author.login // "") as $login
                         | ($login == $reviewer or $login == ($reviewer + "[bot]"))
                       )
-                    | select(.state == "COMMENTED")
+                    | select(.state == "COMMENTED" or .state == "APPROVED")
                     | select(.commit.oid == $head)
                     | (.id // empty)' <<<"${response}"
               )"
