@@ -24,6 +24,7 @@
       - ansible-core
       - ansible-navigator
       - git
+      - openssh-clients
       - openssl
       - podman
     aap_podman_bootstrap_storage_conf: >-
