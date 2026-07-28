@@ -68,6 +68,12 @@ ansible-playbook -i "$INVENTORY" \
 Run each ephemeral profile with a unique lowercase run ID of 3 to 24
 characters. Profiles are acceptance inputs, never deployment tags.
 
+The automated Heavy profile is orchestrated only by the SHA-pinned reusable
+workflow in `modulix-validation`. This repository deliberately owns the
+component-specific playbook and cleanup contract, not the GitHub runner,
+environment, or evidence orchestration. See
+[ADR 2886566105](https://wiki.cloud.l-it.io/wiki/spaces/LIT/pages/2886566105).
+
 ```bash
 for PROFILE in tiny heavy application; do
   ansible-playbook -i "$INVENTORY" \

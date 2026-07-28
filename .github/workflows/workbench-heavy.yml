@@ -1,0 +1,35 @@
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+---
+name: Workbench Heavy
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heavy:
+    name: Delegate Heavy execution
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.head_ref == 'develop' &&
+        github.base_ref == 'main' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+    uses: lightning-it/modulix-validation/.github/workflows/ansible-runbook-heavy-profile.yml@3e6a84554bf68c31c089a66fda6129d8f6bfa37e
+    with:
+      source-sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      inventory-path: ${{ vars.WORKBENCH_HEAVY_INVENTORY_PATH }}
+      target: ${{ vars.WORKBENCH_HEAVY_TARGET }}
+      scenario: workbench
+      playbook: ansible/runbooks/50-applications/workbench/40-acceptance.yml
+      cleanup-playbook: ansible/runbooks/50-applications/workbench/50-cleanup.yml
+      environment-name: workbench-heavy
+    secrets: inherit
