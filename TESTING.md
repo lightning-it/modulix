@@ -50,9 +50,8 @@ bash scripts/wunder-devtools-ee.sh true
 
 Heavy Incus tests require an Ubuntu host or runner with Incus available, suitable images, and repository-specific scenario configuration. Heavy tests must use sanitized inputs and must not rely on private inventory values.
 
-In accordance with
-[ADR 2886566105](https://wiki.cloud.l-it.io/wiki/spaces/LIT/pages/2886566105),
-this repository retains the Workbench Heavy runbook, assertions, fixtures, and
+In accordance with ADR 2886566105, this repository retains the Workbench Heavy
+runbook, assertions, fixtures, and
 exact owner-checked cleanup. GitHub execution is delegated exclusively to the
 full-commit-pinned reusable runbook profile in `modulix-validation`.
 
