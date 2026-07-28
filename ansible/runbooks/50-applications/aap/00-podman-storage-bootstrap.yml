@@ -303,3 +303,20 @@
         TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
       changed_when: false
       no_log: true
+
+    - name: Verify required AAP preflight role in the execution environment
+      ansible.builtin.command:
+        argv:
+          - podman
+          - run
+          - --rm
+          - --network=none
+          - --entrypoint
+          - /usr/bin/test
+          - "{{ aap_podman_bootstrap_ee_image }}"
+          - -d
+          - /usr/share/ansible/collections/ansible_collections/lit/supplementary/roles/aap_preflight
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+      changed_when: false
