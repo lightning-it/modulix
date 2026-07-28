@@ -71,11 +71,13 @@
         apply:
           tags: [atlas, loki, loki_deploy]
       vars:
+        loki_deploy_image: "{{ _lit_atlas_images.loki }}"
         loki_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         loki_deploy_port: "{{ _lit_atlas_loki_port }}"
         loki_deploy_host_data_dir: "{{ _lit_atlas_state_dir }}/loki"
         loki_deploy_config_dir: "{{ _lit_atlas_config_dir }}/loki"
         loki_deploy_pod_manifest_path: "{{ _lit_atlas_quadlet_dir }}/loki.yml"
+        loki_deploy_retention_period: "{{ _lit_atlas_retention.loki }}"
       when: >-
         (
           _atlas_services_cfg.loki
@@ -90,6 +92,7 @@
         apply:
           tags: [atlas, alertmanager, alertmanager_deploy]
       vars:
+        alertmanager_deploy_image: "{{ _lit_atlas_images.alertmanager }}"
         alertmanager_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         alertmanager_deploy_port: "{{ _lit_atlas_alertmanager_port }}"
         alertmanager_deploy_config_dir: "{{ _lit_atlas_config_dir }}/alertmanager"
@@ -110,6 +113,7 @@
         apply:
           tags: [atlas, prometheus, prometheus_deploy]
       vars:
+        prometheus_deploy_image: "{{ _lit_atlas_images.prometheus }}"
         prometheus_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         prometheus_deploy_port: "{{ _lit_atlas_prometheus_port }}"
         prometheus_deploy_config_dir: "{{ _lit_atlas_config_dir }}/prometheus"
@@ -142,6 +146,7 @@
         apply:
           tags: [atlas, rsyslog, rsyslog_deploy]
       vars:
+        rsyslog_deploy_image: "{{ _lit_atlas_images.rsyslog }}"
         rsyslog_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         rsyslog_deploy_tcp_port: "{{ _lit_atlas_rsyslog_tcp_port }}"
         rsyslog_deploy_udp_port: "{{ _lit_atlas_rsyslog_udp_port }}"
@@ -163,6 +168,7 @@
         apply:
           tags: [atlas, alloy, alloy_deploy]
       vars:
+        alloy_deploy_image: "{{ _lit_atlas_images.alloy }}"
         alloy_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         alloy_deploy_port: "{{ _lit_atlas_alloy_port }}"
         alloy_deploy_config_dir: "{{ _lit_atlas_config_dir }}/alloy"
@@ -194,6 +200,7 @@
         apply:
           tags: [atlas, grafana, grafana_deploy]
       vars:
+        grafana_deploy_image: "{{ _lit_atlas_images.grafana }}"
         grafana_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         grafana_deploy_port: "{{ _lit_atlas_grafana_port }}"
         grafana_deploy_host_data_dir: "{{ _lit_atlas_state_dir }}/grafana"
@@ -216,6 +223,7 @@
         apply:
           tags: [atlas, checkmk, checkmk_deploy]
       vars:
+        checkmk_deploy_image: "{{ _lit_atlas_images.checkmk }}"
         checkmk_deploy_host_ip: "{{ _lit_atlas_bind_address }}"
         checkmk_deploy_port: "{{ _lit_atlas_checkmk_port }}"
         checkmk_deploy_host_data_dir: "{{ _lit_atlas_state_dir }}/checkmk"
