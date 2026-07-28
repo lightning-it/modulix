@@ -245,7 +245,13 @@
             aap_podman_bootstrap_effective_runroot.stdout | trim ==
             aap_podman_bootstrap_runroot
         fail_msg: >-
-          Podman did not activate the configured graphroot and runroot.
+          Podman storage configuration mismatch. Expected GraphRoot
+          {{ aap_podman_bootstrap_graphroot }}, got
+          {{ aap_podman_bootstrap_effective_graphroot.stdout | trim }};
+          expected RunRoot {{ aap_podman_bootstrap_runroot }}, got
+          {{ aap_podman_bootstrap_effective_runroot.stdout | trim }}.
+          An existing Podman store may have been initialized with an older
+          storage configuration.
         success_msg: >-
           Rootless Podman uses persistent storage below /appl and its
           transient runroot below /run/user.
