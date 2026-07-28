@@ -105,6 +105,16 @@
       register: aap_podman_bootstrap_uid
       changed_when: false
 
+    - name: Read installation account primary group
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --group
+          - --name
+          - "{{ aap_podman_bootstrap_user }}"
+      register: aap_podman_bootstrap_primary_group
+      changed_when: false
+
     - name: Define rootless Podman runtime paths
       ansible.builtin.set_fact:
         aap_podman_bootstrap_runtime_dir: >-
@@ -150,11 +160,11 @@
       loop:
         - path: "{{ aap_podman_bootstrap_graphroot }}"
           owner: "{{ aap_podman_bootstrap_user }}"
-          group: "{{ aap_podman_bootstrap_user }}"
+          group: "{{ aap_podman_bootstrap_primary_group.stdout | trim }}"
           mode: "0700"
         - path: "{{ aap_podman_bootstrap_runtime_dir }}"
           owner: "{{ aap_podman_bootstrap_user }}"
-          group: "{{ aap_podman_bootstrap_user }}"
+          group: "{{ aap_podman_bootstrap_primary_group.stdout | trim }}"
           mode: "0700"
         - path: "{{ aap_podman_bootstrap_tmpdir }}"
           owner: root
