@@ -1,0 +1,109 @@
+---
+- name: Collect read-only Atlas storage evidence
+  hosts: atlas
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  vars_files:
+    - vars/main.yml
+
+  pre_tasks:
+    - name: Require one exact Atlas host limit
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+        fail_msg: >-
+          Atlas storage evidence requires --limit with one exact inventory FQDN.
+        quiet: true
+      tags: [always]
+
+    - name: Require the Atlas storage evidence tools
+      ansible.builtin.command:
+        argv:
+          - which
+          - "{{ item }}"
+      changed_when: false
+      loop:
+        - findmnt
+        - lsblk
+        - mdadm
+        - pvs
+        - smartctl
+        - swapon
+        - wipefs
+      tags: [always]
+
+  tasks:
+    - name: Read the complete block-device topology
+      ansible.builtin.command:
+        argv:
+          - lsblk
+          - --json
+          - --bytes
+          - --output
+          - NAME,KNAME,PATH,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINTS,FSTYPE,UUID
+      register: _atlas_storage_lsblk
+      changed_when: false
+
+    - name: Read active mounts
+      ansible.builtin.command:
+        argv: [findmnt, --json]
+      register: _atlas_storage_findmnt
+      changed_when: false
+
+    - name: Read active swap
+      ansible.builtin.command:
+        argv: [swapon, --show, --json]
+      register: _atlas_storage_swapon
+      changed_when: false
+
+    - name: Read LVM physical volumes
+      ansible.builtin.command:
+        argv: [pvs, --reportformat, json]
+      register: _atlas_storage_pvs
+      changed_when: false
+
+    - name: Read assembled software RAID declarations
+      ansible.builtin.command:
+        argv: [mdadm, --detail, --scan]
+      register: _atlas_storage_mdadm
+      changed_when: false
+      failed_when: _atlas_storage_mdadm.rc not in [0, 1]
+
+    - name: Read SMART-capable device discovery
+      ansible.builtin.command:
+        argv: [smartctl, --scan-open]
+      register: _atlas_storage_smart_scan
+      changed_when: false
+
+    - name: Build sanitized Atlas storage evidence
+      ansible.builtin.set_fact:
+        atlas_storage_evidence:
+          host: "{{ inventory_hostname }}"
+          collected_at: "{{ ansible_date_time.iso8601 }}"
+          inventory_devices: "{{ _lit_atlas_storage.devices | default([]) }}"
+          lsblk: "{{ _atlas_storage_lsblk.stdout | from_json }}"
+          findmnt: "{{ _atlas_storage_findmnt.stdout | from_json }}"
+          swapon: "{{ _atlas_storage_swapon.stdout | from_json }}"
+          pvs: "{{ _atlas_storage_pvs.stdout | from_json }}"
+          mdadm_scan: "{{ _atlas_storage_mdadm.stdout_lines }}"
+          smart_scan: "{{ _atlas_storage_smart_scan.stdout_lines }}"
+      changed_when: false
+
+    - name: Show sanitized Atlas storage evidence
+      ansible.builtin.debug:
+        var: atlas_storage_evidence
+
+    - name: Persist protected Atlas storage evidence on the controller
+      ansible.builtin.copy:
+        content: "{{ atlas_storage_evidence | to_nice_json }}\n"
+        dest: "{{ atlas_storage_evidence_output }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      when:
+        - atlas_storage_evidence_output is defined
+        - atlas_storage_evidence_output | string | trim | length > 0
