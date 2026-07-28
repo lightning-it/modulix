@@ -52,15 +52,15 @@ Heavy Incus tests require an Ubuntu host or runner with Incus available, suitabl
 
 In accordance with ADR 2886566105, this repository retains the Workbench Heavy
 runbook, assertions, fixtures, and
-exact owner-checked cleanup. GitHub execution is delegated exclusively to the
-full-commit-pinned reusable runbook profile in `modulix-validation`.
+exact owner-checked cleanup. GitHub execution is owned exclusively by the
+protected `Workbench Public Acceptance` workflow in `modulix-validation`.
 
-Promotion and manual Heavy runs use the protected `workbench-heavy`
-environment. `WORKBENCH_HEAVY_INVENTORY_PATH` must identify an absolute,
-runner-local protected inventory and `WORKBENCH_HEAVY_TARGET` must identify the
-one exact inventory host. Normalized evidence records the candidate SHA,
-`heavy` profile, `workbench` scenario, and target. An applicable Heavy run
-cannot pass by being skipped.
+That central workflow checks out the reviewed automation source and the private
+inventory under its protected `workbench-public-acceptance`
+environment. It owns authorization, credentials, exact-target validation,
+execution, cleanup, and normalized evidence. This repository must not define
+an independent Heavy workflow or require private inventory values as
+repository variables.
 
 ## Interpreting GitHub Actions
 
