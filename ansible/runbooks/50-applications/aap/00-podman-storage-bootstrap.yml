@@ -13,8 +13,28 @@
     aap_podman_bootstrap_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
     aap_podman_bootstrap_graphroot: /appl/podman/storage
     aap_podman_bootstrap_tmpdir: /appl/tmp
+    aap_podman_bootstrap_installation_config_dir: >-
+      {{ aap_podman_bootstrap_home }}/aap-installation/installation-config
+    aap_podman_bootstrap_group_vars_dir: >-
+      {{ aap_podman_bootstrap_installation_config_dir }}/group_vars/aaps
+    aap_podman_bootstrap_ee_image: >-
+      {{ lookup('ansible.builtin.env', 'EE_IMAGE') }}
+    aap_podman_bootstrap_registry_probe_url: https://quay.io/
+    aap_podman_bootstrap_required_packages:
+      - ansible-core
+      - ansible-navigator
+      - git
+      - openssl
+      - podman
     aap_podman_bootstrap_storage_conf: >-
       {{ aap_podman_bootstrap_home }}/.config/containers/storage.conf
+    aap_podman_bootstrap_proxy_environment:
+      HTTP_PROXY: "{{ lookup('ansible.builtin.env', 'HTTP_PROXY') }}"
+      HTTPS_PROXY: "{{ lookup('ansible.builtin.env', 'HTTPS_PROXY') }}"
+      NO_PROXY: "{{ lookup('ansible.builtin.env', 'NO_PROXY') }}"
+      http_proxy: "{{ lookup('ansible.builtin.env', 'http_proxy') }}"
+      https_proxy: "{{ lookup('ansible.builtin.env', 'https_proxy') }}"
+      no_proxy: "{{ lookup('ansible.builtin.env', 'no_proxy') }}"
 
   tasks:
     - name: Validate bootstrap execution context
@@ -25,15 +45,45 @@
           - aap_podman_bootstrap_home is match("^/")
           - aap_podman_bootstrap_graphroot is match("^/")
           - aap_podman_bootstrap_tmpdir is match("^/")
+          - aap_podman_bootstrap_installation_config_dir is match("^/")
+          - aap_podman_bootstrap_group_vars_dir is match("^/")
+          - aap_podman_bootstrap_ee_image | length > 0
+          - aap_podman_bootstrap_proxy_environment.HTTPS_PROXY | length > 0
         fail_msg: >-
           Run this playbook as the non-root installation account with an
-          absolute home directory and absolute Podman storage paths.
+          absolute home directory, absolute Podman storage paths, EE_IMAGE,
+          and the approved proxy environment.
 
     - name: Verify passwordless privilege escalation
       become: true
       ansible.builtin.command:
         argv: [/usr/bin/true]
       changed_when: false
+
+    - name: Read installed RPM packages
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    - name: Verify required host packages
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.packages
+        fail_msg: >-
+          Required RPM package {{ item }} is not installed.
+      loop: "{{ aap_podman_bootstrap_required_packages }}"
+
+    - name: Verify access to the container registry through the proxy
+      ansible.builtin.uri:
+        url: "{{ aap_podman_bootstrap_registry_probe_url }}"
+        method: HEAD
+        follow_redirects: safe
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 307
+          - 308
+      environment: "{{ aap_podman_bootstrap_proxy_environment }}"
 
     - name: Read installation account UID
       ansible.builtin.command:
@@ -135,6 +185,15 @@
         state: directory
         mode: "0700"
 
+    - name: Create protected installation configuration directory
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - "{{ aap_podman_bootstrap_installation_config_dir }}"
+        - "{{ aap_podman_bootstrap_group_vars_dir }}"
+
     - name: Configure rootless Podman storage
       ansible.builtin.copy:
         dest: "{{ aap_podman_bootstrap_storage_conf }}"
@@ -190,3 +249,50 @@
         success_msg: >-
           Rootless Podman uses persistent storage below /appl and its
           transient runroot below /run/user.
+
+    - name: Check whether the execution-environment image is available
+      ansible.builtin.command:
+        argv:
+          - podman
+          - image
+          - exists
+          - "{{ aap_podman_bootstrap_ee_image }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+      register: aap_podman_bootstrap_ee_image_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Pull the execution-environment image
+      ansible.builtin.command:
+        argv:
+          - podman
+          - pull
+          - "{{ aap_podman_bootstrap_ee_image }}"
+      environment: >-
+        {{
+          aap_podman_bootstrap_proxy_environment
+          | combine(
+              {
+                'CONTAINERS_STORAGE_CONF':
+                  aap_podman_bootstrap_storage_conf,
+                'TMPDIR': aap_podman_bootstrap_tmpdir
+              }
+            )
+        }}
+      when: aap_podman_bootstrap_ee_image_exists.rc != 0
+      changed_when: true
+
+    - name: Verify the execution-environment image
+      ansible.builtin.command:
+        argv:
+          - podman
+          - image
+          - inspect
+          - "{{ aap_podman_bootstrap_ee_image }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+      changed_when: false
+      no_log: true
