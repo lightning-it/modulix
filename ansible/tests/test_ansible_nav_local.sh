@@ -104,7 +104,7 @@ env \
 
 grep -Fxq 'ARG=ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected' "${ssh_output}"
 grep -Fxq 'ARG=ANSIBLE_HOST_KEY_CHECKING=True' "${ssh_output}"
-grep -Fxq 'ARG=ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config' "${ssh_output}"
+grep -Fxq 'ARG=ANSIBLE_SSH_COMMON_ARGS=-F/runner/.ssh/config' "${ssh_output}"
 grep -Fxq 'ARG=ANSIBLE_SSH_ARGS=-o ControlPersist=120' "${ssh_output}"
 grep -Fxq 'SSH_STAGE_FILES=config,id_selected,known_hosts' "${ssh_output}"
 grep -Fxq 'SSH_STAGE_MODES=400,400,400' "${ssh_output}"

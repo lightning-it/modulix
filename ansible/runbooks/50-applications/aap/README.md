@@ -5,6 +5,14 @@ inventory-owned values.
 
 ## Runbooks
 
+- `00-podman-storage-bootstrap.yml`: configure and verify rootless Podman
+  graphroot below `/appl`, enable the systemd user runtime directory, and
+  verify the transient runroot below `/run/user`; it also validates the
+  required RPM packages and proxy access, creates the protected installation
+  configuration directory, and pulls the execution-environment image selected
+  through `EE_IMAGE`. This bootstrap intentionally uses only
+  `ansible.builtin` and the dedicated `ansible-bootstrap.cfg`, so it does not
+  require the project-wide Vault password file.
 - `00-bootstrap-self-hosted.yml`: validate an Incus recovery snapshot and
   bootstrap a target-specific self-hosted rollout workspace from a workstation.
 - `00-prepare-poc-inputs.yml`: generate explicitly approved, encrypted PoC

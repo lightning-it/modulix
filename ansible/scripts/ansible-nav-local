@@ -311,7 +311,7 @@ EOF
   cmd+=(--senv "ANSIBLE_HOST_KEY_CHECKING=True")
   # Keep the repository's ssh_args (including ControlPersist) and add only the
   # strict, container-local configuration file.
-  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-F /runner/.ssh/config")
+  cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-F/runner/.ssh/config")
   if [[ -n "${ANSIBLE_SSH_ARGS:-}" ]]; then
     ssh_args_lower="${ANSIBLE_SSH_ARGS,,}"
     if [[ "${ssh_args_lower}" =~ (stricthostkeychecking|userknownhostsfile|globalknownhostsfile|identityfile|identitiesonly) ]]; then
