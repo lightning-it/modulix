@@ -151,6 +151,7 @@ if env \
 fi
 
 for unsafe_ssh_args in "-F /tmp/untrusted-ssh-config" "-F/tmp/untrusted-ssh-config"; do
+  unsafe_ssh_stderr="${test_root}/unsafe-ssh-config.stderr"
   if env \
     "${common_env[@]}" \
     "FAKE_NAV_OUTPUT=${test_root}/unsafe-ssh-config.out" \
@@ -159,10 +160,13 @@ for unsafe_ssh_args in "-F /tmp/untrusted-ssh-config" "-F/tmp/untrusted-ssh-conf
     "ANSIBLE_SSH_ARGS=${unsafe_ssh_args}" \
     "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=${key}" \
     "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=${known_hosts}" \
-    "${script}" run example.yml >/dev/null 2>&1; then
+    "${script}" run example.yml >/dev/null 2>"${unsafe_ssh_stderr}"; then
     echo "ANSIBLE_SSH_ARGS accepted an overriding SSH configuration file." >&2
     exit 1
   fi
+  grep -Fxq \
+    "ANSIBLE_SSH_ARGS must not override the enforced SSH trust or identity settings." \
+    "${unsafe_ssh_stderr}"
 done
 
 echo "ansible-nav-local security contract tests passed"
