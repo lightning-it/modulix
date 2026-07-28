@@ -232,6 +232,7 @@ configure_ssh_transport() {
   local staged_key=""
   local staged_known_hosts=""
   local ssh_common_args=""
+  local ssh_args_lower=""
 
   if [[ -n "${ssh_private_key_file}" && "${ssh_agent_forwarding}" == "true" ]]; then
     echo "Select either an explicit SSH private key or SSH agent forwarding, not both." >&2
@@ -314,7 +315,8 @@ EOF
   cmd+=(--senv "ANSIBLE_SSH_COMMON_ARGS=-F/runner/.ssh/config")
   if [[ -n "${ANSIBLE_SSH_ARGS:-}" ]]; then
     ssh_args_lower="${ANSIBLE_SSH_ARGS,,}"
-    if [[ "${ssh_args_lower}" =~ (stricthostkeychecking|userknownhostsfile|globalknownhostsfile|identityfile|identitiesonly) ]]; then
+    if [[ "${ssh_args_lower}" =~ (stricthostkeychecking|userknownhostsfile|globalknownhostsfile|identityfile|identitiesonly) ]] ||
+      [[ "${ANSIBLE_SSH_ARGS}" =~ (^|[[:space:]])-F($|[[:space:]]|[^[:space:]]+) ]]; then
       echo "ANSIBLE_SSH_ARGS must not override the enforced SSH trust or identity settings." >&2
       exit 1
     fi

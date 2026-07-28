@@ -150,4 +150,19 @@ if env \
   exit 1
 fi
 
+for unsafe_ssh_args in "-F /tmp/untrusted-ssh-config" "-F/tmp/untrusted-ssh-config"; do
+  if env \
+    "${common_env[@]}" \
+    "FAKE_NAV_OUTPUT=${test_root}/unsafe-ssh-config.out" \
+    "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true" \
+    "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman" \
+    "ANSIBLE_SSH_ARGS=${unsafe_ssh_args}" \
+    "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=${key}" \
+    "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=${known_hosts}" \
+    "${script}" run example.yml >/dev/null 2>&1; then
+    echo "ANSIBLE_SSH_ARGS accepted an overriding SSH configuration file." >&2
+    exit 1
+  fi
+done
+
 echo "ansible-nav-local security contract tests passed"
