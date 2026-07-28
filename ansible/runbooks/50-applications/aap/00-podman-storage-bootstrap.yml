@@ -49,7 +49,9 @@
           - aap_podman_bootstrap_installation_config_dir is match("^/")
           - aap_podman_bootstrap_group_vars_dir is match("^/")
           - aap_podman_bootstrap_ee_image | length > 0
-          - aap_podman_bootstrap_proxy_environment.HTTPS_PROXY | length > 0
+          - >-
+            aap_podman_bootstrap_proxy_environment.HTTPS_PROXY | length > 0 or
+            aap_podman_bootstrap_proxy_environment.https_proxy | length > 0
         fail_msg: >-
           Run this playbook as the non-root installation account with an
           absolute home directory, absolute Podman storage paths, EE_IMAGE,
@@ -59,6 +61,14 @@
       become: true
       ansible.builtin.command:
         argv: [/usr/bin/true]
+      changed_when: false
+
+    - name: Verify dedicated application filesystem
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/findmnt
+          - --mountpoint
+          - /appl
       changed_when: false
 
     - name: Read installed RPM packages
@@ -220,6 +230,7 @@
       environment:
         CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
         TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+        XDG_RUNTIME_DIR: "{{ aap_podman_bootstrap_runtime_dir }}"
       register: aap_podman_bootstrap_effective_graphroot
       changed_when: false
 
@@ -233,6 +244,7 @@
       environment:
         CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
         TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+        XDG_RUNTIME_DIR: "{{ aap_podman_bootstrap_runtime_dir }}"
       register: aap_podman_bootstrap_effective_runroot
       changed_when: false
 
