@@ -74,42 +74,41 @@
   no_log: true
   when: not (aap_poc_inputs_vault_stat.stat.exists | default(false))
 
-- name: Write new PoC secret values to temporary file before encryption
-  ansible.builtin.copy:
-    dest: "{{ aap_poc_inputs_vault_file }}.tmp"
-    content: "{{ aap_poc_inputs_generated | to_nice_yaml(indent=2) }}"
-    mode: "0600"
-  no_log: true
-  when:
-    - not ansible_check_mode
-    - not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+- name: Create encrypted PoC Vault output
+  block:
+    - name: Write new PoC secret values to temporary file before encryption
+      ansible.builtin.copy:
+        dest: "{{ aap_poc_inputs_vault_file }}.tmp"
+        content: "{{ aap_poc_inputs_generated | to_nice_yaml(indent=2) }}"
+        mode: "0600"
 
-- name: Encrypt new PoC Vault file
-  ansible.builtin.command:
-    argv:
-      - ansible-vault
-      - encrypt
-      - --encrypt-vault-id
-      - default
-      - --vault-password-file
-      - "{{ aap_poc_inputs_vault_password_file }}"
-      - --
-      - "{{ aap_poc_inputs_vault_file }}.tmp"
-  register: aap_poc_inputs_encrypt
-  changed_when: aap_poc_inputs_encrypt.rc == 0
-  no_log: true
-  when:
-    - not ansible_check_mode
-    - not (aap_poc_inputs_vault_stat.stat.exists | default(false))
+    - name: Encrypt new PoC Vault file
+      ansible.builtin.command:
+        argv:
+          - ansible-vault
+          - encrypt
+          - --encrypt-vault-id
+          - default
+          - --vault-password-file
+          - "{{ aap_poc_inputs_vault_password_file }}"
+          - --
+          - "{{ aap_poc_inputs_vault_file }}.tmp"
+      register: aap_poc_inputs_encrypt
+      changed_when: aap_poc_inputs_encrypt.rc == 0
 
-- name: Publish encrypted PoC Vault file atomically
-  ansible.builtin.command:
-    argv:
-      - mv
-      - --
-      - "{{ aap_poc_inputs_vault_file }}.tmp"
-      - "{{ aap_poc_inputs_vault_file }}"
-  changed_when: true
+    - name: Publish encrypted PoC Vault file atomically
+      ansible.builtin.command:
+        argv:
+          - mv
+          - --
+          - "{{ aap_poc_inputs_vault_file }}.tmp"
+          - "{{ aap_poc_inputs_vault_file }}"
+      changed_when: true
+  always:
+    - name: Remove temporary PoC Vault file
+      ansible.builtin.file:
+        path: "{{ aap_poc_inputs_vault_file }}.tmp"
+        state: absent
   no_log: true
   when:
     - not ansible_check_mode
