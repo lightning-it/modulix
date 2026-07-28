@@ -1,4 +1,7 @@
 ---
+- name: Enforce Atlas preflight before deployment
+  ansible.builtin.import_playbook: 07-preflight.yml
+
 - name: Deploy LIT Atlas observability appliances
   hosts: atlas
   become: true
@@ -132,6 +135,8 @@
             static_configs:
               - targets:
                   - "{{ _lit_atlas_bind_address }}:{{ _lit_atlas_alloy_port }}"
+        prometheus_deploy_extra_args:
+          - "--storage.tsdb.retention.time={{ _lit_atlas_retention.prometheus }}"
       when: >-
         (
           _atlas_services_cfg.prometheus
