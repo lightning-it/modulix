@@ -12,12 +12,89 @@
       ansible.builtin.assert:
         that:
           - _lit_atlas_enabled is boolean
+          - _lit_atlas_domain is string
+          - _lit_atlas_config_dir is string
+          - _lit_atlas_state_dir is string
+          - _lit_atlas_quadlet_dir is string
+          - _lit_atlas_backup_dir is string
           - _atlas_services_cfg is mapping
+          - >-
+            _atlas_services_cfg.keys() | list | sort
+            == ['alertmanager', 'alloy', 'checkmk', 'grafana', 'loki',
+                'prometheus', 'rsyslog']
+          - _atlas_services_cfg.values() | list | map('lower') | unique | list == ['enabled']
           - _lit_atlas_data_dir | trim | length > 0
           - _lit_atlas_bind_address | trim | length > 0
+          - _lit_atlas_storage is mapping
+          - _lit_atlas_storage.approved | bool
+          - _lit_atlas_storage.mount_point == '/srv/atlas'
+          - _lit_atlas_storage.filesystem == 'xfs'
+          - _lit_atlas_storage.encryption == 'luks2'
+          - _lit_atlas_storage.redundancy == 'raid1'
+          - _lit_atlas_storage.minimum_devices | int == 2
+          - _lit_atlas_retention is mapping
+          - _lit_atlas_retention.keys() | list | sort == ['backup', 'loki', 'prometheus', 'rsyslog']
+          - _lit_atlas_retention.values() | select('string') | list | length == 4
+          - _lit_atlas_images is mapping
+          - >-
+            _lit_atlas_images.keys() | list | sort
+            == ['alertmanager', 'alloy', 'checkmk', 'grafana', 'loki',
+                'prometheus', 'rsyslog']
+          - >-
+            _lit_atlas_images.values()
+            | select('match', '^[^\\s]+@sha256:[0-9a-f]{64}$')
+            | list | length == 7
+          - _lit_atlas_ports is mapping
+          - >-
+            _lit_atlas_ports.keys() | list | sort
+            == ['alertmanager', 'alloy', 'checkmk', 'grafana', 'loki',
+                'prometheus', 'rsyslog_tcp', 'rsyslog_udp']
+          - _lit_atlas_ports.values() | map('int') | min >= 1
+          - _lit_atlas_ports.values() | map('int') | max <= 65535
         fail_msg: >-
-          Atlas inventory is incomplete. Provide lit_atlas_* values and
-          services.atlas or atlas_services as a mapping.
+          Atlas inventory is incomplete or storage approval is absent. Provide
+          the complete lit_atlas_* and services.atlas contracts before rollout.
+        quiet: true
+      tags: [atlas, atlas_preflight]
+
+    - name: Inspect the approved Atlas data mount
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --json
+          - --target
+          - "{{ _lit_atlas_storage.mount_point }}"
+      changed_when: false
+      failed_when: false
+      register: _lit_atlas_findmnt
+      tags: [atlas, atlas_preflight]
+
+    - name: Parse the Atlas data mount
+      ansible.builtin.set_fact:
+        _lit_atlas_mount: >-
+          {{
+            (
+              _lit_atlas_findmnt.stdout | from_json
+            ).filesystems | first
+          }}
+      changed_when: false
+      when:
+        - _lit_atlas_findmnt.rc == 0
+        - _lit_atlas_findmnt.stdout | trim | length > 0
+      tags: [atlas, atlas_preflight]
+
+    - name: Require the approved Atlas filesystem and hardening options
+      ansible.builtin.assert:
+        that:
+          - _lit_atlas_findmnt.rc == 0
+          - _lit_atlas_mount | default({}) is mapping
+          - _lit_atlas_mount.target | default('') == _lit_atlas_storage.mount_point
+          - _lit_atlas_mount.fstype | default('') == _lit_atlas_storage.filesystem
+          - >-
+            _lit_atlas_storage.mount_options
+            | difference((_lit_atlas_mount.options | default('') | string).split(','))
+            | length == 0
+        fail_msg: The approved and hardened Atlas data filesystem is not mounted.
         quiet: true
       tags: [atlas, atlas_preflight]
 
