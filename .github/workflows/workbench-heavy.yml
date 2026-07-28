@@ -23,7 +23,7 @@ jobs:
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
-    uses: lightning-it/modulix-validation/.github/workflows/ansible-runbook-heavy-profile.yml@ff2df05dde69b15019024a177f64cb7ce9ddd315
+    uses: lightning-it/modulix-validation/.github/workflows/ansible-runbook-heavy-profile.yml@6a78dcbd0931c7184336e7a5c6d11e6bfcc4b2d7
     with:
       source-sha: ${{ github.event.pull_request.head.sha || github.sha }}
       inventory-path: ${{ vars.WORKBENCH_HEAVY_INVENTORY_PATH }}
@@ -32,4 +32,5 @@ jobs:
       playbook: ansible/runbooks/50-applications/workbench/40-acceptance.yml
       cleanup-playbook: ansible/runbooks/50-applications/workbench/50-cleanup.yml
       environment-name: workbench-heavy
-    secrets: inherit
+    secrets:
+      ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
