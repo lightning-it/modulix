@@ -131,6 +131,8 @@ done
 
 mkdir -p "${source_root}/ansible"
 tar -C "${REPO_ROOT}/ansible" \
+  --exclude='./.secrets' \
+  --exclude='./.tmp' \
   --exclude='./.toolbox-podman' \
   --exclude='./.vault-pass.txt' \
   --exclude='./ansible-automation-platform-containerized-setup-bundle-*.tar.gz' \

@@ -1,0 +1,381 @@
+---
+- name: Validate controlled bootstrap inputs
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_bootstrap_fqdn is string
+      - aap_self_hosted_bootstrap_fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]+$')
+      - aap_self_hosted_bootstrap_project_repo is string
+      - aap_self_hosted_bootstrap_project_repo | trim | length > 0
+      - aap_self_hosted_bootstrap_project_repo is not search('(?i)CHANGE_ME')
+      - aap_self_hosted_bootstrap_project_version is string
+      - aap_self_hosted_bootstrap_project_version is match('^[A-Za-z0-9][A-Za-z0-9._+-]*$')
+      - aap_self_hosted_bootstrap_project_version is not match('^CHANGE_ME')
+      - aap_self_hosted_bootstrap_supplementary_version is match('^[0-9a-f]{40}$')
+      - >-
+        not (aap_self_hosted_bootstrap_manage_hosts_entry | bool)
+        or (
+          aap_self_hosted_bootstrap_host_address
+          | ansible.utils.ipaddr('address')
+        ) is string
+      - aap_self_hosted_bootstrap_ee_image is string
+      - >-
+        aap_self_hosted_bootstrap_ee_image
+        is match('^[A-Za-z0-9._/:+-]+@sha256:[0-9a-f]{64}$')
+      - item is string
+      - item | trim | length > 0
+      - item is not match('^CHANGE_ME')
+    fail_msg: >-
+      Supply the approved FQDN, immutable Git tag, project source, inventory,
+      encrypted Vault, Vault-password, registry-auth, bundle, and manifest files.
+    quiet: true
+  loop:
+    - "{{ aap_self_hosted_bootstrap_registry_auth_src }}"
+    - "{{ aap_self_hosted_bootstrap_vault_password_src }}"
+    - "{{ aap_self_hosted_bootstrap_encrypted_vault_src }}"
+    - "{{ aap_self_hosted_bootstrap_inventory_src }}"
+    - "{{ aap_self_hosted_bootstrap_group_vars_src }}"
+    - "{{ aap_self_hosted_bootstrap_bundle_src }}"
+    - "{{ aap_self_hosted_bootstrap_manifest_src }}"
+
+- name: Validate bootstrap source files on the workstation
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    get_checksum: false
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: aap_self_hosted_bootstrap_source_stats
+  loop:
+    - {name: registry authentication, path: "{{ aap_self_hosted_bootstrap_registry_auth_src }}", secret: true}
+    - {name: Vault password, path: "{{ aap_self_hosted_bootstrap_vault_password_src }}", secret: true}
+    - {name: encrypted Vault variables, path: "{{ aap_self_hosted_bootstrap_encrypted_vault_src }}", secret: true}
+    - {name: inventory, path: "{{ aap_self_hosted_bootstrap_inventory_src }}", secret: false}
+    - {name: group variables, path: "{{ aap_self_hosted_bootstrap_group_vars_src }}", secret: false}
+    - {name: setup bundle, path: "{{ aap_self_hosted_bootstrap_bundle_src }}", secret: false}
+    - {name: manifest, path: "{{ aap_self_hosted_bootstrap_manifest_src }}", secret: false}
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ item.secret }}"
+
+- name: Require regular nonempty bootstrap source files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(false))
+      - item.stat.size | int > 0
+    fail_msg: "Required bootstrap source is absent or unsafe: {{ item.item.name }}"
+    quiet: true
+  loop: "{{ aap_self_hosted_bootstrap_source_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  no_log: "{{ item.item.secret }}"
+
+- name: Resolve rollout user account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+
+- name: Record rollout account paths
+  ansible.builtin.set_fact:
+    aap_self_hosted_bootstrap_rollout_home: >-
+      {{ ansible_facts.getent_passwd[aap_self_hosted_bootstrap_rollout_user][-2] }}
+  changed_when: false
+
+- name: Validate rollout account home
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_bootstrap_rollout_home is string
+      - aap_self_hosted_bootstrap_rollout_home is match('^/[^/].*')
+      - aap_self_hosted_bootstrap_rollout_home != '/bin/bash'
+    fail_msg: The rollout account must have an absolute home directory.
+    quiet: true
+
+- name: Resolve installation user account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ aap_self_hosted_bootstrap_install_user }}"
+
+- name: Ensure transport and rollout roots exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ aap_self_hosted_bootstrap_remote_tmp }}"
+      owner: root
+      group: root
+      mode: "1777"
+    - path: "{{ aap_self_hosted_bootstrap_work_root }}"
+      owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+      group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+      mode: "0700"
+
+- name: Ensure AAP FQDN resolves to the managed host address
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: >-
+      ^\S+\s+(?:\S+\s+)*{{ aap_self_hosted_bootstrap_fqdn | regex_escape }}(?:\s|$).*$
+    line: >-
+      {{ aap_self_hosted_bootstrap_host_address | ansible.utils.ipaddr('address') }}
+      {{ aap_self_hosted_bootstrap_fqdn }}
+      {{ aap_self_hosted_bootstrap_fqdn.split('.')[0] }}
+    state: present
+  when: aap_self_hosted_bootstrap_manage_hosts_entry | bool
+
+- name: Ensure owner-only rollout workspace exists
+  ansible.builtin.file:
+    path: "{{ aap_self_hosted_bootstrap_work_root }}/{{ item }}"
+    state: directory
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0700"
+  loop: "{{ aap_self_hosted_bootstrap_workspace_directories }}"
+
+- name: Check out the approved automation version
+  ansible.builtin.git:
+    repo: "{{ aap_self_hosted_bootstrap_project_repo }}"
+    dest: "{{ aap_self_hosted_bootstrap_project_dir }}"
+    version: "{{ aap_self_hosted_bootstrap_project_version }}"
+    depth: >-
+      {{ 1 if not (aap_self_hosted_bootstrap_project_version
+                   is match('^[0-9a-f]{40}$')) else omit }}
+    single_branch: >-
+      {{ true if not (aap_self_hosted_bootstrap_project_version
+                      is match('^[0-9a-f]{40}$')) else omit }}
+    update: true
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+
+- name: Check out the approved supplementary collection version
+  ansible.builtin.git:
+    repo: "{{ aap_self_hosted_bootstrap_supplementary_repo }}"
+    dest: "{{ aap_self_hosted_bootstrap_supplementary_dir }}"
+    version: "{{ aap_self_hosted_bootstrap_supplementary_version }}"
+    update: true
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+
+- name: Ensure protected production inventory directory exists
+  ansible.builtin.file:
+    path: "{{ aap_self_hosted_bootstrap_project_dir }}/ansible/inventories/production/group_vars/aaps"
+    state: directory
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0700"
+
+- name: Ensure rollout SSH directory exists
+  ansible.builtin.file:
+    path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh"
+    state: directory
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0700"
+
+- name: Inspect dedicated rollout public key
+  ansible.builtin.stat:
+    path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}.pub"
+    follow: false
+  register: aap_self_hosted_bootstrap_rollout_public_key_stat
+  no_log: true
+
+- name: Generate dedicated rollout SSH key pair
+  community.crypto.openssh_keypair:
+    path: "{{ aap_self_hosted_bootstrap_ssh_key_path }}"
+    type: ed25519
+    comment: "{{ aap_self_hosted_bootstrap_rollout_user }}@{{ aap_self_hosted_bootstrap_fqdn }} AAP rollout"
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0600"
+  no_log: true
+
+- name: Read dedicated rollout public key
+  ansible.builtin.slurp:
+    src: "{{ aap_self_hosted_bootstrap_ssh_key_path }}.pub"
+  register: aap_self_hosted_bootstrap_rollout_public_key
+  no_log: true
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_rollout_public_key_stat.stat.exists | default(false))
+
+- name: Authorize dedicated rollout public key
+  ansible.posix.authorized_key:
+    user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    key: "{{ aap_self_hosted_bootstrap_rollout_public_key.content | b64decode | trim }}"
+    state: present
+  no_log: true
+  when:
+    - not ansible_check_mode
+      or (aap_self_hosted_bootstrap_rollout_public_key_stat.stat.exists | default(false))
+
+- name: Inspect locally trusted SSH host public-key file
+  ansible.builtin.stat:
+    path: "{{ aap_self_hosted_bootstrap_host_public_key_path }}"
+    follow: false
+  register: aap_self_hosted_bootstrap_host_public_key_stat
+
+- name: Require safe trusted SSH host public-key file
+  ansible.builtin.assert:
+    that:
+      - aap_self_hosted_bootstrap_host_public_key_stat.stat.exists | default(false)
+      - aap_self_hosted_bootstrap_host_public_key_stat.stat.isreg | default(false)
+      - not (aap_self_hosted_bootstrap_host_public_key_stat.stat.islnk | default(false))
+      - aap_self_hosted_bootstrap_host_public_key_stat.stat.size | int > 0
+    fail_msg: The trusted SSH host public-key file is absent or unsafe.
+    quiet: true
+
+- name: Read locally trusted SSH host public key
+  ansible.builtin.slurp:
+    src: "{{ aap_self_hosted_bootstrap_host_public_key_path }}"
+  register: aap_self_hosted_bootstrap_host_public_key
+
+- name: Install trusted loopback host key
+  ansible.builtin.known_hosts:
+    path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/known_hosts"
+    name: "{{ aap_self_hosted_bootstrap_fqdn }}"
+    key: >-
+      {{ aap_self_hosted_bootstrap_fqdn }}
+      {{ (aap_self_hosted_bootstrap_host_public_key.content
+          | b64decode).split()[0:2] | join(' ') }}
+    state: present
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+
+- name: Protect trusted loopback host-key file
+  ansible.builtin.file:
+    path: "{{ aap_self_hosted_bootstrap_rollout_home }}/.ssh/known_hosts"
+    state: touch
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Copy protected rollout inputs
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - src: "{{ aap_self_hosted_bootstrap_registry_auth_src }}"
+      dest: "{{ aap_self_hosted_bootstrap_work_root }}/secrets/registry-auth.json"
+      mode: "0600"
+      secret: true
+    - src: "{{ aap_self_hosted_bootstrap_vault_password_src }}"
+      dest: "{{ aap_self_hosted_bootstrap_work_root }}/secrets/.vault-pass.txt"
+      mode: "0600"
+      secret: true
+    - src: "{{ aap_self_hosted_bootstrap_encrypted_vault_src }}"
+      dest: >-
+        {{ aap_self_hosted_bootstrap_project_dir
+           }}/ansible/inventories/production/group_vars/aaps/aap-vault.yml
+      mode: "0600"
+      secret: true
+    - src: "{{ aap_self_hosted_bootstrap_inventory_src }}"
+      dest: >-
+        {{ aap_self_hosted_bootstrap_project_dir
+           }}/ansible/inventories/production/inventory.yml
+      mode: "0600"
+      secret: false
+    - src: "{{ aap_self_hosted_bootstrap_group_vars_src }}"
+      dest: >-
+        {{ aap_self_hosted_bootstrap_project_dir
+           }}/ansible/inventories/production/group_vars/aaps/aap.yml
+      mode: "0600"
+      secret: false
+    - src: "{{ aap_self_hosted_bootstrap_manifest_src }}"
+      dest: "{{ aap_self_hosted_bootstrap_work_root }}/artifacts/manifest.zip"
+      mode: "0600"
+      secret: false
+  loop_control:
+    label: "{{ item.dest }}"
+  no_log: "{{ item.secret }}"
+
+- name: Inspect staged setup bundle
+  ansible.builtin.stat:
+    path: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+  register: aap_self_hosted_bootstrap_bundle_stat
+
+- name: Report planned setup-bundle transfer
+  ansible.builtin.debug:
+    msg: The approved AAP setup bundle would be transferred with streaming rsync.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not (aap_self_hosted_bootstrap_bundle_stat.stat.exists | default(false))
+
+- name: Verify rsync is available in the rollout execution environment
+  ansible.builtin.command:
+    argv: [rsync, --version]
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+
+- name: Verify rsync is available on the managed host
+  ansible.builtin.command:
+    argv: [rsync, --version]
+  become: false
+  check_mode: false
+  changed_when: false
+
+- name: Transfer approved setup bundle with streaming checksum comparison
+  ansible.posix.synchronize:
+    src: "{{ aap_self_hosted_bootstrap_bundle_src }}"
+    dest: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+    mode: push
+    archive: false
+    checksum: true
+    compress: false
+    perms: false
+    times: false
+    use_ssh_args: true
+    rsync_opts:
+      - --chmod=F600
+  become: false
+  when: not ansible_check_mode
+
+- name: Protect staged setup bundle
+  ansible.builtin.file:
+    path: >-
+      {{ aap_self_hosted_bootstrap_work_root
+         }}/artifacts/aap-containerized-setup.tar.gz
+    state: file
+    owner: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+    group: "{{ aap_self_hosted_bootstrap_rollout_group }}"
+    mode: "0600"
+  when: not ansible_check_mode
+
+- name: Check approved execution-environment image
+  ansible.builtin.command:
+    argv: [podman, image, exists, "{{ aap_self_hosted_bootstrap_ee_image }}"]
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+  register: aap_self_hosted_bootstrap_image_exists
+  changed_when: false
+  failed_when: aap_self_hosted_bootstrap_image_exists.rc not in [0, 1]
+  check_mode: false
+
+- name: Pull approved execution-environment image when absent
+  ansible.builtin.command:
+    argv:
+      - podman
+      - pull
+      - --authfile
+      - "{{ aap_self_hosted_bootstrap_work_root }}/secrets/registry-auth.json"
+      - "{{ aap_self_hosted_bootstrap_ee_image }}"
+  become: true
+  become_user: "{{ aap_self_hosted_bootstrap_rollout_user }}"
+  register: aap_self_hosted_bootstrap_image_pull
+  changed_when: aap_self_hosted_bootstrap_image_pull.rc == 0
+  when:
+    - not ansible_check_mode
+    - aap_self_hosted_bootstrap_image_exists.rc | default(0) == 1

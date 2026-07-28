@@ -49,6 +49,9 @@
       - workbench_acceptance.tools | length > 0
       - workbench_acceptance.python_environment | default({}) is mapping
       - workbench_acceptance.python_environment.path | default('') is match('^/')
+      - >-
+        workbench_acceptance.python_environment.path | default('')
+        is match('^/opt/lit/[^/]+$')
       - workbench_acceptance.python_environment.packages | default({}) is mapping
       - workbench_acceptance.npm_packages | default({}) is mapping
       - workbench_acceptance.incus | default({}) is mapping

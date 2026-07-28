@@ -1,0 +1,344 @@
+---
+# Bootstrap rootless Podman storage before the execution-environment image is
+# available. This playbook intentionally uses ansible.builtin only.
+
+- name: Bootstrap rootless Podman storage for local AAP execution
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    aap_podman_bootstrap_user: "{{ lookup('ansible.builtin.env', 'USER') }}"
+    aap_podman_bootstrap_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+    aap_podman_bootstrap_graphroot: /appl/podman/storage
+    aap_podman_bootstrap_tmpdir: /appl/tmp
+    aap_podman_bootstrap_installation_config_dir: >-
+      {{ aap_podman_bootstrap_home }}/aap-installation/installation-config
+    aap_podman_bootstrap_group_vars_dir: >-
+      {{ aap_podman_bootstrap_installation_config_dir }}/group_vars/aaps
+    aap_podman_bootstrap_ee_image: >-
+      {{ lookup('ansible.builtin.env', 'EE_IMAGE') }}
+    aap_podman_bootstrap_registry_probe_url: https://quay.io/
+    aap_podman_bootstrap_required_packages:
+      - ansible-core
+      - ansible-navigator
+      - git
+      - openssh-clients
+      - openssl
+      - podman
+    aap_podman_bootstrap_storage_conf: >-
+      {{ aap_podman_bootstrap_home }}/.config/containers/storage.conf
+    aap_podman_bootstrap_proxy_environment:
+      HTTP_PROXY: "{{ lookup('ansible.builtin.env', 'HTTP_PROXY') }}"
+      HTTPS_PROXY: "{{ lookup('ansible.builtin.env', 'HTTPS_PROXY') }}"
+      NO_PROXY: "{{ lookup('ansible.builtin.env', 'NO_PROXY') }}"
+      http_proxy: "{{ lookup('ansible.builtin.env', 'http_proxy') }}"
+      https_proxy: "{{ lookup('ansible.builtin.env', 'https_proxy') }}"
+      no_proxy: "{{ lookup('ansible.builtin.env', 'no_proxy') }}"
+
+  tasks:
+    - name: Validate bootstrap execution context
+      ansible.builtin.assert:
+        that:
+          - aap_podman_bootstrap_user | length > 0
+          - aap_podman_bootstrap_user != "root"
+          - aap_podman_bootstrap_home is match("^/")
+          - aap_podman_bootstrap_graphroot is match("^/")
+          - aap_podman_bootstrap_tmpdir is match("^/")
+          - aap_podman_bootstrap_installation_config_dir is match("^/")
+          - aap_podman_bootstrap_group_vars_dir is match("^/")
+          - aap_podman_bootstrap_ee_image | length > 0
+          - >-
+            aap_podman_bootstrap_proxy_environment.HTTPS_PROXY | length > 0 or
+            aap_podman_bootstrap_proxy_environment.https_proxy | length > 0
+        fail_msg: >-
+          Run this playbook as the non-root installation account with an
+          absolute home directory, absolute Podman storage paths, EE_IMAGE,
+          and the approved proxy environment.
+
+    - name: Verify passwordless privilege escalation
+      become: true
+      ansible.builtin.command:
+        argv: [/usr/bin/true]
+      changed_when: false
+
+    - name: Verify dedicated application filesystem
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/findmnt
+          - --mountpoint
+          - /appl
+      changed_when: false
+
+    - name: Read installed RPM packages
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    - name: Verify required host packages
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.packages
+        fail_msg: >-
+          Required RPM package {{ item }} is not installed.
+      loop: "{{ aap_podman_bootstrap_required_packages }}"
+
+    - name: Verify access to the container registry through the proxy
+      ansible.builtin.uri:
+        url: "{{ aap_podman_bootstrap_registry_probe_url }}"
+        method: HEAD
+        follow_redirects: safe
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 307
+          - 308
+      environment: "{{ aap_podman_bootstrap_proxy_environment }}"
+
+    - name: Read installation account UID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --user
+          - "{{ aap_podman_bootstrap_user }}"
+      register: aap_podman_bootstrap_uid
+      changed_when: false
+
+    - name: Read installation account primary group
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --group
+          - --name
+          - "{{ aap_podman_bootstrap_user }}"
+      register: aap_podman_bootstrap_primary_group
+      changed_when: false
+
+    - name: Define rootless Podman runtime paths
+      ansible.builtin.set_fact:
+        aap_podman_bootstrap_runtime_dir: >-
+          /run/user/{{ aap_podman_bootstrap_uid.stdout | trim }}
+        aap_podman_bootstrap_runroot: >-
+          /run/user/{{ aap_podman_bootstrap_uid.stdout | trim }}/containers
+
+    - name: Read installation account linger state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/loginctl
+          - show-user
+          - "{{ aap_podman_bootstrap_user }}"
+          - --property=Linger
+          - --value
+      register: aap_podman_bootstrap_linger
+      changed_when: false
+      failed_when: false
+
+    - name: Enable systemd linger for rootless Podman
+      become: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/loginctl
+          - enable-linger
+          - "{{ aap_podman_bootstrap_user }}"
+      when: aap_podman_bootstrap_linger.stdout | trim != "yes"
+      changed_when: true
+
+    - name: Check fuse-overlayfs availability
+      ansible.builtin.stat:
+        path: /usr/bin/fuse-overlayfs
+      register: aap_podman_bootstrap_fuse_overlayfs
+
+    - name: Create privileged Podman storage directories
+      become: true
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ aap_podman_bootstrap_graphroot }}"
+          owner: "{{ aap_podman_bootstrap_user }}"
+          group: "{{ aap_podman_bootstrap_primary_group.stdout | trim }}"
+          mode: "0700"
+        - path: "{{ aap_podman_bootstrap_runtime_dir }}"
+          owner: "{{ aap_podman_bootstrap_user }}"
+          group: "{{ aap_podman_bootstrap_primary_group.stdout | trim }}"
+          mode: "0700"
+        - path: "{{ aap_podman_bootstrap_tmpdir }}"
+          owner: root
+          group: root
+          mode: "1777"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Read SELinux enforcement state
+      ansible.builtin.command:
+        argv: [/usr/sbin/getenforce]
+      register: aap_podman_bootstrap_selinux
+      changed_when: false
+      failed_when: false
+
+    - name: Check SELinux relabel command availability
+      ansible.builtin.stat:
+        path: /usr/bin/chcon
+      register: aap_podman_bootstrap_chcon
+
+    - name: Label Podman storage for SELinux
+      become: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/chcon
+          - --recursive
+          - --type
+          - container_var_lib_t
+          - "{{ aap_podman_bootstrap_graphroot }}"
+      changed_when: true
+      when:
+        - aap_podman_bootstrap_selinux.rc == 0
+        - aap_podman_bootstrap_selinux.stdout | trim != "Disabled"
+        - aap_podman_bootstrap_chcon.stat.executable | default(false)
+
+    - name: Create rootless containers configuration directory
+      ansible.builtin.file:
+        path: "{{ aap_podman_bootstrap_storage_conf | dirname }}"
+        state: directory
+        mode: "0700"
+
+    - name: Create protected installation configuration directory
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - "{{ aap_podman_bootstrap_installation_config_dir }}"
+        - "{{ aap_podman_bootstrap_group_vars_dir }}"
+
+    - name: Configure rootless Podman storage
+      ansible.builtin.copy:
+        dest: "{{ aap_podman_bootstrap_storage_conf }}"
+        mode: "0600"
+        content: |
+          [storage]
+          driver = "overlay"
+          graphroot = "{{ aap_podman_bootstrap_graphroot }}"
+          runroot = "{{ aap_podman_bootstrap_runroot }}"
+
+          [storage.options]
+          {% if aap_podman_bootstrap_fuse_overlayfs.stat.exists %}
+          mount_program = "/usr/bin/fuse-overlayfs"
+          {% endif %}
+
+    - name: Read effective Podman graphroot
+      ansible.builtin.command:
+        argv:
+          - podman
+          - info
+          - --format
+          - "{{ '{{ .Store.GraphRoot }}' }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+        XDG_RUNTIME_DIR: "{{ aap_podman_bootstrap_runtime_dir }}"
+      register: aap_podman_bootstrap_effective_graphroot
+      changed_when: false
+
+    - name: Read effective Podman runroot
+      ansible.builtin.command:
+        argv:
+          - podman
+          - info
+          - --format
+          - "{{ '{{ .Store.RunRoot }}' }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+        XDG_RUNTIME_DIR: "{{ aap_podman_bootstrap_runtime_dir }}"
+      register: aap_podman_bootstrap_effective_runroot
+      changed_when: false
+
+    - name: Verify effective rootless Podman storage
+      ansible.builtin.assert:
+        that:
+          - >-
+            aap_podman_bootstrap_effective_graphroot.stdout | trim ==
+            aap_podman_bootstrap_graphroot
+          - >-
+            aap_podman_bootstrap_effective_runroot.stdout | trim ==
+            aap_podman_bootstrap_runroot
+        fail_msg: >-
+          Podman storage configuration mismatch. Expected GraphRoot
+          {{ aap_podman_bootstrap_graphroot }}, got
+          {{ aap_podman_bootstrap_effective_graphroot.stdout | trim }};
+          expected RunRoot {{ aap_podman_bootstrap_runroot }}, got
+          {{ aap_podman_bootstrap_effective_runroot.stdout | trim }}.
+          An existing Podman store may have been initialized with an older
+          storage configuration.
+        success_msg: >-
+          Rootless Podman uses persistent storage below /appl and its
+          transient runroot below /run/user.
+
+    - name: Check whether the execution-environment image is available
+      ansible.builtin.command:
+        argv:
+          - podman
+          - image
+          - exists
+          - "{{ aap_podman_bootstrap_ee_image }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+      register: aap_podman_bootstrap_ee_image_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Pull the execution-environment image
+      ansible.builtin.command:
+        argv:
+          - podman
+          - pull
+          - "{{ aap_podman_bootstrap_ee_image }}"
+      environment: >-
+        {{
+          aap_podman_bootstrap_proxy_environment
+          | combine(
+              {
+                'CONTAINERS_STORAGE_CONF':
+                  aap_podman_bootstrap_storage_conf,
+                'TMPDIR': aap_podman_bootstrap_tmpdir
+              }
+            )
+        }}
+      when: aap_podman_bootstrap_ee_image_exists.rc != 0
+      changed_when: true
+
+    - name: Verify the execution-environment image
+      ansible.builtin.command:
+        argv:
+          - podman
+          - image
+          - inspect
+          - "{{ aap_podman_bootstrap_ee_image }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+      changed_when: false
+      no_log: true
+
+    - name: Verify required AAP preflight role in the execution environment
+      ansible.builtin.command:
+        argv:
+          - podman
+          - run
+          - --rm
+          - --network=none
+          - --entrypoint
+          - /usr/bin/test
+          - "{{ aap_podman_bootstrap_ee_image }}"
+          - -d
+          - /usr/share/ansible/collections/ansible_collections/lit/supplementary/roles/aap_preflight
+      environment:
+        CONTAINERS_STORAGE_CONF: "{{ aap_podman_bootstrap_storage_conf }}"
+        TMPDIR: "{{ aap_podman_bootstrap_tmpdir }}"
+      changed_when: false

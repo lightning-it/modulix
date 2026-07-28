@@ -1,0 +1,6 @@
+---
+aap_poc_inputs_enabled: false
+aap_poc_inputs_vault_password_file: ""
+aap_poc_inputs_vault_file: ""
+aap_poc_inputs_registry_auth_file: ""
+aap_poc_inputs_password_length: 32

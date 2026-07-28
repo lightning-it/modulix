@@ -26,7 +26,21 @@
           - --format=json
       register: workbench_heavy_guest_list
       changed_when: false
+      failed_when: false
       check_mode: false
+      until: >-
+        workbench_heavy_guest_list.rc == 0
+        and workbench_heavy_guest_list.stdout | trim | length > 0
+        and (
+          (workbench_heavy_guest_list.stdout | from_json | first).state.network
+          | dict2items
+          | map(attribute='value.addresses') | flatten
+          | selectattr('family', 'equalto', 'inet')
+          | rejectattr('address', 'equalto', '127.0.0.1')
+          | list | length > 0
+        )
+      retries: 30
+      delay: 2
 
     - name: Require Heavy guest list evidence
       ansible.builtin.assert:
@@ -61,6 +75,119 @@
           - workbench_heavy_guest_addresses | length > 0
         fail_msg: "Incus did not report a non-loopback IPv4 address for the Heavy guest."
         quiet: true
+      changed_when: false
+
+    - name: Require the generated Heavy guest account
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - getent
+          - passwd
+          - "{{ workbench_acceptance_profile_config.guest_user }}"
+      changed_when: false
+      check_mode: false
+
+    - name: Require a non-empty Heavy guest authorized_keys file
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - test
+          - -s
+          - >-
+            /home/{{ workbench_acceptance_profile_config.guest_user }}/.ssh/authorized_keys
+      changed_when: false
+      check_mode: false
+
+    - name: Read Heavy guest SSH path metadata
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - stat
+          - --format=%U:%G:%a
+          - >-
+            /home/{{ workbench_acceptance_profile_config.guest_user }}/.ssh
+          - >-
+            /home/{{ workbench_acceptance_profile_config.guest_user }}/.ssh/authorized_keys
+      register: workbench_heavy_guest_ssh_metadata
+      changed_when: false
+
+    - name: Require safe Heavy guest SSH path metadata
+      ansible.builtin.assert:
+        that:
+          - >-
+            workbench_heavy_guest_ssh_metadata.stdout_lines
+            == [
+              workbench_acceptance_profile_config.guest_user
+              ~ ':' ~ workbench_acceptance_profile_config.guest_user ~ ':700',
+              workbench_acceptance_profile_config.guest_user
+              ~ ':' ~ workbench_acceptance_profile_config.guest_user ~ ':600'
+            ]
+        fail_msg: "The Heavy guest SSH directory or authorized_keys metadata is unsafe."
+        quiet: true
+      changed_when: false
+
+    - name: Read the generated Heavy public-key fingerprint
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -l
+          - -f
+          - "{{ workbench_acceptance_workspace }}/guest-key.pub"
+      register: workbench_heavy_local_key_fingerprint
+      changed_when: false
+
+    - name: Read the installed Heavy guest public-key fingerprint
+      ansible.builtin.command:
+        argv:
+          - incus
+          - --force-local
+          - --project
+          - "{{ workbench_acceptance_profile_config.project }}"
+          - exec
+          - "{{ workbench_acceptance_current_instance_name }}"
+          - "--"
+          - ssh-keygen
+          - -l
+          - -f
+          - >-
+            /home/{{ workbench_acceptance_profile_config.guest_user }}/.ssh/authorized_keys
+      register: workbench_heavy_guest_key_fingerprint
+      changed_when: false
+
+    - name: Require the generated key in the Heavy guest
+      ansible.builtin.assert:
+        that:
+          - >-
+            workbench_heavy_local_key_fingerprint.stdout.split()[1]
+            in workbench_heavy_guest_key_fingerprint.stdout
+        fail_msg: "The generated Heavy SSH key fingerprint does not match the guest."
+        quiet: true
+      changed_when: false
+
+    - name: Wait for the Heavy guest SSH listener
+      ansible.builtin.wait_for:
+        host: "{{ workbench_heavy_guest_addresses | first }}"
+        port: 22
+        connect_timeout: 2
+        timeout: 120
       changed_when: false
 
     - name: Write temporary Heavy guest inventory
@@ -103,6 +230,8 @@
             {{ workbench_acceptance_artifacts }}/guest-{{ workbench_heavy_guest_sequence }}-second.raw.log
           - >-
             {{ workbench_acceptance_workspace }}/ansible-local-{{ workbench_heavy_guest_sequence }}
+          - "{{ workbench_acceptance.python_environment.path }}/bin/ansible"
+          - "{{ workbench_acceptance.python_environment.path }}/bin/ansible-playbook"
       become: true
       become_user: "{{ workbench_acceptance_operator }}"
       environment:

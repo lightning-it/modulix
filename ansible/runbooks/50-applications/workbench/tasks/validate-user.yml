@@ -39,6 +39,13 @@
   changed_when: false
   check_mode: false
 
+- name: Read the primary group for {{ workbench_validation_user.name }}
+  ansible.builtin.command:
+    argv: [id, --name, --group, "{{ workbench_validation_user.name }}"]
+  register: workbench_validation_primary_group
+  changed_when: false
+  check_mode: false
+
 - name: Read password lock status for {{ workbench_validation_user.name }}
   ansible.builtin.command:
     argv: [passwd, --status, "{{ workbench_validation_user.name }}"]
@@ -149,6 +156,7 @@
         | length == 0
       - >-
         workbench_validation_groups.stdout.split()
+        | difference([workbench_validation_primary_group.stdout | trim])
         | difference(workbench_validation_user.groups)
         | length == 0
       - >-
