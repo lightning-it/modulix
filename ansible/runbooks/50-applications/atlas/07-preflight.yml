@@ -32,9 +32,55 @@
           - _lit_atlas_storage.encryption == 'luks2'
           - _lit_atlas_storage.redundancy == 'raid1'
           - _lit_atlas_storage.minimum_devices | int == 2
+          - _lit_atlas_storage.devices is sequence
+          - _lit_atlas_storage.devices is not string
+          - _lit_atlas_storage.devices | length == 2
+          - _lit_atlas_storage.devices | unique | length == 2
+          - >-
+            _lit_atlas_storage.devices
+            | select('match', '^/dev/disk/by-id/')
+            | list | length == 2
           - _lit_atlas_retention is mapping
           - _lit_atlas_retention.keys() | list | sort == ['backup', 'loki', 'prometheus', 'rsyslog']
           - _lit_atlas_retention.values() | select('string') | list | length == 4
+          - _lit_atlas_off_host_backup is mapping
+          - _lit_atlas_off_host_backup.approved | default(false) | bool
+          - _lit_atlas_off_host_backup.provisioned | default(false) | bool
+          - _lit_atlas_off_host_backup.protocol | default('') == 's3'
+          - _lit_atlas_off_host_backup.schedule | default('') == 'daily'
+          - _lit_atlas_off_host_backup.rpo_hours | default(0) | int == 24
+          - _lit_atlas_off_host_backup.rto_hours | default(0) | int == 8
+          - >-
+            _lit_atlas_off_host_backup.restore_test_interval_days
+            | default(0) | int == 90
+          - >-
+            _lit_atlas_off_host_backup.restore_test_after_material_change
+            | default(false) | bool
+          - >-
+            _lit_atlas_off_host_backup.client_side_encryption
+            | default('') == 'required'
+          - _lit_atlas_off_host_backup.versioning | default(false) | bool
+          - >-
+            (_lit_atlas_off_host_backup.object_lock | default({}))
+            .enabled_at_creation | default(false) | bool
+          - >-
+            (_lit_atlas_off_host_backup.object_lock | default({}))
+            .mode | default('') == 'governance'
+          - >-
+            (_lit_atlas_off_host_backup.object_lock | default({}))
+            .retention_days | default(0) | int == 30
+          - _lit_atlas_alerting is mapping
+          - _lit_atlas_alerting.owner | default('') == 'platform_operations'
+          - >-
+            _lit_atlas_alerting.escalation | default([])
+            == ['platform_operations', 'incident_commander',
+                'information_security', 'atlas_service_owner']
+          - >-
+            _lit_atlas_alerting.receiver_secret_source | default('')
+            == 'hashicorp_vault'
+          - >-
+            _lit_atlas_alerting.receiver_secret_kv_path | default('')
+            | trim | length > 0
           - _lit_atlas_images is mapping
           - >-
             _lit_atlas_images.keys() | list | sort

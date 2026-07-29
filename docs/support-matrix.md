@@ -26,7 +26,9 @@ This matrix defines supported execution modes for ModuLix automation.
 
 ## Collection source
 
-- Base collections: bootstrap is enabled by default (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
+- Base collections: bootstrap is enabled by default. In EE-only mode it
+  defaults to disabled so collections are consumed exclusively from the
+  certified execution environment.
 - Default profile: `ansible/collections/requirements.yml`.
 - RH-certified/AAP profile is selected automatically when
   `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`

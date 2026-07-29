@@ -44,6 +44,8 @@ The playbook targets the `atlas` inventory group.
 
 ## Runbooks
 
+- `06-storage-evidence.yml`: collect read-only block, mount, swap, LVM, RAID,
+  and SMART discovery for one exactly limited Atlas host.
 - `05-prepare.yml`: create Atlas directories, prepare Ubuntu, configure Podman,
   and optionally apply firewall policy.
 - `07-preflight.yml`: validate Atlas inventory shape and runtime readiness.
