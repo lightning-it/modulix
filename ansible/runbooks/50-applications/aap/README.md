@@ -54,6 +54,12 @@ environment-file path instead of selecting a shared implicit workspace.
 Existing environment files with explicit legacy roots remain supported while
 their guides are migrated.
 
+Generated inventories use the public Platform Gateway URL
+`https://<aap-fqdn>` and leave the component-specific Hub, EDA, and internal
+gateway ports to the Red Hat installer. The normal workflow does not repair or
+delete a partial installation; a deliberate clean reinstall remains an
+explicit operator action.
+
 For a self-hosted rollout with no separate Linux control workstation, run
 `scripts/ansible-nav-local` directly on the RHEL AAP host. The EE then connects
 back to that host over its verified SSH path as `svc_ansible`; `connection: local`

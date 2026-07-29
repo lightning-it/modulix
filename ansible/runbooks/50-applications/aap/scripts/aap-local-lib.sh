@@ -29,7 +29,6 @@ modulix_aap_set_defaults() {
   : "${AAP_ANSIBLE_HOST:=${AAP_FQDN}}"
   : "${AAP_ANSIBLE_BECOME_FLAGS:=}"
   : "${AAP_SECRET_BACKEND:=hashicorp_vault}"
-  : "${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES:=true}"
   : "${AAP_SSH_KEY_AUTH_ENABLED:=true}"
   : "${AAP_BOOTSTRAP_USER:=${AAP_USER}}"
   if [[ "${AAP_SSH_KEY_AUTH_ENABLED}" != "true" &&
@@ -140,15 +139,6 @@ modulix_aap_set_defaults() {
       return 1
       ;;
   esac
-  case "${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES}" in
-    true | false) ;;
-    *)
-      printf 'AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES must be true or false, got: %s\n' \
-        "${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES}" >&2
-      return 1
-      ;;
-  esac
-
   if [[ "${AAP_SECRET_BACKEND}" == "hashicorp_vault" ]]; then
     : "${AAP_VAULT_HOST_KEY:=${AAP_FQDN}}"
     : "${AAP_VAULT_ADMIN_PASSWORDS_KV_PATH:=${AAP_VAULT_HOST_KEY}/aap/deploy/admin_passwords}"
@@ -192,7 +182,6 @@ modulix_aap_set_defaults() {
 
   export AAP_DEPLOYMENT_ID AAP_SHORTNAME AAP_USER AAP_SETUP_USER AAP_INSTALL_USER AAP_ANSIBLE_HOST
   export AAP_ANSIBLE_BECOME_FLAGS AAP_SECRET_BACKEND
-  export AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES
   export AAP_SSH_KEY_AUTH_ENABLED
   export AAP_BOOTSTRAP_USER AAP_BASELINE_SSH_KEY AAP_BOOTSTRAP_SSH_KEY
   export AAP_INVENTORY_HOST AAP_APPL_ROOT AAP_ENV_FILE
@@ -486,17 +475,12 @@ aap_deploy_install_dir: /appl/aap
 aap_deploy_setup_dir: "{{ aap_deploy_install_dir }}/setup"
 aap_deploy_tls_dir: "{{ aap_deploy_install_dir }}/tls"
 aap_deploy_installed_marker_path: "{{ aap_deploy_install_dir }}/.aap_containerized_installed"
-aap_deploy_gateway_main_url: "https://${AAP_FQDN}:8446"
+aap_deploy_gateway_main_url: "https://${AAP_FQDN}"
 aap_deploy_gateway_verify_url: "{{ aap_deploy_gateway_main_url }}"
-aap_deploy_hub_upload_readiness_url: "https://${AAP_FQDN}:8444/api/galaxy/pulp/api/v3/status/"
-aap_deploy_hub_container_registry_url: "https://${AAP_FQDN}:8444"
-aap_deploy_hub_seed_execution_environment_images: ${AAP_HUB_SEED_EXECUTION_ENVIRONMENT_IMAGES}
-aap_deploy_eda_api_url: "https://${AAP_FQDN}:8445"
 
 aap_deploy_install_user: ${AAP_INSTALL_USER}
 aap_deploy_install_user_home: /appl/home/${AAP_INSTALL_USER}
 aap_deploy_install_user_shell: /bin/bash
-aap_deploy_reset_partial_install_enabled: true
 
 aap_deploy_growth_gateway_host: "${AAP_INVENTORY_HOST}"
 aap_deploy_growth_controller_host: "${AAP_INVENTORY_HOST}"
