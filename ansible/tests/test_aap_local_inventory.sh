@@ -34,13 +34,11 @@ grep -Fxq \
 grep -Fxq \
   'aap_deploy_gateway_verify_url: "{{ aap_deploy_gateway_main_url }}"' \
   "${rendered_inventory}"
-grep -Fxq \
-  'aap_deploy_hub_seed_execution_environment_images: true' \
-  "${rendered_inventory}"
 
 for forbidden_value in \
   aap_deploy_hub_upload_readiness_url \
   aap_deploy_hub_container_registry_url \
+  aap_deploy_hub_seed_execution_environment_images \
   aap_deploy_eda_api_url \
   :8444 \
   :8445 \
