@@ -18,7 +18,7 @@ This document defines the canonical execution contract for ModuLix automation re
   project collection path first.
 - `ansible/scripts/ansible-nav-local run` bootstraps collections by default.
   When `ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true`, automatic collection
-  installation defaults to `false` so the certified EE remains the sole
+  installation is forced to `false` so the certified EE remains the sole
   collection source.
 - If `ansible/files/tls` exists, `ansible-nav-local run` mounts it read-only
   with a private SELinux label at `/runner/project/files/tls` for

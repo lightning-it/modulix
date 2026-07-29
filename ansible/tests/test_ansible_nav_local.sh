@@ -69,7 +69,9 @@ grep -Fq '/runner/project/ansible/roles' "${ee_only_output}"
 ee_only_default_output="${test_root}/ee-only-default.out"
 env \
   -u ANSIBLE_TOOLBOX_AUTO_COLLECTIONS \
-  "${common_env[@]:0:3}" \
+  "PATH=${fake_bin}:${PATH}" \
+  "HOME=${home}" \
+  "ANSIBLE_HOME=${test_root}/ansible-home" \
   "FAKE_NAV_OUTPUT=${ee_only_default_output}" \
   "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true" \
   "ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=/does/not/exist" \
