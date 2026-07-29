@@ -56,9 +56,9 @@ their guides are migrated.
 
 Generated inventories use the public Platform Gateway URL
 `https://<aap-fqdn>` and leave the component-specific Hub, EDA, and internal
-gateway ports to the Red Hat installer. Partial-install cleanup is disabled by
-default; a deliberate clean reinstall must be handled as an explicit operator
-action instead of being triggered by an ordinary retry.
+gateway ports to the Red Hat installer. The normal workflow does not repair or
+delete a partial installation; a deliberate clean reinstall remains an
+explicit operator action.
 
 For a self-hosted rollout with no separate Linux control workstation, run
 `scripts/ansible-nav-local` directly on the RHEL AAP host. The EE then connects

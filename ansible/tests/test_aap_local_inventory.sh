@@ -49,6 +49,7 @@ for inventory_source in "${rendered_inventory}" "${inventory_template}"; do
     aap_deploy_hub_container_registry_url \
     aap_deploy_hub_seed_execution_environment_images \
     aap_deploy_eda_api_url \
+    aap_deploy_reset_partial_install_enabled \
     :8444 \
     :8445 \
     :8446; do
