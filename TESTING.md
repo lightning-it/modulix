@@ -50,18 +50,6 @@ bash scripts/wunder-devtools-ee.sh true
 
 Heavy Incus tests require an Ubuntu host or runner with Incus available, suitable images, and repository-specific scenario configuration. Heavy tests must use sanitized inputs and must not rely on private inventory values.
 
-In accordance with ADR 2886566105, this repository retains the Workbench Heavy
-runbook, assertions, fixtures, and
-exact owner-checked cleanup. GitHub execution is owned exclusively by the
-protected `Workbench Public Acceptance` workflow in `modulix-validation`.
-
-That central workflow checks out the reviewed automation source and the private
-inventory under its protected `workbench-public-acceptance`
-environment. It owns authorization, credentials, exact-target validation,
-execution, cleanup, and normalized evidence. This repository must not define
-an independent Heavy workflow or require private inventory values as
-repository variables.
-
 ## Interpreting GitHub Actions
 
 The GitHub Actions matrix is the primary dashboard. Job names should expose the repository class, OS/runtime, and profile, for example `ansible / rhel9 / molecule-heavy-incus` or `container / ubuntu / build-smoke`.

@@ -9,6 +9,8 @@ _lit_atlas_backup_dir: "{{ lit_atlas_backup_dir | default(none) }}"
 _lit_atlas_bind_address: "{{ lit_atlas_bind_address | default(none) }}"
 _lit_atlas_storage: "{{ lit_atlas_storage | default({}) }}"
 _lit_atlas_retention: "{{ lit_atlas_retention | default({}) }}"
+_lit_atlas_off_host_backup: "{{ lit_atlas_off_host_backup | default({}) }}"
+_lit_atlas_alerting: "{{ lit_atlas_alerting | default({}) }}"
 _lit_atlas_images: "{{ lit_atlas_images | default({}) }}"
 _lit_atlas_ports: "{{ lit_atlas_ports | default({}) }}"
 
