@@ -3,6 +3,7 @@ set -euo pipefail
 
 ansible_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 library="${ansible_root}/runbooks/50-applications/aap/scripts/aap-local-lib.sh"
+inventory_template="${ansible_root}/runbooks/50-applications/aap/templates/aap-local/inventories/group_vars/aaps/aap.yml.j2"
 test_root="$(mktemp -d)"
 trap 'rm -rf -- "${test_root}"' EXIT
 
@@ -35,19 +36,29 @@ grep -Fxq \
   'aap_deploy_gateway_verify_url: "{{ aap_deploy_gateway_main_url }}"' \
   "${rendered_inventory}"
 
-for forbidden_value in \
-  aap_deploy_hub_upload_readiness_url \
-  aap_deploy_hub_container_registry_url \
-  aap_deploy_hub_seed_execution_environment_images \
-  aap_deploy_eda_api_url \
-  :8444 \
-  :8445 \
-  :8446; do
-  if grep -Fq "${forbidden_value}" "${rendered_inventory}"; then
-    printf 'Rendered AAP inventory contains forbidden direct-service value: %s\n' \
-      "${forbidden_value}" >&2
-    exit 1
-  fi
+grep -Fxq \
+  'aap_deploy_gateway_main_url: "https://{{ aap_fqdn }}"' \
+  "${inventory_template}"
+grep -Fxq \
+  'aap_deploy_gateway_verify_url: "{{ '"'"'{{'"'"' }} aap_deploy_gateway_main_url {{ '"'"'}}'"'"' }}"' \
+  "${inventory_template}"
+
+for inventory_source in "${rendered_inventory}" "${inventory_template}"; do
+  for forbidden_value in \
+    aap_deploy_hub_upload_readiness_url \
+    aap_deploy_hub_container_registry_url \
+    aap_deploy_hub_seed_execution_environment_images \
+    aap_deploy_eda_api_url \
+    aap_deploy_reset_partial_install_enabled \
+    :8444 \
+    :8445 \
+    :8446; do
+    if grep -Fq "${forbidden_value}" "${inventory_source}"; then
+      printf 'AAP inventory source %s contains forbidden direct-service value: %s\n' \
+        "${inventory_source}" "${forbidden_value}" >&2
+      exit 1
+    fi
+  done
 done
 
-echo "AAP local inventory gateway endpoint tests passed"
+echo "AAP local inventory gateway and clean-install safety tests passed"
