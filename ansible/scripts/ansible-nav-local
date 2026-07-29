@@ -20,6 +20,10 @@ nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS+x}" ]]; then
   auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS}"
+elif [[ "${ee_only_collections}" == "true" ]]; then
+  # A certified/self-contained EE is the sole collection source. Installing
+  # project overlays would be redundant and could introduce version drift.
+  auto_collections="false"
 elif [[ "${REPO_ROOT}" == "/opt/modulix/ansible" ]]; then
   # RPM/container-in runtime is expected to be self-contained and offline-safe.
   auto_collections="false"
@@ -73,7 +77,7 @@ Environment:
   ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
-  ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
+  ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (forced false in EE-only; default false in RPM mode, true otherwise)
   ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
   ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
   ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
@@ -104,6 +108,7 @@ add_ee_volume_if_present() {
   local source="$1"
   local target="${2:-${source}}"
   local kind="${3:-file}"
+  local options="${4:-ro}"
 
   if [[ "${nav_ee_enabled}" != "true" || -z "${source}" ]]; then
     return 0
@@ -122,7 +127,7 @@ add_ee_volume_if_present() {
       ;;
   esac
 
-  cmd+=(--eev "${source}:${target}:ro")
+  cmd+=(--eev "${source}:${target}:${options}")
 }
 
 validate_owner_only_secret_file() {
@@ -578,6 +583,14 @@ case "${subcommand}" in
     stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
     configure_ssh_transport
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
+    # Self-signed/customer TLS assets are controller-side inputs to copy
+    # actions. Make the conventional persistent project directory visible in
+    # the nested execution environment without requiring operator flags.
+    add_ee_volume_if_present \
+      "${REPO_ROOT}/files/tls" \
+      "/runner/project/files/tls" \
+      dir \
+      "ro,Z"
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
     fi
