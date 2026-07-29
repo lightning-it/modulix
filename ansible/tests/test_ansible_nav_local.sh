@@ -66,6 +66,18 @@ if grep -Fq '/tmp/untrusted-overlay' "${ee_only_output}"; then
 fi
 grep -Fq '/runner/project/ansible/roles' "${ee_only_output}"
 
+ee_only_default_output="${test_root}/ee-only-default.out"
+env \
+  -u ANSIBLE_TOOLBOX_AUTO_COLLECTIONS \
+  "${common_env[@]:0:3}" \
+  "FAKE_NAV_OUTPUT=${ee_only_default_output}" \
+  "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true" \
+  "ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=/does/not/exist" \
+  "${script}" run example.yml
+grep -Fxq \
+  'COLLECTIONS=/usr/share/ansible/collections:/usr/share/automation-controller/collections' \
+  "${ee_only_default_output}"
+
 custom_roles_output="${test_root}/custom-roles.out"
 env \
   "${common_env[@]}" \
@@ -83,6 +95,22 @@ env \
   "${script}" run example.yml
 
 grep -Fq '/runner/project/ansible/collections' "${project_overlay_output}"
+
+tls_project_root="${test_root}/tls-project"
+mkdir -p "${tls_project_root}/scripts" "${tls_project_root}/files/tls"
+cp "${script}" "${tls_project_root}/scripts/ansible-nav-local"
+printf '%s\n' 'fixture-certificate' > "${tls_project_root}/files/tls/aap.crt"
+
+tls_mount_output="${test_root}/tls-mount.out"
+env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${tls_mount_output}" \
+  "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true" \
+  "${tls_project_root}/scripts/ansible-nav-local" run example.yml
+
+grep -Fxq \
+  "ARG=${tls_project_root}/files/tls:/runner/project/files/tls:ro,Z" \
+  "${tls_mount_output}"
 
 key="${home}/selected-key"
 known_hosts="${home}/selected-known-hosts"

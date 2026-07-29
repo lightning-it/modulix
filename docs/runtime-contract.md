@@ -16,8 +16,13 @@ This document defines the canonical execution contract for ModuLix automation re
 - `ansible-navigator run` is always executed with `--ee true`.
 - Connected runs resolve collections from `ANSIBLE_COLLECTIONS_PATH` with the
   project collection path first.
-- `ansible/scripts/ansible-nav-local run` bootstraps collections by default
-  (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
+- `ansible/scripts/ansible-nav-local run` bootstraps collections by default.
+  When `ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true`, automatic collection
+  installation defaults to `false` so the certified EE remains the sole
+  collection source.
+- If `ansible/files/tls` exists, `ansible-nav-local run` mounts it read-only
+  with a private SELinux label at `/runner/project/files/tls` for
+  controller-side TLS copy operations.
 - Default requirements profile: `ansible/collections/requirements.yml`.
 - If `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`
   exists, that RH profile is selected automatically.

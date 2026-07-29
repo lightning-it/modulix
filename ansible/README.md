@@ -28,6 +28,15 @@ it is selected automatically instead.
 - `auto`: install only when cache is missing or requirements changed.
 - `false`: do not install; assume collections are already present.
 
+When `ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true`, the default changes to
+`false`; an explicit `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS` value still takes
+precedence.
+
+For `run`, an existing project directory at `files/tls` is mounted read-only
+with a private SELinux label at `/runner/project/files/tls` in the execution
+environment. This makes controller-side TLS inputs available to Ansible copy
+actions without operator-supplied container options.
+
 Use `auto` for faster day-to-day operator runs. Use `true` for strict
 reproducibility (for example CI or fresh environments).
 
