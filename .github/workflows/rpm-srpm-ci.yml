@@ -156,6 +156,8 @@ jobs:
             '{' \
             '  "schema_version": 1,' \
             '  "artifact": "'"${SRPM_FILE}"'",' \
+            '  "version": "'"${RPM_VERSION}"'",' \
+            '  "release": "'"${RPM_RELEASE}"'",' \
             '  "declared_license": "'"${declared_license}"'",' \
             '  "policy": "repository SPDX license must match SRPM license"' \
             '}' >"${license_report}"
@@ -180,7 +182,7 @@ jobs:
       contents: read
     steps:
       - name: Install SRPM extraction tooling
-        run: dnf -y install cpio rpm
+        run: dnf -y install cpio python3 rpm
 
       - name: Download exact SRPM artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
@@ -232,6 +234,59 @@ jobs:
           format: cyclonedx-json
           output-file: evidence/sbom.cdx.json
           upload-artifact: false
+
+      - name: Bind SBOM root component to exact SRPM identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path("evidence")
+          report = json.loads((evidence / "license-report.json").read_text())
+          checksum_line = (evidence / "SHA256SUMS").read_text().strip()
+          digest, artifact = checksum_line.split(maxsplit=1)
+          if artifact != report["artifact"]:
+              raise SystemExit("checksum and license evidence identify different artifacts")
+          if report["declared_license"] != "MIT":
+              raise SystemExit("SRPM license is not the repository SPDX license")
+          if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+              raise SystemExit("invalid SRPM SHA-256 evidence")
+
+          sbom_path = evidence / "sbom.cdx.json"
+          sbom = json.loads(sbom_path.read_text())
+          component = {
+              "type": "application",
+              "bom-ref": f"urn:sha256:{digest}",
+              "name": "modulix-automation-runtime",
+              "version": f"{report['version']}-{report['release']}",
+              "purl": (
+                  "pkg:rpm/modulix-automation-runtime@"
+                  f"{report['version']}-{report['release']}?arch=src"
+              ),
+              "hashes": [{"alg": "SHA-256", "content": digest}],
+              "licenses": [{"license": {"id": "MIT"}}],
+              "properties": [
+                  {"name": "lightning-it:artifact", "value": artifact},
+                  {
+                      "name": "lightning-it:source-sha",
+                      "value": os.environ["GITHUB_SHA"],
+                  },
+              ],
+          }
+          sbom.setdefault("metadata", {})["component"] = component
+          components = sbom.setdefault("components", [])
+          components[:] = [
+              existing
+              for existing in components
+              if existing.get("bom-ref") != component["bom-ref"]
+          ]
+          components.insert(0, component)
+          if not components or components[0]["hashes"][0]["content"] != digest:
+              raise SystemExit("candidate-bound SBOM root component is missing")
+          sbom_path.write_text(json.dumps(sbom, indent=2) + "\n")
+          PY
 
       - name: Scan exact-SRPM SBOM for high-severity vulnerabilities
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7
