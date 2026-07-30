@@ -2,7 +2,7 @@
   "name": "lightning-it-playbook-runbook-release",
   "version": "0.0.0",
   "private": true,
-  "description": "Pinned semantic-release toolchain for Lightning IT playbook and runbook repositories.",
+  "description": "Lockfile-pinned semantic-release toolchain for Lightning IT playbook and runbook repositories.",
   "license": "MIT",
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.0",
