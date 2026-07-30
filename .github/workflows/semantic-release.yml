@@ -165,4 +165,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: npx semantic-release --dry-run --no-ci
+        run: |
+          set -euo pipefail
+          auth_header="$(
+            printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n'
+          )"
+          echo "::add-mask::${auth_header}"
+          trap 'git config --local --unset-all http.https://github.com/.extraheader || true' EXIT
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic ${auth_header}"
+          npx semantic-release --dry-run --no-ci
