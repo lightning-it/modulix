@@ -1,0 +1,18 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "preset": "conventionalcommits",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/github",
+      {
+        "assets": [],
+        "successCommentCondition": false,
+        "failCommentCondition": false,
+        "releasedLabels": false
+      }
+    ]
+  ]
+}
