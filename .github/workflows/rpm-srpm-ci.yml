@@ -46,6 +46,8 @@ permissions:
 
 jobs:
   build-srpm:
+    outputs:
+      artifact-name: ${{ steps.settings.outputs.artifact-name }}
     runs-on: ubuntu-latest
     container:
       image: quay.io/fedora/fedora:45
@@ -66,6 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Resolve RPM settings
+        id: settings
         shell: bash
         run: |
           set -euo pipefail
@@ -107,6 +110,7 @@ jobs:
           echo "RPM_SRPM_GLOB=${srpm_glob_input}" >> "${GITHUB_ENV}"
           echo "RPM_ARTIFACT_PREFIX=${artifact_prefix_input}" >> "${GITHUB_ENV}"
           echo "RPM_ARTIFACT_NAME=${artifact_name}" >> "${GITHUB_ENV}"
+          echo "artifact-name=${artifact_name}" >> "${GITHUB_OUTPUT}"
 
       - name: Build source RPM
         shell: bash
@@ -141,15 +145,146 @@ jobs:
           echo "SRPM_PATH=${srpm}" >> "${GITHUB_ENV}"
           echo "SRPM_FILE=$(basename "${srpm}")" >> "${GITHUB_ENV}"
 
+      - name: Verify declared SRPM license
+        shell: bash
+        run: |
+          set -euo pipefail
+          declared_license="$(rpm -qp --queryformat '%{LICENSE}\n' "${SRPM_PATH}")"
+          test "${declared_license}" = "MIT"
+          license_report="${RPM_OUTPUT_DIR}/license-report.json"
+          printf '%s\n' \
+            '{' \
+            '  "schema_version": 1,' \
+            '  "artifact": "'"${SRPM_FILE}"'",' \
+            '  "declared_license": "'"${declared_license}"'",' \
+            '  "policy": "repository SPDX license must match SRPM license"' \
+            '}' >"${license_report}"
+          echo "RPM_LICENSE_REPORT=${license_report}" >>"${GITHUB_ENV}"
+
       - name: Upload SRPM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ${{ env.RPM_ARTIFACT_NAME }}
-          path: ${{ env.SRPM_PATH }}
+          path: |
+            ${{ env.SRPM_PATH }}
+            ${{ env.RPM_LICENSE_REPORT }}
           if-no-files-found: error
 
+  supply-chain-evidence:
+    name: SRPM supply-chain evidence
+    needs: build-srpm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download exact SRPM artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: ${{ needs.build-srpm.outputs.artifact-name }}
+          path: dist
+
+      - name: Resolve exact SRPM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t srpms < <(find dist -maxdepth 1 -type f -name '*.src.rpm' -print)
+          test "${#srpms[@]}" -eq 1
+          printf 'SRPM_PATH=%s\n' "${srpms[0]}" >>"${GITHUB_ENV}"
+          mkdir -p evidence
+          (
+            cd dist
+            sha256sum "$(basename "${srpms[0]}")" >../evidence/SHA256SUMS
+          )
+          test -s dist/license-report.json
+          cp dist/license-report.json evidence/license-report.json
+
+      - name: Generate exact-SRPM CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0
+        with:
+          path: ${{ env.SRPM_PATH }}
+          format: cyclonedx-json
+          output-file: evidence/sbom.cdx.json
+          upload-artifact: false
+
+      - name: Scan exact-SRPM SBOM for high-severity vulnerabilities
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7
+        with:
+          sbom: evidence/sbom.cdx.json
+          output-format: json
+          output-file: evidence/vulnerability-report.json
+          fail-build: true
+          severity-cutoff: high
+
+      - name: Upload immutable SRPM evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: evidence-${{ needs.build-srpm.outputs.artifact-name }}
+          path: evidence/
+          if-no-files-found: error
+
+  attest-release:
+    name: Attest tagged SRPM
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-srpm, supply-chain-evidence]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download exact SRPM artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: ${{ needs.build-srpm.outputs.artifact-name }}
+          path: dist
+
+      - name: Download exact SRPM evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: evidence-${{ needs.build-srpm.outputs.artifact-name }}
+          path: evidence
+
+      - name: Verify evidence checksum binds the exact SRPM
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check ../evidence/SHA256SUMS)
+
+      - name: Attest exact SRPM build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+        with:
+          subject-path: dist/*.src.rpm
+
+      - name: Attest exact SRPM SBOM
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d  # v4
+        with:
+          subject-path: dist/*.src.rpm
+          sbom-path: evidence/sbom.cdx.json
+
+  publish-copr:
+    name: Publish attested SRPM to COPR
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-srpm, supply-chain-evidence, attest-release]
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/fedora/fedora:45
+    permissions:
+      contents: read
+    steps:
+      - name: Download attested SRPM artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: ${{ needs.build-srpm.outputs.artifact-name }}
+          path: dist
+
+      - name: Resolve attested SRPM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t srpms < <(find dist -maxdepth 1 -type f -name '*.src.rpm' -print)
+          test "${#srpms[@]}" -eq 1
+          printf 'SRPM_PATH=%s\n' "${srpms[0]}" >>"${GITHUB_ENV}"
+
       - name: Publish SRPM to COPR
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG || '' }}
