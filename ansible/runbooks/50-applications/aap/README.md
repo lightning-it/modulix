@@ -33,6 +33,32 @@ inventory-owned values.
   files for lab/disconnected installs when customer PKI is not available.
 - `10-deploy.yml`: prepare and deploy AAP, then apply configuration-as-code.
 - `20-ops.yml`: run explicit day-2 AAP operations with `aap_ops_action`.
+- `90-uninstall.yml`: deliberately remove a containerized AAP installation
+  using only `ansible.builtin`; this also recovers an incomplete installation
+  whose original installer inventory is no longer available.
+
+`90-uninstall.yml` is restricted to the dedicated `svc_aap` account,
+`/appl/aap`, and `/appl/home/svc_aap`. It removes all rootless Podman
+containers and volumes owned by that account, clears its generated systemd and
+runtime state, and recreates empty installation directories. Rollout artifacts
+outside `/appl/aap` are preserved. Destructive execution requires the explicit
+inventory or command-line variable:
+
+```yaml
+aap_uninstall_confirm: true
+```
+
+Run check mode first and then remove the installation deliberately:
+
+```console
+ansible-playbook runbooks/50-applications/aap/90-uninstall.yml \
+  --inventory <inventory> --limit <aap-host> \
+  --extra-vars aap_uninstall_confirm=true --check
+
+ansible-playbook runbooks/50-applications/aap/90-uninstall.yml \
+  --inventory <inventory> --limit <aap-host> \
+  --extra-vars aap_uninstall_confirm=true
+```
 
 ## Local Control
 
