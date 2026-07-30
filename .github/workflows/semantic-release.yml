@@ -21,9 +21,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup pinned lint runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.14"
+
       - name: yamllint
         run: |
-          python -m pip install --no-cache-dir yamllint
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            --require-hashes \
+            --requirement .github/requirements/semantic-release-lint.lock
           yamllint .github
 
   release:
