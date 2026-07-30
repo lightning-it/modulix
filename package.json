@@ -1,22 +1,14 @@
 {
-  "name": "modulix",
+  "name": "lightning-it-playbook-runbook-release",
   "version": "0.0.0",
   "private": true,
-  "description": "ModuLix enterprise automation repository.",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/lightning-it/modulix-automation.git"
-  },
-  "bugs": {
-    "url": "https://github.com/lightning-it/modulix-automation/issues"
-  },
-  "homepage": "https://github.com/lightning-it/modulix-automation#readme",
-  "license": "GPL-3.0-only",
+  "description": "Pinned semantic-release toolchain for Lightning IT playbook and runbook repositories.",
+  "license": "MIT",
   "devDependencies": {
-    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/commit-analyzer": "^13.0.0",
     "@semantic-release/github": "^12.0.0",
-    "@semantic-release/release-notes-generator": "^14.1.0",
+    "@semantic-release/release-notes-generator": "^14.0.0",
     "conventional-changelog-conventionalcommits": "^10.0.0",
-    "semantic-release": "25.0.8"
+    "semantic-release": "^25.0.2"
   }
 }
