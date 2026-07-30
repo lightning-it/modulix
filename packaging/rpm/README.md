@@ -68,14 +68,21 @@ Preferred for ongoing builds is the webhook-driven SCM workflow below.
 Workflow: `.github/workflows/rpm-srpm-ci.yml`
 
 - On pull requests touching RPM packaging files:
-  - Builds SRPM and uploads it as a workflow artifact.
+  - Builds the SRPM and uploads it as a workflow artifact.
+  - Generates a candidate-bound CycloneDX SBOM and SHA-256 checksum.
+  - Verifies that the SRPM declares the repository's canonical MIT license and
+    records the result as immutable evidence.
+  - Fails closed when the SBOM contains a high-or-critical vulnerability.
 - On tag push matching `v*`:
-  - Builds SRPM and uploads it as a workflow artifact.
-  - Publishes the SRPM to COPR (requires `COPR_CONFIG` secret).
+  - Runs the same build, SBOM, checksum, and vulnerability gates.
+  - Creates GitHub/Sigstore build-provenance and SBOM attestations for the
+    exact SRPM digest.
+  - Publishes the SRPM to COPR only after both attestations succeed
+    (requires `COPR_CONFIG` secret).
   - RPM version is derived from the tag (`v1.2.3` -> `1.2.3`).
 - `semantic-release` workflow on `main` can generate these `v*` tags automatically from commit messages.
 - On manual `workflow_dispatch`:
-  - Builds SRPM with optional overrides:
+  - Builds and scans an SRPM with optional overrides:
     - `version`
     - `release`
     - `build_script`
@@ -84,6 +91,28 @@ Workflow: `.github/workflows/rpm-srpm-ci.yml`
     - `srpm_glob`
     - `artifact_prefix`
   - Does not publish to COPR.
+
+## Consumer verification
+
+Download the SRPM and its `SHA256SUMS` evidence artifact from the same workflow
+run, then verify the checksum:
+
+```bash
+sha256sum --check SHA256SUMS
+```
+
+For a tagged release, verify both GitHub artifact attestations against this
+repository:
+
+```bash
+gh attestation verify \
+  modulix-automation-runtime-<version>-<release>.<dist>.src.rpm \
+  --repo lightning-it/modulix-automation
+```
+
+The command must report attestations for the exact SRPM digest. COPR publication
+is downstream of those attestation jobs; a failed scan or attestation prevents
+publication.
 
 Build script contract for workflow:
 - The workflow invokes the configured `build_script` with:
