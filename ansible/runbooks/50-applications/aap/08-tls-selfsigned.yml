@@ -1,13 +1,13 @@
 ---
-# Temporary AAP self-signed TLS generation.
+# Temporary AAP self-signed TLS generation and target-host CA trust.
 # The reusable logic lives in lit.supplementary.aap_tls.
 
-- name: Generate temporary AAP self-signed TLS files
+- name: Generate temporary AAP self-signed TLS files and establish CA trust
   hosts: aaps
   gather_facts: false
 
   tasks:
-    - name: Generate temporary TLS assets
+    - name: Generate temporary TLS assets and establish target-host CA trust
       ansible.builtin.include_role:
         name: lit.supplementary.aap_tls
         apply:
