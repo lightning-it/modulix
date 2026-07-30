@@ -174,9 +174,14 @@ jobs:
     name: SRPM supply-chain evidence
     needs: build-srpm
     runs-on: ubuntu-latest
+    container:
+      image: quay.io/fedora/fedora:45
     permissions:
       contents: read
     steps:
+      - name: Install SRPM extraction tooling
+        run: dnf -y install cpio rpm
+
       - name: Download exact SRPM artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
@@ -198,10 +203,32 @@ jobs:
           test -s dist/license-report.json
           cp dist/license-report.json evidence/license-report.json
 
+      - name: Extract exact SRPM for component inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          rpm2cpio "${SRPM_PATH}" >"${RUNNER_TEMP}/candidate.cpio"
+          mapfile -t members < <(cpio --list <"${RUNNER_TEMP}/candidate.cpio")
+          test "${#members[@]}" -gt 0
+          for member in "${members[@]}"; do
+            case "${member}" in
+              /*|../*|*/../*|*/..)
+                echo "Unsafe SRPM archive member: ${member}" >&2
+                exit 1
+                ;;
+            esac
+          done
+          mkdir -p candidate
+          (
+            cd candidate
+            cpio --extract --make-directories --no-absolute-filenames \
+              <"${RUNNER_TEMP}/candidate.cpio"
+          )
+
       - name: Generate exact-SRPM CycloneDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0
         with:
-          path: ${{ env.SRPM_PATH }}
+          path: candidate
           format: cyclonedx-json
           output-file: evidence/sbom.cdx.json
           upload-artifact: false
