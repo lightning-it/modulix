@@ -96,15 +96,27 @@ jobs:
           GH_TOKEN: ${{ steps.release-app.outputs.token }}
         run: |
           set -euo pipefail
-          public_remote="https://github.com/${GITHUB_REPOSITORY}.git"
-          trap 'git remote set-url origin "$public_remote"' EXIT
-          git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          auth_header="$(
+            printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n'
+          )"
+          echo "::add-mask::${auth_header}"
+          trap 'git config --local --unset-all http.https://github.com/.extraheader || true' EXIT
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic ${auth_header}"
           npx semantic-release
 
       - name: Generate release evidence
+        env:
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
         run: |
           set -euo pipefail
+          auth_header="$(
+            printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n'
+          )"
+          echo "::add-mask::${auth_header}"
+          trap 'git config --local --unset-all http.https://github.com/.extraheader || true' EXIT
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic ${auth_header}"
           git fetch --tags --force
           tag="$(git describe --tags --abbrev=0)"
           version="${tag#v}"
@@ -165,4 +177,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: npx semantic-release --dry-run --no-ci
+        run: |
+          set -euo pipefail
+          auth_header="$(
+            printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n'
+          )"
+          echo "::add-mask::${auth_header}"
+          trap 'git config --local --unset-all http.https://github.com/.extraheader || true' EXIT
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic ${auth_header}"
+          npx semantic-release --dry-run --no-ci
