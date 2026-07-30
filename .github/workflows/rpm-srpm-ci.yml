@@ -150,7 +150,10 @@ jobs:
         run: |
           set -euo pipefail
           declared_license="$(rpm -qp --queryformat '%{LICENSE}\n' "${SRPM_PATH}")"
-          test "${declared_license}" = "MIT"
+          if [[ "${declared_license}" != "MIT" ]]; then
+            echo "SRPM license mismatch: expected MIT, found '${declared_license}'." >&2
+            exit 1
+          fi
           license_report="${RPM_OUTPUT_DIR}/license-report.json"
           printf '%s\n' \
             '{' \
@@ -179,6 +182,7 @@ jobs:
     container:
       image: quay.io/fedora/fedora:45
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Install SRPM extraction tooling
@@ -310,6 +314,7 @@ jobs:
     needs: [build-srpm, supply-chain-evidence]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -350,6 +355,7 @@ jobs:
     container:
       image: quay.io/fedora/fedora:45
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Download attested SRPM artifact
