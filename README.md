@@ -47,6 +47,7 @@ Publishing targets: `github-release, rpm-srpm`.
 [![CI](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml/badge.svg?branch=develop)](https://github.com/lightning-it/modulix-automation/actions/workflows/rpm-srpm-ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/lightning-it/modulix-automation?sort=semver)](https://github.com/lightning-it/modulix-automation/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lightning-it/modulix-automation/badge)](https://scorecard.dev/viewer/?uri=github.com/lightning-it/modulix-automation)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13887/badge)](https://www.bestpractices.dev/projects/13887)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 <!-- END LIT_QUALITY_BADGES -->
