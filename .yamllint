@@ -1,9 +1,24 @@
 ---
 extends: default
 
+ignore: |
+  .cache/
+  .pytest_cache/
+  .tox/
+  .venv/
+  dist/
+  node_modules/
+
 rules:
-  # Use 120 chars across repos (ansible-lint/ansible best practice in this workspace).
+  braces:
+    max-spaces-inside: 1
+  comments-indentation: disable
+  comments:
+    min-spaces-from-content: 1
   line-length:
     max: 120
     allow-non-breakable-words: true
     allow-non-breakable-inline-mappings: true
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
