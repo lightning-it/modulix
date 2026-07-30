@@ -1,0 +1,418 @@
+---
+# Deliberate clean removal of a containerized AAP installation.
+# This runbook intentionally uses ansible.builtin only and does not require the
+# AAP installer collection. It removes all rootless Podman state owned by the
+# dedicated AAP installation account.
+
+- name: Remove containerized AAP completely
+  hosts: aaps
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Resolve AAP uninstall inputs
+      ansible.builtin.set_fact:
+        aap_uninstall_user_effective: >-
+          {{ aap_uninstall_user | default('svc_aap', true) }}
+        aap_uninstall_root_effective: >-
+          {{ aap_uninstall_root | default('/appl/aap', true) }}
+        aap_uninstall_home_effective: >-
+          {{
+            aap_uninstall_home
+            | default(
+                '/appl/home/'
+                ~ (aap_uninstall_user | default('svc_aap', true)),
+                true
+              )
+          }}
+      changed_when: false
+
+    - name: Require deliberate and safely scoped AAP removal
+      ansible.builtin.assert:
+        that:
+          - aap_uninstall_confirm | default(false) | bool
+          - aap_uninstall_user_effective == "svc_aap"
+          - aap_uninstall_root_effective == "/appl/aap"
+          - aap_uninstall_home_effective == "/appl/home/svc_aap"
+        fail_msg: >-
+          Refusing destructive AAP removal. Set aap_uninstall_confirm=true.
+          This runbook is deliberately restricted to user svc_aap,
+          /appl/aap, and /appl/home/svc_aap.
+        quiet: true
+
+    - name: Resolve AAP installation account UID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --user
+          - "{{ aap_uninstall_user_effective }}"
+      register: aap_uninstall_uid
+      changed_when: false
+      check_mode: false
+
+    - name: Resolve AAP installation account primary group
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --group
+          - --name
+          - "{{ aap_uninstall_user_effective }}"
+      register: aap_uninstall_group
+      changed_when: false
+      check_mode: false
+
+    - name: Define rootless AAP runtime environment
+      ansible.builtin.set_fact:
+        aap_uninstall_runtime_environment:
+          HOME: "{{ aap_uninstall_home_effective }}"
+          XDG_RUNTIME_DIR: "/run/user/{{ aap_uninstall_uid.stdout | trim }}"
+          DBUS_SESSION_BUS_ADDRESS: >-
+            unix:path=/run/user/{{ aap_uninstall_uid.stdout | trim }}/bus
+      changed_when: false
+
+    - name: Enable lingering for AAP installation account
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/loginctl
+          - enable-linger
+          - "{{ aap_uninstall_user_effective }}"
+      args:
+        creates: >-
+          /var/lib/systemd/linger/{{ aap_uninstall_user_effective }}
+
+    - name: Ensure AAP installation account manager is running
+      ansible.builtin.systemd:
+        name: "user@{{ aap_uninstall_uid.stdout | trim }}.service"
+        state: started
+
+    - name: List AAP installation account systemd units
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - --user
+          - list-unit-files
+          - --no-legend
+          - --no-pager
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_user_units
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Select AAP systemd units
+      ansible.builtin.set_fact:
+        aap_uninstall_selected_units: >-
+          {{
+            aap_uninstall_user_units.stdout_lines
+            | default([])
+            | map('split')
+            | selectattr('0', 'match',
+                '^(automation-|receptor|postgresql|redis-).*\.(service|socket)$')
+            | map('first')
+            | list
+          }}
+      changed_when: false
+
+    - name: Stop and disable AAP systemd units
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/systemctl', '--user', 'disable', '--now']
+            + aap_uninstall_selected_units
+          }}
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_disable_units
+      changed_when: aap_uninstall_selected_units | length > 0
+      failed_when: false
+      when:
+        - not ansible_check_mode
+        - aap_uninstall_selected_units | length > 0
+
+    - name: List rootless AAP containers
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - ps
+          - --all
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_containers
+      changed_when: false
+      check_mode: false
+
+    - name: Remove rootless AAP containers
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/podman', 'rm', '--force']
+            + aap_uninstall_containers.stdout_lines
+          }}
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      when:
+        - not ansible_check_mode
+        - aap_uninstall_containers.stdout_lines | length > 0
+      changed_when: true
+
+    - name: List rootless AAP pods
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - pod
+          - ps
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_pods
+      changed_when: false
+      check_mode: false
+
+    - name: Remove rootless AAP pods
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/podman', 'pod', 'rm', '--force']
+            + aap_uninstall_pods.stdout_lines
+          }}
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      when:
+        - not ansible_check_mode
+        - aap_uninstall_pods.stdout_lines | length > 0
+      changed_when: true
+
+    - name: List rootless AAP networks
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - network
+          - ls
+          - --format
+          - "{{ '{{.Name}}' }}"
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_networks
+      changed_when: false
+      check_mode: false
+
+    - name: Select non-default rootless AAP networks
+      ansible.builtin.set_fact:
+        aap_uninstall_selected_networks: >-
+          {{
+            aap_uninstall_networks.stdout_lines
+            | default([])
+            | reject('equalto', 'podman')
+            | list
+          }}
+      changed_when: false
+
+    - name: Remove non-default rootless AAP networks
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/podman', 'network', 'rm', '--force']
+            + aap_uninstall_selected_networks
+          }}
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      when:
+        - not ansible_check_mode
+        - aap_uninstall_selected_networks | length > 0
+      changed_when: true
+
+    - name: List rootless AAP volumes
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - volume
+          - ls
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_volumes
+      changed_when: false
+      check_mode: false
+
+    - name: Remove rootless AAP volumes
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/podman', 'volume', 'rm', '--force']
+            + aap_uninstall_volumes.stdout_lines
+          }}
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      when:
+        - not ansible_check_mode
+        - aap_uninstall_volumes.stdout_lines | length > 0
+      changed_when: true
+
+    - name: List rootless AAP secrets
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - secret
+          - ls
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_secrets
+      changed_when: false
+      check_mode: false
+
+    - name: Remove rootless AAP secrets
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/podman', 'secret', 'rm']
+            + aap_uninstall_secrets.stdout_lines
+          }}
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      when:
+        - not ansible_check_mode
+        - aap_uninstall_secrets.stdout_lines | length > 0
+      changed_when: true
+
+    - name: Remove AAP installation filesystem state
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ aap_uninstall_root_effective }}"
+        - "{{ aap_uninstall_home_effective }}"
+
+    - name: Recreate clean AAP directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ aap_uninstall_user_effective }}"
+        group: "{{ aap_uninstall_group.stdout | trim }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ aap_uninstall_root_effective }}"
+          mode: "0755"
+        - path: "{{ aap_uninstall_home_effective }}"
+          mode: "0700"
+
+    - name: Reload clean AAP user systemd state
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - --user
+          - daemon-reload
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Reset failed AAP user systemd state
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - --user
+          - reset-failed
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Restore SELinux labels on clean AAP directories
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/restorecon
+          - -RF
+          - "{{ aap_uninstall_root_effective }}"
+          - "{{ aap_uninstall_home_effective }}"
+      register: aap_uninstall_restorecon
+      changed_when: aap_uninstall_restorecon.stdout | length > 0
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Verify no rootless AAP containers remain
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - ps
+          - --all
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_containers_after
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Verify no rootless AAP volumes remain
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - volume
+          - ls
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_volumes_after
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Verify rootless AAP networks are clean
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - network
+          - ls
+          - --format
+          - "{{ '{{.Name}}' }}"
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_networks_after
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Verify no rootless AAP secrets remain
+      become_user: "{{ aap_uninstall_user_effective }}"
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - secret
+          - ls
+          - --quiet
+      environment: "{{ aap_uninstall_runtime_environment }}"
+      register: aap_uninstall_secrets_after
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Verify clean AAP state
+      ansible.builtin.assert:
+        that:
+          - aap_uninstall_containers_after.stdout_lines | length == 0
+          - aap_uninstall_volumes_after.stdout_lines | length == 0
+          - >-
+            aap_uninstall_networks_after.stdout_lines
+            | reject('equalto', 'podman')
+            | list
+            | length == 0
+          - aap_uninstall_secrets_after.stdout_lines | length == 0
+        fail_msg: >-
+          AAP removal is incomplete. Rootless Podman containers, volumes,
+          non-default networks, or secrets remain for
+          {{ aap_uninstall_user_effective }}.
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Report successful AAP removal
+      ansible.builtin.debug:
+        msg: >-
+          AAP_UNINSTALL_STATUS_OK: rootless runtime and filesystem state were
+          removed. Rollout artifacts outside {{ aap_uninstall_root_effective }}
+          were preserved.
+      when: not ansible_check_mode
