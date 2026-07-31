@@ -24,5 +24,5 @@ collections:
     type: url
   - name: lit.ubuntu
     version: "1.9.0"
-  - name: https://github.com/lightning-it/ansible-collection-ocp/releases/download/v1.6.0/lit-ocp-1.6.0.tar.gz
+  - name: https://github.com/lightning-it/ansible-collection-ocp/releases/download/v1.9.0/lit-ocp-1.9.0.tar.gz
     type: url
