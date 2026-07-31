@@ -20,7 +20,7 @@ collections:
     version: "1.40.0"
   - name: lit.foundational
     version: "1.32.0"
-  - name: https://github.com/lightning-it/ansible-collection-rhel/releases/download/v1.21.0/lit-rhel-1.21.0.tar.gz
+  - name: https://github.com/lightning-it/ansible-collection-rhel/releases/download/v1.23.0/lit-rhel-1.23.0.tar.gz
     type: url
   - name: lit.ubuntu
     version: "1.9.0"
