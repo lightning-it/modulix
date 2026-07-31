@@ -70,7 +70,7 @@ podman run --rm -it \
   -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
-  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1 \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.5 \
   ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
@@ -96,7 +96,7 @@ podman run --rm -it \
   -e ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never \
   -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false \
   -e ANSIBLE_VAULT_PASSWORD_FILE=/opt/modulix/ansible/.vault-pass.txt \
-  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1 \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.5 \
   ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
   -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
@@ -243,7 +243,7 @@ ansible-nav-local run <runbook.yml> \
 `scripts/ansible-nav` runs the toolbox image directly via Podman or Docker.
 
 Default toolbox image:
-- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.1`
+- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.5`
 
 Wrapper behavior (`scripts/ansible-nav`):
 - External inventories are auto-mounted from `ANSIBLE_TOOLBOX_INVENTORY_SOURCE`,
