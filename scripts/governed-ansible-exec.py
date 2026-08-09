@@ -3,9 +3,9 @@
 
 The recorder is deliberately generic.  Environment-specific target identity,
 gate state, approvals, repository commits, and runtime image digests are read
-from a signed manifest supplied by a private validation adapter.  The recorder
-does not accept an arbitrary command line and never treats caller prose as an
-authorization boundary.
+from a signed manifest supplied through a fixed component adapter.  The
+recorder does not accept an arbitrary command line and never treats caller
+prose as an authorization boundary.
 
 The recorder keeps its subprocess capture bounded in memory.  Ansible Runner's
 unavoidable raw artifacts are redirected into one owner-only private runtime
@@ -2115,7 +2115,7 @@ def verify_external_anchor_sources(
         / "governed-ansible-root-launcher": trust["execution_anchor"]["launcher"][
             "sha256"
         ],
-        snapshots["validation"]
+        snapshots["automation"]
         / "policies"
         / "wunderbox"
         / "root-of-trust-policy.json": trust["policy"]["sha256"],

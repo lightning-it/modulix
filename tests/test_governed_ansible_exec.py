@@ -783,12 +783,11 @@ class GovernedRecorderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             automation = root / "automation"
-            validation = root / "validation"
             recorder = automation / "scripts" / "governed-ansible-exec.py"
             launcher = (
                 automation / "ansible" / "scripts" / "governed-ansible-root-launcher"
             )
-            policy = validation / "policies" / "wunderbox" / "root-of-trust-policy.json"
+            policy = automation / "policies" / "wunderbox" / "root-of-trust-policy.json"
             for path, payload in (
                 (recorder, b"recorder\n"),
                 (launcher, b"launcher\n"),
@@ -803,7 +802,7 @@ class GovernedRecorderTests(unittest.TestCase):
                 },
                 "policy": {"sha256": MODULE.sha256_file(policy)},
             }
-            snapshots = {"automation": automation, "validation": validation}
+            snapshots = {"automation": automation}
             MODULE.verify_external_anchor_sources(trust, snapshots)
 
             recorder.write_bytes(b"changed\n")

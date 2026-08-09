@@ -1,0 +1,724 @@
+{
+  "schema_version": 2,
+  "policy_id": "wunderbox-root-of-trust-v3",
+  "required_repositories": [
+    "automation",
+    "inventory",
+    "foundational",
+    "ubuntu",
+    "validation",
+    "operations"
+  ],
+  "required_collections": ["foundational", "ubuntu"],
+  "collection_repositories": {
+    "foundational": "foundational",
+    "ubuntu": "ubuntu"
+  },
+  "target_contract": {
+    "target_id_pattern": "^[A-Z][A-Z0-9-]{2,63}$",
+    "fqdn_pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?){2,}$"
+  },
+  "projection_contract": {
+    "repository": "inventory",
+    "path": "contracts/inventory-projection.json",
+    "sha256": "02192db11e264d9ae52149e47d2e8057919577842c970eb5e2c1355fc3c621b9"
+  },
+  "actions": {
+    "target_inventory_projection": {
+      "record_prefix": "100",
+      "gate": "WBX-G0",
+      "prerequisite_gates": [],
+      "impact": "controller_read",
+      "mode": "inventory_projection",
+      "allowed_under_safety_hold": true,
+      "projection_paths": [
+        "hostname_fqdn",
+        "hostname_etc_hosts_ip",
+        "hetzner_robot_server_number",
+        "wunderbox_dns_identity.schema_version",
+        "wunderbox_dns_identity.desired.public.fqdn",
+        "wunderbox_dns_identity.desired.public.a_records",
+        "wunderbox_dns_identity.desired.public.ptr_records",
+        "wunderbox_dns_identity.desired.public.aaaa_records",
+        "wunderbox_dns_identity.desired.public.cname_records",
+        "wunderbox_dns_identity.desired.management.fqdn",
+        "wunderbox_dns_identity.desired.management.a_records",
+        "wunderbox_dns_identity.desired.management.aaaa_records",
+        "wunderbox_dns_identity.desired.management.cname_records",
+        "wunderbox_dns_identity.verification.accepted",
+        "wunderbox_dns_identity.verification.fresh_readback",
+        "wunderbox_dns_identity.verification.evidence_reference",
+        "hetzner_baremetal_root_of_trust.schema_version",
+        "hetzner_baremetal_root_of_trust.selection_scope",
+        "hetzner_baremetal_root_of_trust.inventory_hostname",
+        "hetzner_baremetal_root_of_trust.controller_ipv4_cidr",
+        "hetzner_baremetal_root_of_trust.server_lifecycle.status",
+        "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled",
+        "wunderbox_inventory_contract.controller_access.management_services",
+        "host_firewall_enabled",
+        "host_firewall_action",
+        "host_firewall_mode",
+        "host_firewall_expected_inventory_hostname",
+        "host_firewall_expected_public_ipv4",
+        "host_firewall_expected_management_ipv4",
+        "host_firewall_expected_public_ipv6",
+        "host_firewall_expected_management_ipv6",
+        "host_firewall_public_interface",
+        "host_firewall_management_interface",
+        "host_firewall_management_access",
+        "host_firewall_tang_access",
+        "host_firewall_controller_source_cidrs",
+        "host_firewall_recovery_source_cidrs",
+        "host_firewall_egress_policies",
+        "host_firewall_egress_policy",
+        "host_firewall_provider_ipv6_filter_enabled",
+        "host_firewall_provider_ipv6_filter_evidence_reference",
+        "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
+        "hetzner_baremetal_robot_firewall_hardened_input_rules",
+        "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
+        "hetzner_installimage_layout.ipv4_only",
+        "ubtu24cis_ipv4_required",
+        "ubtu24cis_ipv6_required",
+        "ubtu24cis_ipv6_disable",
+        "netplan_ethernets",
+        "netplan_vlans",
+        "wunderbox_inventory_contract.ipv4_only_baseline",
+        "hetzner_baremetal_robot_firewall.enabled",
+        "hetzner_baremetal_robot_firewall.admin_ipv4",
+        "hetzner_baremetal_robot_firewall.filter_ipv6"
+      ],
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "wunderbox_preflight_syntax": {
+      "record_prefix": "101",
+      "gate": "WBX-G0",
+      "prerequisite_gates": [],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/50-applications/wunderbox/07-preflight.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_robot_credentials": {
+      "record_prefix": "200",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/07-robot-credentials.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_recovery_secrets": {
+      "record_prefix": "201",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/08-recovery-secrets.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_rescue_extended_smart": {
+      "record_prefix": "202",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/09-rescue-extended-smart.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_robot_ops": {
+      "record_prefix": "203",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/09-robot-ops.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_installimage": {
+      "record_prefix": "204",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/10-installimage.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_prepare_installimage": {
+      "record_prefix": "205",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/09-prepare-installimage.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_bootstrap_unlock": {
+      "record_prefix": "206",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/10-bootstrap-unlock.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_first_encrypted_boot": {
+      "record_prefix": "207",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/10-first-encrypted-boot.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_base_setup": {
+      "record_prefix": "208",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/01-base-setup.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_openssh_transition": {
+      "record_prefix": "209",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/02-openssh-transition.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_installed_acceptance": {
+      "record_prefix": "210",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/14-installed-acceptance.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_cis_hardening": {
+      "record_prefix": "211",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/90-cis-hardening.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_cis_audit": {
+      "record_prefix": "212",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/91-cis-audit.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_tang_deploy": {
+      "record_prefix": "213",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/50-applications/tang/10-deploy.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "syntax_first_boot_reconnect": {
+      "record_prefix": "214",
+      "gate": "WBX-G2",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1"],
+      "impact": "local_validation",
+      "mode": "syntax_check",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/11-first-boot-reconnect.yml",
+      "allowed_under_safety_hold": true,
+      "required_evidence_references": ["test_ref"],
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    "recovery_metadata_plan": {
+      "record_prefix": "300",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/08-recovery-secrets.yml",
+      "requires_ssh_private_key": false,
+      "allowed_extra_vars": [
+        "hetzner_baremetal_onepassword_password_action",
+        "hetzner_baremetal_onepassword_ssh_key_action"
+      ],
+      "required_extra_vars": [
+        "hetzner_baremetal_onepassword_password_action",
+        "hetzner_baremetal_onepassword_ssh_key_action"
+      ],
+      "nonsecret_secret_named_vars": [
+        "hetzner_baremetal_onepassword_password_action",
+        "hetzner_baremetal_onepassword_ssh_key_action"
+      ],
+      "extra_var_allowed_values": {
+        "hetzner_baremetal_onepassword_password_action": ["plan"],
+        "hetzner_baremetal_onepassword_ssh_key_action": ["plan"]
+      },
+      "extra_var_bindings": {
+        "hetzner_baremetal_onepassword_password_action": {
+          "kind": "literal",
+          "value": "plan"
+        },
+        "hetzner_baremetal_onepassword_ssh_key_action": {
+          "kind": "literal",
+          "value": "plan"
+        }
+      },
+      "required_evidence_references": ["readback_ref", "finding_ref"],
+      "timeout_seconds": 900,
+      "max_output_bytes": 2097152
+    },
+    "rescue_extended_smart": {
+      "record_prefix": "310",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/09-rescue-extended-smart.yml",
+      "allowed_extra_vars": ["hetzner_rescue_smart_extended_confirmation"],
+      "required_extra_vars": ["hetzner_rescue_smart_extended_confirmation"],
+      "extra_var_bindings": {
+        "hetzner_rescue_smart_extended_confirmation": {
+          "kind": "target_confirmation",
+          "prefix": "SMART_EXTENDED"
+        }
+      },
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 21600,
+      "max_output_bytes": 4194304
+    },
+    "prepare_installimage_plan": {
+      "record_prefix": "320",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "requires_ssh_private_key": false,
+      "requires_ssh_agent": true,
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/09-prepare-installimage.yml",
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 900,
+      "max_output_bytes": 4194304
+    },
+    "installimage_plan": {
+      "record_prefix": "321",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/10-installimage.yml",
+      "allowed_extra_vars": ["hetzner_installimage_action"],
+      "required_extra_vars": ["hetzner_installimage_action"],
+      "extra_var_bindings": {
+        "hetzner_installimage_action": {"kind": "literal", "value": "plan"}
+      },
+      "safe_artifact_tasks": {
+        "Show the secret-free installation approval plan": "plan"
+      },
+      "expected_artifact": "plan",
+      "artifact_projection_paths": ["target", "action", "plan_sha256"],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.installimage-plan.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "action": {"type": "string", "allowed_values": ["plan"]},
+          "plan_sha256": {"type": "sha256"}
+        }
+      },
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 1800,
+      "max_output_bytes": 4194304
+    },
+    "prepare_installimage_apply": {
+      "record_prefix": "330",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "requires_ssh_private_key": false,
+      "requires_ssh_agent": true,
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/09-prepare-installimage.yml",
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 900,
+      "max_output_bytes": 4194304
+    },
+    "installimage_apply": {
+      "record_prefix": "331",
+      "implementation_status": "blocked",
+      "implementation_blocker": "dedicated_secret_safe_onepassword_installimage_orchestrator_missing",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "destructive",
+      "mode": "playbook",
+      "playbook": "runbooks/10-compute/baremetal/hetzner/10-installimage.yml",
+      "allowed_extra_vars": [
+        "hetzner_installimage_action",
+        "hetzner_installimage_allow_destructive",
+        "hetzner_installimage_approved_plan_sha256",
+        "hetzner_installimage_confirmation"
+      ],
+      "required_extra_vars": [
+        "hetzner_installimage_action",
+        "hetzner_installimage_allow_destructive",
+        "hetzner_installimage_approved_plan_sha256",
+        "hetzner_installimage_confirmation"
+      ],
+      "extra_var_bindings": {
+        "hetzner_installimage_action": {"kind": "literal", "value": "install"},
+        "hetzner_installimage_allow_destructive": {"kind": "literal", "value": true},
+        "hetzner_installimage_approved_plan_sha256": {
+          "kind": "authorization_field",
+          "field": "approved_plan_sha256"
+        },
+        "hetzner_installimage_confirmation": {
+          "kind": "target_and_authorization_confirmation",
+          "prefix": "ERASE",
+          "field": "approved_plan_sha256"
+        }
+      },
+      "safe_artifact_tasks": {
+        "Show the secret-free installation approval plan": "plan"
+      },
+      "expected_artifact": "plan",
+      "artifact_projection_paths": ["target", "action", "plan_sha256"],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.installimage-apply-plan.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "action": {"type": "string", "allowed_values": ["install"]},
+          "plan_sha256": {"type": "sha256"}
+        }
+      },
+      "required_evidence_references": [
+        "plan_ref",
+        "rollback_ref",
+        "recovery_ref",
+        "negative_test_ref",
+        "finding_ref"
+      ],
+      "timeout_seconds": 7200,
+      "max_output_bytes": 8388608
+    },
+    "first_encrypted_boot": {
+      "record_prefix": "340",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "availability",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/10-first-encrypted-boot.yml",
+      "allowed_extra_vars": ["hetzner_first_boot_confirmation"],
+      "required_extra_vars": ["hetzner_first_boot_confirmation"],
+      "extra_var_bindings": {
+        "hetzner_first_boot_confirmation": {
+          "kind": "target_confirmation",
+          "prefix": "BOOT"
+        }
+      },
+      "safe_artifact_tasks": {
+        "Report the verified first-boot host-key handoff": "readback"
+      },
+      "expected_artifact": "readback",
+      "artifact_projection_paths": [
+        "target",
+        "dropbear_fingerprint",
+        "openssh_fingerprint",
+        "dropbear_port",
+        "known_hosts_sha256"
+      ],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.first-encrypted-boot-readback.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "dropbear_fingerprint": {"type": "ssh_fingerprint"},
+          "openssh_fingerprint": {"type": "ssh_fingerprint"},
+          "dropbear_port": {"type": "integer"},
+          "known_hosts_sha256": {"type": "sha256"}
+        }
+      },
+      "required_evidence_references": ["rollback_ref", "recovery_ref", "finding_ref"],
+      "timeout_seconds": 1800,
+      "max_output_bytes": 4194304
+    },
+    "bootstrap_unlock": {
+      "record_prefix": "341",
+      "implementation_status": "blocked",
+      "implementation_blocker": "blocked_missing_desktop_integrated_onepassword_controller_runtime",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "recovery",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/10-bootstrap-unlock.yml",
+      "requires_ssh_private_key": false,
+      "requires_ssh_agent": true,
+      "allowed_extra_vars": [
+        "hetzner_bootstrap_unlock_approval",
+        "hetzner_bootstrap_unlock_dropbear_fingerprint",
+        "hetzner_bootstrap_unlock_known_hosts_sha256"
+      ],
+      "required_extra_vars": [
+        "hetzner_bootstrap_unlock_approval",
+        "hetzner_bootstrap_unlock_dropbear_fingerprint",
+        "hetzner_bootstrap_unlock_known_hosts_sha256"
+      ],
+      "nonsecret_secret_named_vars": [
+        "hetzner_bootstrap_unlock_approval"
+      ],
+      "extra_var_bindings": {
+        "hetzner_bootstrap_unlock_approval": {
+          "kind": "signed_approval_transport",
+          "operation": "unlock-luks-over-ssh-stdin",
+          "contract_binding": "REPLACE_WITH_EXACT_FOUNDATIONAL_PLUGIN_BINDING"
+        },
+        "hetzner_bootstrap_unlock_dropbear_fingerprint": {
+          "kind": "authorization_field",
+          "field": "approved_dropbear_fingerprint"
+        },
+        "hetzner_bootstrap_unlock_known_hosts_sha256": {
+          "kind": "authorization_field",
+          "field": "approved_dropbear_known_hosts_sha256"
+        }
+      },
+      "required_evidence_references": ["recovery_ref", "negative_test_ref", "finding_ref"],
+      "timeout_seconds": 900,
+      "max_output_bytes": 2097152
+    },
+    "first_boot_reconnect": {
+      "record_prefix": "342",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/11-first-boot-reconnect.yml",
+      "requires_ssh_private_key": false,
+      "allowed_extra_vars": [
+        "hetzner_first_boot_openssh_fingerprint",
+        "hetzner_first_boot_reconnect_confirmation"
+      ],
+      "required_extra_vars": [
+        "hetzner_first_boot_openssh_fingerprint",
+        "hetzner_first_boot_reconnect_confirmation"
+      ],
+      "extra_var_bindings": {
+        "hetzner_first_boot_openssh_fingerprint": {
+          "kind": "authorization_field",
+          "field": "approved_openssh_fingerprint"
+        },
+        "hetzner_first_boot_reconnect_confirmation": {
+          "kind": "target_confirmation",
+          "prefix": "RECONNECT"
+        }
+      },
+      "safe_artifact_tasks": {
+        "Report the verified installed OpenSSH handoff": "readback"
+      },
+      "expected_artifact": "readback",
+      "artifact_projection_paths": ["target", "openssh_fingerprint", "state"],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.first-boot-reconnect-readback.v1",
+        "fields": {
+          "target": {"type": "string", "binding": "fqdn"},
+          "openssh_fingerprint": {"type": "ssh_fingerprint"},
+          "state": {
+            "type": "string",
+            "allowed_values": ["installed_openssh_pinned"]
+          }
+        }
+      },
+      "required_evidence_references": [
+        "readback_ref",
+        "recovery_ref",
+        "negative_test_ref",
+        "finding_ref"
+      ],
+      "timeout_seconds": 1800,
+      "max_output_bytes": 4194304
+    },
+    "base_setup_bootstrap": {
+      "record_prefix": "350",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/01-base-setup.yml",
+      "allowed_extra_vars": ["ansible_user"],
+      "required_extra_vars": ["ansible_user"],
+      "extra_var_bindings": {
+        "ansible_user": {"kind": "literal", "value": "root"}
+      },
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 3600,
+      "max_output_bytes": 8388608
+    },
+    "base_setup_managed": {
+      "record_prefix": "351",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/01-base-setup.yml",
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 3600,
+      "max_output_bytes": 8388608
+    },
+    "openssh_transition": {
+      "record_prefix": "352",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/02-openssh-transition.yml",
+      "required_evidence_references": ["readback_ref", "rollback_ref", "negative_test_ref", "finding_ref"],
+      "timeout_seconds": 1800,
+      "max_output_bytes": 4194304
+    },
+    "cis_hardening": {
+      "record_prefix": "353",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/90-cis-hardening.yml",
+      "tags": ["level1-server"],
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 7200,
+      "max_output_bytes": 8388608
+    },
+    "cis_audit": {
+      "record_prefix": "354",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/91-cis-audit.yml",
+      "tags": ["setup_audit"],
+      "required_evidence_references": ["readback_ref", "finding_ref"],
+      "timeout_seconds": 3600,
+      "max_output_bytes": 8388608
+    },
+    "installed_acceptance": {
+      "record_prefix": "355",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "availability",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/14-installed-acceptance.yml",
+      "allowed_extra_vars": ["hetzner_baremetal_acceptance_reboot"],
+      "required_extra_vars": ["hetzner_baremetal_acceptance_reboot"],
+      "extra_var_bindings": {
+        "hetzner_baremetal_acceptance_reboot": {"kind": "literal", "value": false}
+      },
+      "required_evidence_references": ["readback_ref", "negative_test_ref", "finding_ref"],
+      "timeout_seconds": 3600,
+      "max_output_bytes": 8388608
+    },
+    "vault_plan": {
+      "record_prefix": "360",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/30-operating-systems/ubuntu/24/15-vault-plan.yml",
+      "allowed_extra_vars": ["vault_lifecycle_operation"],
+      "required_extra_vars": ["vault_lifecycle_operation"],
+      "extra_var_bindings": {
+        "vault_lifecycle_operation": {"kind": "literal", "value": "deploy"}
+      },
+      "safe_artifact_tasks": {
+        "Report the reviewed Vault lifecycle plan identity": "plan"
+      },
+      "expected_artifact": "plan",
+      "artifact_projection_paths": [
+        "operation",
+        "target",
+        "plan_sha256",
+        "confirmation"
+      ],
+      "artifact_schema": {
+        "schema_id": "lit.wunderbox.vault-lifecycle-plan.v1",
+        "fields": {
+          "operation": {"type": "string", "allowed_values": ["deploy"]},
+          "target": {"type": "string", "binding": "fqdn"},
+          "plan_sha256": {"type": "sha256"},
+          "confirmation": {"type": "string"}
+        }
+      },
+      "required_evidence_references": ["readback_ref", "rollback_ref", "finding_ref"],
+      "timeout_seconds": 1800,
+      "max_output_bytes": 4194304
+    },
+    "tang_deploy": {
+      "record_prefix": "370",
+      "gate": "WBX-G3",
+      "prerequisite_gates": ["WBX-G0", "WBX-G1", "WBX-G2"],
+      "impact": "security_relevant",
+      "mode": "playbook",
+      "playbook": "runbooks/50-applications/tang/10-deploy.yml",
+      "required_evidence_references": ["readback_ref", "rollback_ref", "negative_test_ref", "finding_ref"],
+      "timeout_seconds": 3600,
+      "max_output_bytes": 8388608
+    }
+  }
+}

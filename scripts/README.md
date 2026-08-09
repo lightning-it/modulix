@@ -86,3 +86,8 @@ that owns that policy. Concrete inventory values belong to the applicable
 inventory repository. Customer-specific commands, paths, evidence locations
 and execution order belong in the private operations repository; they must not
 be copied into this public reusable component.
+
+The reusable, sanitized Wunderbox binding is owned by this repository under
+`policies/wunderbox/`; its fixed adapter is `scripts/wbx-governed-exec.py`.
+The separate validation repository remains an immutable execution input, but
+does not own production execution or approval logic.

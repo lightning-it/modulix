@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "path": "/Library/Application Support/Lightning IT/Governed Ansible/policy/root-of-trust-policy.json",
+    "sha256": "REPLACE_WITH_64_HEX"
+  },
+  "execution_anchor": {
+    "launcher": {
+      "path": "/Library/Application Support/Lightning IT/Governed Ansible/bin/governed-ansible-exec",
+      "sha256": "REPLACE_WITH_64_HEX"
+    },
+    "interpreter": {
+      "path": "/usr/bin/python3",
+      "sha256": "REPLACE_WITH_64_HEX"
+    },
+    "recorder": {
+      "path": "/Library/Application Support/Lightning IT/Governed Ansible/libexec/governed-ansible-exec.py",
+      "sha256": "REPLACE_WITH_64_HEX"
+    },
+    "acceptance_receipt": {
+      "path": "/Library/Application Support/Lightning IT/Governed Ansible/acceptance/execution-anchor.json",
+      "sha256": "REPLACE_WITH_64_HEX"
+    }
+  },
+  "replay_broker": {
+    "kind": "root-brokered-append-only-v1",
+    "path": "/Library/Application Support/Lightning IT/Governed Ansible/bin/replay-broker",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "store_id": "REPLACE_WITH_CANONICAL_STORE_ID"
+  },
+  "process_supervisor": {
+    "kind": "root-brokered-process-domain-v1",
+    "path": "/Library/Application Support/Lightning IT/Governed Ansible/bin/process-supervisor",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "backend": "launchd-job",
+    "profile_id": "REPLACE_WITH_ACCEPTED_PROCESS_DOMAIN"
+  },
+  "container_engine": {
+    "kind": "podman",
+    "path": "/Library/Application Support/Lightning IT/Governed Ansible/bin/podman",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "backend_uri": "unix:///REPLACE/WITH/PINNED/PODMAN/API.sock",
+    "backend_identity_sha256": "REPLACE_WITH_64_HEX",
+    "backend_transport": "local-root-unix-v1",
+    "backend_socket_path": "/REPLACE/WITH/ROOT_OWNED/PODMAN/API.sock",
+    "backend_socket_owner_uid": 0,
+    "backend_socket_owner_gid": 0,
+    "backend_socket_mode": 384,
+    "backend_socket_device": 1,
+    "backend_socket_inode": 1
+  },
+  "manifest_signature": {
+    "identity": "REPLACE_WITH_IDENTITY",
+    "namespace": "REPLACE_WITH_NAMESPACE",
+    "allowed_signers_path": "/Library/Application Support/Lightning IT/Governed Ansible/trust/manifest.allowed_signers",
+    "allowed_signers_sha256": "REPLACE_WITH_64_HEX",
+    "ssh_keygen_path": "/usr/bin/ssh-keygen",
+    "ssh_keygen_sha256": "REPLACE_WITH_64_HEX"
+  },
+  "runtime_attestation_signature": {
+    "identity": "REPLACE_WITH_IDENTITY",
+    "namespace": "REPLACE_WITH_NAMESPACE",
+    "allowed_signers_path": "/Library/Application Support/Lightning IT/Governed Ansible/trust/runtime.allowed_signers",
+    "allowed_signers_sha256": "REPLACE_WITH_64_HEX",
+    "ssh_keygen_path": "/usr/bin/ssh-keygen",
+    "ssh_keygen_sha256": "REPLACE_WITH_64_HEX"
+  },
+  "approval_authority": {
+    "schema_version": 1,
+    "identity": "REPLACE_WITH_IDENTITY",
+    "namespace": "lit-onepassword-approval-v1",
+    "fingerprint": "REPLACE_WITH_SSH_SHA256_FINGERPRINT",
+    "allowed_signers_path": "/Library/Application Support/Lightning IT/Governed Ansible/trust/approval.allowed_signers",
+    "allowed_signers_sha256": "REPLACE_WITH_64_HEX",
+    "ssh_keygen_path": "/usr/bin/ssh-keygen",
+    "ssh_keygen_sha256": "REPLACE_WITH_64_HEX",
+    "replay_directory": "/REPLACE/WITH/OWNER_ONLY/CONSUMER/REPLAY/DIRECTORY"
+  }
+}
