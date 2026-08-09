@@ -211,6 +211,11 @@ def sample_policy() -> dict:
             "target_id_pattern": "^TEST-TARGET$",
             "fqdn_pattern": "^host\\.example\\.test$",
         },
+        "projection_contract": {
+            "repository": "inventory",
+            "path": "contracts/inventory-projection.json",
+            "sha256": "0" * 64,
+        },
         "actions": {
             "target_plan": {
                 "record_prefix": "321",
@@ -299,6 +304,254 @@ def sample_manifest(policy_digest: str) -> dict:
                 "consumer_approval_contracts": {},
                 "rollback_ref": "TEST-1#rollback",
             }
+        },
+    }
+
+
+def sample_projection_contract(document: dict, target: dict, controller: dict) -> dict:
+    policies = document["host_firewall_egress_policies"]
+    return {
+        "schema_version": 1,
+        "contract_id": "test-inventory-projection-v1",
+        "target": copy.deepcopy(target),
+        "controller": {"source_cidr": controller["source_cidr"]},
+        "projection_paths": ["hostname_fqdn"],
+        "expectations": {
+            "dns_identity": copy.deepcopy(document["wunderbox_dns_identity"]),
+            "management_services": copy.deepcopy(
+                document["wunderbox_inventory_contract"]["controller_access"][
+                    "management_services"
+                ]
+            ),
+            "provider_input_rules": {
+                "bootstrap": copy.deepcopy(
+                    document["hetzner_baremetal_robot_firewall_bootstrap_input_rules"]
+                ),
+                "hardened": copy.deepcopy(
+                    document["hetzner_baremetal_robot_firewall_hardened_input_rules"]
+                ),
+                "tang": copy.deepcopy(
+                    document[
+                        "hetzner_baremetal_robot_firewall_deferred_tang_input_rules"
+                    ]
+                ),
+            },
+            "tang_access": copy.deepcopy(document["host_firewall_tang_access"]),
+            "legacy_aggregate_sources": {
+                "controller": copy.deepcopy(
+                    document["host_firewall_controller_source_cidrs"]
+                ),
+                "recovery": copy.deepcopy(
+                    document["host_firewall_recovery_source_cidrs"]
+                ),
+            },
+            "host_firewall": {
+                "enabled": document["host_firewall_enabled"],
+                "action": document["host_firewall_action"],
+                "mode": document["host_firewall_mode"],
+                "identity": {
+                    "inventory_hostname": document[
+                        "host_firewall_expected_inventory_hostname"
+                    ],
+                    "public_ipv4": document["host_firewall_expected_public_ipv4"],
+                    "management_ipv4": document[
+                        "host_firewall_expected_management_ipv4"
+                    ],
+                    "public_ipv6": document["host_firewall_expected_public_ipv6"],
+                    "management_ipv6": document[
+                        "host_firewall_expected_management_ipv6"
+                    ],
+                    "public_interface": document["host_firewall_public_interface"],
+                    "management_interface": document[
+                        "host_firewall_management_interface"
+                    ],
+                },
+                "egress_policies_sha256": MODULE.sha256_bytes(
+                    MODULE.canonical_json_bytes(policies)
+                ),
+                "egress_selector": document["host_firewall_egress_policy"],
+                "provider_ipv6_filter": {
+                    "verified_enabled": document[
+                        "host_firewall_provider_ipv6_filter_enabled"
+                    ],
+                    "evidence_reference": document[
+                        "host_firewall_provider_ipv6_filter_evidence_reference"
+                    ],
+                    "claim_basis": "PENDING_EXTERNAL_READBACK",
+                },
+            },
+            "ipv4_only_baseline": copy.deepcopy(
+                document["wunderbox_inventory_contract"]["ipv4_only_baseline"]
+            ),
+            "installimage_and_cis": {
+                "installimage_ipv4_only": document["hetzner_installimage_layout"][
+                    "ipv4_only"
+                ],
+                "cis_ipv4_required": document["ubtu24cis_ipv4_required"],
+                "cis_ipv6_required": document["ubtu24cis_ipv6_required"],
+                "cis_ipv6_disable": document["ubtu24cis_ipv6_disable"],
+            },
+            "netplan_ethernets": copy.deepcopy(document["netplan_ethernets"]),
+            "netplan_vlans": copy.deepcopy(document["netplan_vlans"]),
+            "provider_firewall": {
+                "enabled": document["hetzner_baremetal_robot_firewall"]["enabled"],
+                "admin_ipv4": document["hetzner_baremetal_robot_firewall"][
+                    "admin_ipv4"
+                ],
+                "filter_ipv6": document["hetzner_baremetal_robot_firewall"][
+                    "filter_ipv6"
+                ],
+            },
+        },
+    }
+
+
+def minimal_projection_contract() -> dict:
+    target = {
+        "target_id": "TEST-TARGET",
+        "fqdn": "host.example.test",
+        "public_ipv4": "192.0.2.10",
+        "provider_id": "provider-1",
+    }
+    controller = "192.0.2.20/32"
+    management = {
+        "management_ssh": {
+            "port": 2200,
+            "modes": ["bootstrap"],
+            "sources_ipv4": [controller],
+            "sources_ipv6": [],
+        }
+    }
+    return {
+        "schema_version": 1,
+        "contract_id": "test-inventory-projection-v1",
+        "target": target,
+        "controller": {"source_cidr": controller},
+        "projection_paths": ["hostname_fqdn"],
+        "expectations": {
+            "dns_identity": {
+                "schema_version": 1,
+                "desired": {
+                    "public": {
+                        "fqdn": target["fqdn"],
+                        "a_records": [target["public_ipv4"]],
+                        "ptr_records": [target["fqdn"]],
+                        "aaaa_records": [],
+                        "cname_records": [],
+                    },
+                    "management": {
+                        "fqdn": "host.management.example.test",
+                        "a_records": ["192.0.2.30"],
+                        "aaaa_records": [],
+                        "cname_records": [],
+                    },
+                },
+                "verification": {
+                    "accepted": False,
+                    "fresh_readback": False,
+                    "evidence_reference": "PENDING - test readback",
+                },
+            },
+            "management_services": management,
+            "provider_input_rules": {
+                "bootstrap": [
+                    {
+                        "ip_version": "ipv4",
+                        "protocol": "tcp",
+                        "src_ip": controller,
+                        "dst_ip": target["public_ipv4"],
+                        "dst_port": "2200",
+                        "name": "Test management",
+                        "action": "accept",
+                    }
+                ],
+                "hardened": [],
+                "tang": [
+                    {
+                        "ip_version": "ipv4",
+                        "protocol": "tcp",
+                        "src_ip": "192.0.2.40/32",
+                        "dst_ip": target["public_ipv4"],
+                        "dst_port": "8000",
+                        "name": "Test service",
+                        "action": "accept",
+                    }
+                ],
+            },
+            "tang_access": {
+                "port": 8000,
+                "sources_ipv4": ["192.0.2.40/32"],
+                "sources_ipv6": [],
+            },
+            "legacy_aggregate_sources": {"controller": [], "recovery": []},
+            "host_firewall": {
+                "enabled": False,
+                "action": "plan",
+                "mode": "bootstrap",
+                "identity": {
+                    "inventory_hostname": target["fqdn"],
+                    "public_ipv4": target["public_ipv4"],
+                    "management_ipv4": "192.0.2.30",
+                    "public_ipv6": "",
+                    "management_ipv6": "",
+                    "public_interface": "eth0",
+                    "management_interface": "eth1",
+                },
+                "egress_policies_sha256": "1" * 64,
+                "egress_selector": "test_selector",
+                "provider_ipv6_filter": {
+                    "verified_enabled": False,
+                    "evidence_reference": "PENDING - test IPv6 readback",
+                    "claim_basis": "PENDING_EXTERNAL_READBACK",
+                },
+            },
+            "ipv4_only_baseline": {
+                "decision_id": "TEST-ADR-1",
+                "evidence_id": "TEST-EV-1",
+                "evidence_sha256": "2" * 64,
+                "installimage_ipv4_only": True,
+                "cis_ipv4_required": True,
+                "cis_ipv6_required": False,
+                "cis_ipv6_disable": "test-disable",
+                "kernel_ipv6_disabled": True,
+                "netplan": {
+                    "dhcp6": False,
+                    "accept_ra": False,
+                    "link_local": [],
+                    "source_ipv6": [],
+                    "destination_ipv6": [],
+                },
+                "dns": {"aaaa_records": []},
+                "provider": {
+                    "required_filter_enabled": True,
+                    "ipv6_rules": [],
+                    "assigned_prefix": "2001:db8::/64",
+                    "assignment_state": "assigned-but-unconfigured",
+                },
+            },
+            "installimage_and_cis": {
+                "installimage_ipv4_only": True,
+                "cis_ipv4_required": True,
+                "cis_ipv6_required": False,
+                "cis_ipv6_disable": "test-disable",
+            },
+            "netplan_ethernets": {
+                "eth0": {
+                    "dhcp4": False,
+                    "dhcp6": False,
+                    "accept-ra": False,
+                    "link-local": [],
+                    "addresses": ["192.0.2.10/24"],
+                    "routes": [{"to": "default", "via": "192.0.2.1"}],
+                    "nameservers": {"addresses": ["192.0.2.53"]},
+                }
+            },
+            "netplan_vlans": {},
+            "provider_firewall": {
+                "enabled": True,
+                "admin_ipv4": "192.0.2.20",
+                "filter_ipv6": True,
+            },
         },
     }
 
@@ -1711,6 +1964,70 @@ class GovernedRecorderTests(unittest.TestCase):
                             root / f"record-{index}.json", {"nested": {key: "value"}}
                         )
 
+    def test_projection_contract_schema_is_closed_at_every_security_boundary(self):
+        contract = minimal_projection_contract()
+        MODULE.validate_projection_contract(contract)
+        for mutation in ("extra", "missing"):
+            with self.subTest(mutation=mutation):
+                candidate = copy.deepcopy(contract)
+                if mutation == "extra":
+                    candidate["expectations"]["host_firewall"]["unexpected"] = True
+                else:
+                    del candidate["expectations"]["host_firewall"]["mode"]
+                with self.assertRaisesRegex(MODULE.ContractError, "exact-key"):
+                    MODULE.validate_projection_contract(candidate)
+        with self.assertRaisesRegex(MODULE.ContractError, "duplicate key"):
+            MODULE.strict_json_loads(
+                b'{"schema_version":1,"schema_version":1}',
+                "projection contract",
+            )
+
+    def test_projection_contract_loader_rejects_wrong_digest_and_tamper(self):
+        contract = minimal_projection_contract()
+        payload = MODULE.canonical_json_bytes(contract) + b"\n"
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            contract_path = root / "contracts" / "inventory-projection.json"
+            contract_path.parent.mkdir(mode=0o700)
+            contract_path.write_bytes(payload)
+            contract_path.chmod(0o400)
+            policy = sample_policy()
+            policy["projection_contract"] = {
+                "repository": "inventory",
+                "path": "contracts/inventory-projection.json",
+                "sha256": MODULE.sha256_bytes(payload),
+            }
+            loaded, loaded_payload, evidence = MODULE.load_projection_contract(
+                policy, {"inventory": root}
+            )
+            self.assertEqual(loaded, contract)
+            self.assertEqual(loaded_payload, payload)
+            self.assertEqual(evidence["sha256"], MODULE.sha256_bytes(payload))
+
+            wrong_digest = copy.deepcopy(policy)
+            wrong_digest["projection_contract"]["sha256"] = "f" * 64
+            with self.assertRaisesRegex(MODULE.ContractError, "pinned digest"):
+                MODULE.load_projection_contract(wrong_digest, {"inventory": root})
+
+            contract_path.chmod(0o600)
+            contract_path.write_bytes(payload + b" ")
+            contract_path.chmod(0o400)
+            with self.assertRaisesRegex(MODULE.ContractError, "pinned digest"):
+                MODULE.load_projection_contract(policy, {"inventory": root})
+
+    def test_generic_recorder_contains_no_environment_topology_literals(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        for forbidden in (
+            "10.10.30.23",
+            "wunderbox01-edge.mgmt.corp.l-it.io",
+            "wunderbox01.prd.edge.pub.l-it.io",
+            "enp4s0.4091",
+            "153.53.58.197",
+            "2a01:4f8:212:69e::/64",
+            "LIT-PIS-ADR-WBX-016",
+        ):
+            self.assertNotIn(forbidden, source)
+
     def test_inventory_projection_is_exactly_target_controller_and_lifecycle_bound(
         self,
     ):
@@ -1751,10 +2068,36 @@ class GovernedRecorderTests(unittest.TestCase):
             }
 
         egress_policies = sample_host_firewall_egress_policies()
-        self.assertEqual(
-            MODULE.sha256_bytes(MODULE.canonical_json_bytes(egress_policies)),
-            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256,
+        egress_digest = MODULE.sha256_bytes(
+            MODULE.canonical_json_bytes(egress_policies)
         )
+        pending_dns = "PENDING - test DNS readback required"
+        pending_ipv6 = "PENDING - test provider IPv6 readback required"
+        egress_selector = "{{ host_firewall_egress_policies[host_firewall_mode] }}"
+        ipv4_only_baseline = {
+            "decision_id": "TEST-ADR-1",
+            "evidence_id": "TEST-EV-1",
+            "evidence_sha256": "1" * 64,
+            "installimage_ipv4_only": True,
+            "cis_ipv4_required": True,
+            "cis_ipv6_required": False,
+            "cis_ipv6_disable": "test-disable-mode",
+            "kernel_ipv6_disabled": True,
+            "netplan": {
+                "dhcp6": False,
+                "accept_ra": False,
+                "link_local": [],
+                "source_ipv6": [],
+                "destination_ipv6": [],
+            },
+            "dns": {"aaaa_records": []},
+            "provider": {
+                "required_filter_enabled": True,
+                "ipv6_rules": [],
+                "assigned_prefix": "2001:db8::/64",
+                "assignment_state": "assigned-but-unconfigured",
+            },
+        }
         document = {
             "ansible_host": target["public_ipv4"],
             "hostname_fqdn": target["fqdn"],
@@ -1780,7 +2123,7 @@ class GovernedRecorderTests(unittest.TestCase):
                 "verification": {
                     "accepted": False,
                     "fresh_readback": False,
-                    "evidence_reference": MODULE.WUNDERBOX_PENDING_DNS_EVIDENCE,
+                    "evidence_reference": pending_dns,
                 },
             },
             "wunderbox_inventory_contract": {
@@ -1790,7 +2133,7 @@ class GovernedRecorderTests(unittest.TestCase):
                     "fqdn": target["fqdn"],
                     "ipv4": target["public_ipv4"],
                 },
-                "ipv4_only_baseline": copy.deepcopy(MODULE.IPV4_ONLY_BASELINE),
+                "ipv4_only_baseline": copy.deepcopy(ipv4_only_baseline),
                 "controller_access": {
                     "management_services": management_services,
                 },
@@ -1814,13 +2157,9 @@ class GovernedRecorderTests(unittest.TestCase):
                 "sources_ipv6": [],
             },
             "host_firewall_egress_policies": egress_policies,
-            "host_firewall_egress_policy": (
-                MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR
-            ),
+            "host_firewall_egress_policy": (egress_selector),
             "host_firewall_provider_ipv6_filter_enabled": False,
-            "host_firewall_provider_ipv6_filter_evidence_reference": (
-                MODULE.WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE
-            ),
+            "host_firewall_provider_ipv6_filter_evidence_reference": (pending_ipv6),
             "hetzner_baremetal_robot_firewall_bootstrap_input_rules": [
                 provider_rule(22, controller["source_cidr"], "bootstrap SSH")
             ],
@@ -1884,8 +2223,9 @@ class GovernedRecorderTests(unittest.TestCase):
                 "server_lifecycle": {"status": "ready", "cancelled": False},
             },
         }
+        projection_contract = sample_projection_contract(document, target, controller)
         projection = MODULE.validate_inventory_target_projection(
-            document, target, controller
+            document, target, controller, projection_contract
         )
         self.assertEqual(projection["target"], target)
         self.assertEqual(projection["schema_version"], 3)
@@ -1905,7 +2245,7 @@ class GovernedRecorderTests(unittest.TestCase):
         )
         self.assertEqual(
             projection["host_firewall_contract"]["egress_policies_sha256"],
-            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256,
+            egress_digest,
         )
         self.assertEqual(
             projection["host_firewall_contract"]["provider_ipv6_filter"]["claim_basis"],
@@ -1916,43 +2256,51 @@ class GovernedRecorderTests(unittest.TestCase):
             "host_firewall_egress_policies.bootstrap) }}"
         )
         with self.assertRaisesRegex(MODULE.ContractError, "selector"):
-            MODULE.validate_inventory_target_projection(document, target, controller)
-        document["host_firewall_egress_policy"] = (
-            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR
-        )
+            MODULE.validate_inventory_target_projection(
+                document, target, controller, projection_contract
+            )
+        document["host_firewall_egress_policy"] = egress_selector
         document["wunderbox_dns_identity"]["verification"] = {
             "accepted": True,
             "fresh_readback": False,
             "evidence_reference": "WBX-EV-002-Supplement",
         }
         with self.assertRaisesRegex(MODULE.ContractError, "DNS/rDNS"):
-            MODULE.validate_inventory_target_projection(document, target, controller)
+            MODULE.validate_inventory_target_projection(
+                document, target, controller, projection_contract
+            )
         document["wunderbox_dns_identity"]["verification"] = {
             "accepted": False,
             "fresh_readback": False,
-            "evidence_reference": MODULE.WUNDERBOX_PENDING_DNS_EVIDENCE,
+            "evidence_reference": pending_dns,
         }
         document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "213.232.86.209"
         with self.assertRaisesRegex(MODULE.ContractError, "IPv4-only"):
-            MODULE.validate_inventory_target_projection(document, target, controller)
+            MODULE.validate_inventory_target_projection(
+                document, target, controller, projection_contract
+            )
         document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "153.53.58.197"
         document["host_firewall_egress_policies"]["hardened"]["functions"][
             "atlas_loki"
         ]["destinations_ipv4"] = ["10.10.30.99/32"]
         with self.assertRaisesRegex(MODULE.ContractError, "egress policies"):
-            MODULE.validate_inventory_target_projection(document, target, controller)
+            MODULE.validate_inventory_target_projection(
+                document, target, controller, projection_contract
+            )
         egress_policies = sample_host_firewall_egress_policies()
         document["host_firewall_egress_policies"] = egress_policies
-        document["host_firewall_egress_policy"] = (
-            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR
-        )
+        document["host_firewall_egress_policy"] = egress_selector
         document["wunderbox_orchestration"]["target"]["ipv4"] = "192.0.2.99"
         with self.assertRaisesRegex(MODULE.ContractError, "IPv4"):
-            MODULE.validate_inventory_target_projection(document, target, controller)
+            MODULE.validate_inventory_target_projection(
+                document, target, controller, projection_contract
+            )
         document["wunderbox_orchestration"]["target"]["ipv4"] = target["public_ipv4"]
         document["netplan_ethernets"]["enp4s0"]["dhcp6"] = True
-        with self.assertRaisesRegex(MODULE.ContractError, "IPv4-only"):
-            MODULE.validate_inventory_target_projection(document, target, controller)
+        with self.assertRaisesRegex(MODULE.ContractError, "contract-exact"):
+            MODULE.validate_inventory_target_projection(
+                document, target, controller, projection_contract
+            )
 
     def test_inventory_projection_rejects_cross_port_and_tang_policy_drift(self):
         manifest = sample_manifest("f" * 64)
@@ -2006,10 +2354,29 @@ class GovernedRecorderTests(unittest.TestCase):
                 rule(80, tang_sources[0])
             ],
         }
+        expectations = {
+            "management_services": copy.deepcopy(management),
+            "provider_input_rules": {
+                "bootstrap": copy.deepcopy(
+                    document["hetzner_baremetal_robot_firewall_bootstrap_input_rules"]
+                ),
+                "hardened": copy.deepcopy(
+                    document["hetzner_baremetal_robot_firewall_hardened_input_rules"]
+                ),
+                "tang": copy.deepcopy(
+                    document[
+                        "hetzner_baremetal_robot_firewall_deferred_tang_input_rules"
+                    ]
+                ),
+            },
+            "tang_access": copy.deepcopy(document["host_firewall_tang_access"]),
+            "legacy_aggregate_sources": {"controller": [], "recovery": []},
+        }
         MODULE.validate_effective_inventory_access(
             document,
             controller_source_cidr=controller["source_cidr"],
             target_ipv4=target["public_ipv4"],
+            expectations=expectations,
         )
 
         document["host_firewall_management_access"]["openssh"]["sources_ipv4"] = [
@@ -2020,6 +2387,7 @@ class GovernedRecorderTests(unittest.TestCase):
                 document,
                 controller_source_cidr=controller["source_cidr"],
                 target_ipv4=target["public_ipv4"],
+                expectations=expectations,
             )
         document["host_firewall_management_access"] = copy.deepcopy(management)
         document["hetzner_baremetal_robot_firewall_hardened_input_rules"].append(
@@ -2030,21 +2398,23 @@ class GovernedRecorderTests(unittest.TestCase):
                 "action": "accept",
             }
         )
-        with self.assertRaisesRegex(MODULE.ContractError, "unprojected inbound TCP"):
+        with self.assertRaisesRegex(MODULE.ContractError, "pinned contract"):
             MODULE.validate_effective_inventory_access(
                 document,
                 controller_source_cidr=controller["source_cidr"],
                 target_ipv4=target["public_ipv4"],
+                expectations=expectations,
             )
         document["hetzner_baremetal_robot_firewall_hardened_input_rules"].pop()
         document["hetzner_baremetal_robot_firewall_deferred_tang_input_rules"][0][
             "src_ip"
         ] = "192.0.2.98/32"
-        with self.assertRaisesRegex(MODULE.ContractError, "do not match"):
+        with self.assertRaisesRegex(MODULE.ContractError, "pinned contract"):
             MODULE.validate_effective_inventory_access(
                 document,
                 controller_source_cidr=controller["source_cidr"],
                 target_ipv4=target["public_ipv4"],
+                expectations=expectations,
             )
 
     def test_typed_artifact_rejects_extra_fields_and_target_mismatch(self):

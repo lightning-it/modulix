@@ -213,100 +213,6 @@ EXPECTED_RUNTIME_LOADER = {
     ],
     "scan_sys_path": False,
 }
-INVENTORY_PROJECTION_PATHS = [
-    "hostname_fqdn",
-    "hostname_etc_hosts_ip",
-    "hetzner_robot_server_number",
-    "wunderbox_dns_identity.schema_version",
-    "wunderbox_dns_identity.desired.public.fqdn",
-    "wunderbox_dns_identity.desired.public.a_records",
-    "wunderbox_dns_identity.desired.public.ptr_records",
-    "wunderbox_dns_identity.desired.public.aaaa_records",
-    "wunderbox_dns_identity.desired.public.cname_records",
-    "wunderbox_dns_identity.desired.management.fqdn",
-    "wunderbox_dns_identity.desired.management.a_records",
-    "wunderbox_dns_identity.desired.management.aaaa_records",
-    "wunderbox_dns_identity.desired.management.cname_records",
-    "wunderbox_dns_identity.verification.accepted",
-    "wunderbox_dns_identity.verification.fresh_readback",
-    "wunderbox_dns_identity.verification.evidence_reference",
-    "hetzner_baremetal_root_of_trust.schema_version",
-    "hetzner_baremetal_root_of_trust.selection_scope",
-    "hetzner_baremetal_root_of_trust.inventory_hostname",
-    "hetzner_baremetal_root_of_trust.controller_ipv4_cidr",
-    "hetzner_baremetal_root_of_trust.server_lifecycle.status",
-    "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled",
-    "wunderbox_inventory_contract.controller_access.management_services",
-    "host_firewall_enabled",
-    "host_firewall_action",
-    "host_firewall_mode",
-    "host_firewall_expected_inventory_hostname",
-    "host_firewall_expected_public_ipv4",
-    "host_firewall_expected_management_ipv4",
-    "host_firewall_expected_public_ipv6",
-    "host_firewall_expected_management_ipv6",
-    "host_firewall_public_interface",
-    "host_firewall_management_interface",
-    "host_firewall_management_access",
-    "host_firewall_tang_access",
-    "host_firewall_controller_source_cidrs",
-    "host_firewall_recovery_source_cidrs",
-    "host_firewall_egress_policies",
-    "host_firewall_egress_policy",
-    "host_firewall_provider_ipv6_filter_enabled",
-    "host_firewall_provider_ipv6_filter_evidence_reference",
-    "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
-    "hetzner_baremetal_robot_firewall_hardened_input_rules",
-    "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
-    "hetzner_installimage_layout.ipv4_only",
-    "ubtu24cis_ipv4_required",
-    "ubtu24cis_ipv6_required",
-    "ubtu24cis_ipv6_disable",
-    "netplan_ethernets",
-    "netplan_vlans",
-    "wunderbox_inventory_contract.ipv4_only_baseline",
-    "hetzner_baremetal_robot_firewall.enabled",
-    "hetzner_baremetal_robot_firewall.admin_ipv4",
-    "hetzner_baremetal_robot_firewall.filter_ipv6",
-]
-IPV4_ONLY_BASELINE = {
-    "decision_id": "LIT-PIS-ADR-WBX-016",
-    "evidence_id": "WBX-EV-032",
-    "evidence_sha256": (
-        "49d045cf2e1d11180209e87ab8e1e3a78bcaf5b1df63415c87008ac409b68d88"
-    ),
-    "installimage_ipv4_only": True,
-    "cis_ipv4_required": True,
-    "cis_ipv6_required": False,
-    "cis_ipv6_disable": "grub",
-    "kernel_ipv6_disabled": True,
-    "netplan": {
-        "dhcp6": False,
-        "accept_ra": False,
-        "link_local": [],
-        "source_ipv6": [],
-        "destination_ipv6": [],
-    },
-    "dns": {"aaaa_records": []},
-    "provider": {
-        "required_filter_enabled": True,
-        "ipv6_rules": [],
-        "assigned_prefix": "2a01:4f8:212:69e::/64",
-        "assignment_state": "assigned-but-unconfigured",
-    },
-}
-WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256 = (
-    "c3fb79396d3e704ffabc53d392868fb2bb4809621b80537c0399664be36a81a4"
-)
-WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE = (
-    "PENDING - fresh recorder-bound provider IPv6-filter readback required"
-)
-WUNDERBOX_PENDING_DNS_EVIDENCE = (
-    "PENDING - fresh DNS and provider rDNS readback required"
-)
-WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR = (
-    "{{ host_firewall_egress_policies[host_firewall_mode] }}"
-)
 COLLECTION_PROVENANCE_KEYS = {
     "fqcn",
     "version",
@@ -331,9 +237,85 @@ POLICY_KEYS = {
     "required_collections",
     "collection_repositories",
     "target_contract",
+    "projection_contract",
     "actions",
 }
 TARGET_CONTRACT_KEYS = {"target_id_pattern", "fqdn_pattern"}
+PROJECTION_CONTRACT_DESCRIPTOR_KEYS = {"repository", "path", "sha256"}
+PROJECTION_CONTRACT_KEYS = {
+    "schema_version",
+    "contract_id",
+    "target",
+    "controller",
+    "projection_paths",
+    "expectations",
+}
+PROJECTION_EXPECTATION_KEYS = {
+    "dns_identity",
+    "management_services",
+    "provider_input_rules",
+    "tang_access",
+    "legacy_aggregate_sources",
+    "host_firewall",
+    "ipv4_only_baseline",
+    "installimage_and_cis",
+    "netplan_ethernets",
+    "netplan_vlans",
+    "provider_firewall",
+}
+PROJECTION_HOST_FIREWALL_KEYS = {
+    "enabled",
+    "action",
+    "mode",
+    "identity",
+    "egress_policies_sha256",
+    "egress_selector",
+    "provider_ipv6_filter",
+}
+PROJECTION_FIREWALL_IDENTITY_KEYS = {
+    "inventory_hostname",
+    "public_ipv4",
+    "management_ipv4",
+    "public_ipv6",
+    "management_ipv6",
+    "public_interface",
+    "management_interface",
+}
+PROJECTION_PROVIDER_IPV6_FILTER_KEYS = {
+    "verified_enabled",
+    "evidence_reference",
+    "claim_basis",
+}
+PROJECTION_MANAGEMENT_SERVICE_KEYS = {
+    "port",
+    "modes",
+    "sources_ipv4",
+    "sources_ipv6",
+}
+PROJECTION_PROVIDER_RULE_KEYS = {
+    "ip_version",
+    "protocol",
+    "src_ip",
+    "dst_ip",
+    "src_port",
+    "dst_port",
+    "tcp_flags",
+    "name",
+    "action",
+}
+PROJECTION_IPV4_BASELINE_KEYS = {
+    "decision_id",
+    "evidence_id",
+    "evidence_sha256",
+    "installimage_ipv4_only",
+    "cis_ipv4_required",
+    "cis_ipv6_required",
+    "cis_ipv6_disable",
+    "kernel_ipv6_disabled",
+    "netplan",
+    "dns",
+    "provider",
+}
 ACTION_ALLOWED_KEYS = {
     "allowed_extra_vars",
     "allowed_under_safety_hold",
@@ -2258,6 +2240,30 @@ def validate_policy(policy: dict[str, Any]) -> None:
         re.compile(str(target_contract["fqdn_pattern"]))
     except (KeyError, re.error) as exc:
         raise ContractError("policy target contract contains invalid patterns") from exc
+    projection_descriptor = require_mapping(
+        policy.get("projection_contract"), "policy projection contract"
+    )
+    require_exact_keys(
+        projection_descriptor,
+        PROJECTION_CONTRACT_DESCRIPTOR_KEYS,
+        "policy projection contract",
+    )
+    projection_repository = projection_descriptor.get("repository")
+    projection_path = projection_descriptor.get("path")
+    projection_sha256 = projection_descriptor.get("sha256")
+    if projection_repository not in required_repositories:
+        raise ContractError("projection contract repository is not policy-bound")
+    if (
+        not isinstance(projection_path, str)
+        or not projection_path
+        or projection_path.startswith("/")
+        or any(component in {"", ".", ".."} for component in projection_path.split("/"))
+    ):
+        raise ContractError("projection contract path must be canonical and relative")
+    if not isinstance(projection_sha256, str) or not SHA256_RE.fullmatch(
+        projection_sha256
+    ):
+        raise ContractError("projection contract SHA-256 is invalid")
     actions = require_mapping(policy.get("actions"), "policy actions")
     record_prefixes: set[str] = set()
     for action_id, raw_action in actions.items():
@@ -2317,12 +2323,11 @@ def validate_policy(policy: dict[str, Any]) -> None:
                 raise ContractError(
                     f"action {action_id} {sequence_key} must contain nonempty strings"
                 )
-        if (
-            action.get("mode") == "inventory_projection"
-            and action.get("projection_paths") != INVENTORY_PROJECTION_PATHS
+        if action.get("mode") == "inventory_projection" and not action.get(
+            "projection_paths"
         ):
             raise ContractError(
-                f"action {action_id} must pin the complete effective-access projection"
+                f"action {action_id} must pin a nonempty inventory projection"
             )
         for transport_flag in ("requires_ssh_private_key", "requires_ssh_agent"):
             if transport_flag in action and not isinstance(
@@ -4767,8 +4772,447 @@ def canonical_ipv4_host_cidr(value: Any, label: str) -> str:
     return value
 
 
+def _require_nonempty_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ContractError(f"{label} must be a nonempty string")
+    validate_no_secret_scalar(value, label)
+    return value
+
+
+def _validate_projection_dns_identity(value: Any) -> None:
+    dns = require_mapping(value, "projection contract DNS identity")
+    require_exact_keys(
+        dns,
+        {"schema_version", "desired", "verification"},
+        "projection contract DNS identity",
+    )
+    if dns.get("schema_version") != 1:
+        raise ContractError("projection contract DNS schema_version must be 1")
+    desired = require_mapping(dns["desired"], "projection contract desired DNS")
+    require_exact_keys(
+        desired, {"public", "management"}, "projection contract desired DNS"
+    )
+    for scope, required in (
+        (
+            "public",
+            {"fqdn", "a_records", "ptr_records", "aaaa_records", "cname_records"},
+        ),
+        ("management", {"fqdn", "a_records", "aaaa_records", "cname_records"}),
+    ):
+        identity = require_mapping(
+            desired[scope], f"projection contract {scope} DNS identity"
+        )
+        require_exact_keys(
+            identity, required, f"projection contract {scope} DNS identity"
+        )
+        _require_nonempty_string(identity["fqdn"], f"projection contract {scope} FQDN")
+        for key in required - {"fqdn"}:
+            values = require_sequence(
+                identity[key], f"projection contract {scope} {key}"
+            )
+            if any(not isinstance(item, str) for item in values):
+                raise ContractError(
+                    f"projection contract {scope} {key} must contain strings"
+                )
+    verification = require_mapping(
+        dns["verification"], "projection contract DNS verification"
+    )
+    require_exact_keys(
+        verification,
+        {"accepted", "fresh_readback", "evidence_reference"},
+        "projection contract DNS verification",
+    )
+    if not isinstance(verification["accepted"], bool) or not isinstance(
+        verification["fresh_readback"], bool
+    ):
+        raise ContractError(
+            "projection contract DNS verification flags must be boolean"
+        )
+    _require_nonempty_string(
+        verification["evidence_reference"],
+        "projection contract DNS evidence reference",
+    )
+
+
+def _validate_projection_management_services(value: Any) -> None:
+    services = require_mapping(value, "projection contract management services")
+    if not services:
+        raise ContractError("projection contract management services must be nonempty")
+    observed_ports: set[int] = set()
+    for name, raw_service in services.items():
+        if not ACTION_ID_RE.fullmatch(str(name)):
+            raise ContractError(
+                "projection contract management service name is invalid"
+            )
+        service = require_mapping(
+            raw_service, f"projection contract management service {name}"
+        )
+        require_exact_keys(
+            service,
+            PROJECTION_MANAGEMENT_SERVICE_KEYS,
+            f"projection contract management service {name}",
+        )
+        port = service["port"]
+        if (
+            not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 1 <= port <= 65535
+            or port in observed_ports
+        ):
+            raise ContractError(
+                "projection contract management ports must be unique integers"
+            )
+        observed_ports.add(port)
+        modes = require_sequence(
+            service["modes"], f"projection contract management service {name} modes"
+        )
+        if (
+            not modes
+            or len(modes) != len(set(modes))
+            or any(not isinstance(mode, str) or not mode for mode in modes)
+        ):
+            raise ContractError("projection contract management modes are invalid")
+        sources_ipv4 = require_sequence(
+            service["sources_ipv4"],
+            f"projection contract management service {name} IPv4 sources",
+        )
+        for source in sources_ipv4:
+            canonical_ipv4_host_cidr(
+                source, f"projection contract management service {name} source"
+            )
+        if require_sequence(
+            service["sources_ipv6"],
+            f"projection contract management service {name} IPv6 sources",
+        ):
+            raise ContractError(
+                "projection contract management services must remain IPv4-only"
+            )
+
+
+def _validate_projection_provider_rules(value: Any) -> None:
+    phases = require_mapping(value, "projection contract provider input rules")
+    require_exact_keys(
+        phases,
+        {"bootstrap", "hardened", "tang"},
+        "projection contract provider input rules",
+    )
+    for phase, raw_rules in phases.items():
+        rules = require_sequence(
+            raw_rules, f"projection contract provider {phase} rules"
+        )
+        for index, raw_rule in enumerate(rules, start=1):
+            rule = require_mapping(
+                raw_rule, f"projection contract provider {phase} rule {index}"
+            )
+            unexpected = set(rule) - PROJECTION_PROVIDER_RULE_KEYS
+            missing = {"ip_version", "protocol", "name", "action"} - set(rule)
+            if unexpected or missing:
+                raise ContractError(
+                    "projection contract provider rule has an invalid closed schema"
+                )
+            if rule["ip_version"] != "ipv4" or rule["action"] != "accept":
+                raise ContractError(
+                    "projection contract provider rules must remain IPv4 accept rules"
+                )
+            if rule["protocol"] not in {"tcp", "udp", "icmp"}:
+                raise ContractError(
+                    "projection contract provider rule protocol is invalid"
+                )
+            _require_nonempty_string(
+                rule["name"], f"projection contract provider {phase} rule name"
+            )
+            for key in set(rule) - {"name"}:
+                if key in {"ip_version", "protocol", "action"}:
+                    continue
+                if not isinstance(rule[key], str) or not rule[key]:
+                    raise ContractError(
+                        "projection contract provider rule values must be strings"
+                    )
+
+
+def validate_projection_contract(contract: dict[str, Any]) -> None:
+    """Validate the closed, private inventory expectation contract."""
+    require_exact_keys(contract, PROJECTION_CONTRACT_KEYS, "projection contract")
+    if contract.get("schema_version") != 1:
+        raise ContractError("projection contract schema_version must be 1")
+    if not re.fullmatch(r"[a-z][a-z0-9-]{2,127}", str(contract.get("contract_id", ""))):
+        raise ContractError("projection contract ID is invalid")
+    target = require_mapping(contract["target"], "projection contract target")
+    require_exact_keys(target, TARGET_KEYS, "projection contract target")
+    for key in TARGET_KEYS:
+        _require_nonempty_string(target[key], f"projection contract target {key}")
+    try:
+        if ipaddress.ip_address(target["public_ipv4"]).version != 4:
+            raise ValueError
+    except ValueError as exc:
+        raise ContractError("projection contract target IPv4 is invalid") from exc
+    controller = require_mapping(
+        contract["controller"], "projection contract controller"
+    )
+    require_exact_keys(controller, {"source_cidr"}, "projection contract controller")
+    canonical_ipv4_host_cidr(
+        controller["source_cidr"], "projection contract controller source"
+    )
+    paths = require_sequence(contract["projection_paths"], "projection contract paths")
+    if (
+        not paths
+        or len(paths) != len(set(paths))
+        or any(
+            not isinstance(path, str)
+            or not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*", path)
+            for path in paths
+        )
+    ):
+        raise ContractError("projection contract paths are invalid or duplicate")
+    expectations = require_mapping(
+        contract["expectations"], "projection contract expectations"
+    )
+    require_exact_keys(
+        expectations,
+        PROJECTION_EXPECTATION_KEYS,
+        "projection contract expectations",
+    )
+    _validate_projection_dns_identity(expectations["dns_identity"])
+    _validate_projection_management_services(expectations["management_services"])
+    _validate_projection_provider_rules(expectations["provider_input_rules"])
+    tang = require_mapping(
+        expectations["tang_access"], "projection contract Tang access"
+    )
+    require_exact_keys(
+        tang,
+        {"port", "sources_ipv4", "sources_ipv6"},
+        "projection contract Tang access",
+    )
+    if (
+        not isinstance(tang["port"], int)
+        or isinstance(tang["port"], bool)
+        or not 1 <= tang["port"] <= 65535
+    ):
+        raise ContractError("projection contract Tang port is invalid")
+    for source in require_sequence(
+        tang["sources_ipv4"], "projection contract Tang IPv4 sources"
+    ):
+        canonical_ipv4_host_cidr(source, "projection contract Tang source")
+    if require_sequence(tang["sources_ipv6"], "projection contract Tang IPv6 sources"):
+        raise ContractError("projection contract Tang access must remain IPv4-only")
+    legacy = require_mapping(
+        expectations["legacy_aggregate_sources"],
+        "projection contract legacy aggregate sources",
+    )
+    require_exact_keys(
+        legacy,
+        {"controller", "recovery"},
+        "projection contract legacy aggregate sources",
+    )
+    for key in ("controller", "recovery"):
+        values = require_sequence(
+            legacy[key], f"projection contract legacy {key} sources"
+        )
+        for source in values:
+            canonical_ipv4_host_cidr(source, f"projection contract legacy {key} source")
+    host_firewall = require_mapping(
+        expectations["host_firewall"], "projection contract host firewall"
+    )
+    require_exact_keys(
+        host_firewall,
+        PROJECTION_HOST_FIREWALL_KEYS,
+        "projection contract host firewall",
+    )
+    if not isinstance(host_firewall["enabled"], bool):
+        raise ContractError("projection contract host-firewall enabled must be boolean")
+    for key in ("action", "mode", "egress_selector"):
+        _require_nonempty_string(
+            host_firewall[key], f"projection contract host firewall {key}"
+        )
+    if not SHA256_RE.fullmatch(str(host_firewall["egress_policies_sha256"])):
+        raise ContractError("projection contract egress-policy SHA-256 is invalid")
+    identity = require_mapping(
+        host_firewall["identity"], "projection contract firewall identity"
+    )
+    require_exact_keys(
+        identity,
+        PROJECTION_FIREWALL_IDENTITY_KEYS,
+        "projection contract firewall identity",
+    )
+    for key, value in identity.items():
+        if not isinstance(value, str):
+            raise ContractError("projection contract firewall identity is invalid")
+        validate_no_secret_scalar(value, f"projection contract firewall identity {key}")
+    provider_ipv6 = require_mapping(
+        host_firewall["provider_ipv6_filter"],
+        "projection contract provider IPv6 filter",
+    )
+    require_exact_keys(
+        provider_ipv6,
+        PROJECTION_PROVIDER_IPV6_FILTER_KEYS,
+        "projection contract provider IPv6 filter",
+    )
+    if not isinstance(provider_ipv6["verified_enabled"], bool):
+        raise ContractError("projection contract IPv6 verification flag is invalid")
+    _require_nonempty_string(
+        provider_ipv6["evidence_reference"],
+        "projection contract provider IPv6 evidence reference",
+    )
+    _require_nonempty_string(
+        provider_ipv6["claim_basis"],
+        "projection contract provider IPv6 claim basis",
+    )
+    baseline = require_mapping(
+        expectations["ipv4_only_baseline"], "projection contract IPv4 baseline"
+    )
+    require_exact_keys(
+        baseline, PROJECTION_IPV4_BASELINE_KEYS, "projection contract IPv4 baseline"
+    )
+    if not SHA256_RE.fullmatch(str(baseline["evidence_sha256"])):
+        raise ContractError("projection contract baseline evidence SHA-256 is invalid")
+    for key in (
+        "installimage_ipv4_only",
+        "cis_ipv4_required",
+        "cis_ipv6_required",
+        "kernel_ipv6_disabled",
+    ):
+        if not isinstance(baseline[key], bool):
+            raise ContractError("projection contract baseline flags must be boolean")
+    install = require_mapping(
+        expectations["installimage_and_cis"],
+        "projection contract installimage/CIS expectations",
+    )
+    require_exact_keys(
+        install,
+        {
+            "installimage_ipv4_only",
+            "cis_ipv4_required",
+            "cis_ipv6_required",
+            "cis_ipv6_disable",
+        },
+        "projection contract installimage/CIS expectations",
+    )
+    for key in (
+        "installimage_ipv4_only",
+        "cis_ipv4_required",
+        "cis_ipv6_required",
+    ):
+        if not isinstance(install[key], bool):
+            raise ContractError("projection contract installimage/CIS flag is invalid")
+    _require_nonempty_string(
+        install["cis_ipv6_disable"], "projection contract CIS IPv6 disable mode"
+    )
+    ethernets = require_mapping(
+        expectations["netplan_ethernets"], "projection contract Netplan ethernets"
+    )
+    if not ethernets:
+        raise ContractError("projection contract requires a public Netplan interface")
+    for name, raw_interface in ethernets.items():
+        _require_nonempty_string(name, "projection contract Netplan interface name")
+        interface = require_mapping(
+            raw_interface, f"projection contract Netplan interface {name}"
+        )
+        require_exact_keys(
+            interface,
+            {
+                "dhcp4",
+                "dhcp6",
+                "accept-ra",
+                "link-local",
+                "addresses",
+                "routes",
+                "nameservers",
+            },
+            f"projection contract Netplan interface {name}",
+        )
+    vlans = require_mapping(
+        expectations["netplan_vlans"], "projection contract Netplan VLANs"
+    )
+    for name, raw_vlan in vlans.items():
+        _require_nonempty_string(name, "projection contract Netplan VLAN name")
+        vlan = require_mapping(raw_vlan, f"projection contract Netplan VLAN {name}")
+        require_exact_keys(
+            vlan,
+            {
+                "id",
+                "link",
+                "addresses",
+                "dhcp6",
+                "accept-ra",
+                "link-local",
+                "mtu",
+                "optional",
+            },
+            f"projection contract Netplan VLAN {name}",
+        )
+    provider_firewall = require_mapping(
+        expectations["provider_firewall"], "projection contract provider firewall"
+    )
+    require_exact_keys(
+        provider_firewall,
+        {"enabled", "admin_ipv4", "filter_ipv6"},
+        "projection contract provider firewall",
+    )
+    if not isinstance(provider_firewall["enabled"], bool) or not isinstance(
+        provider_firewall["filter_ipv6"], bool
+    ):
+        raise ContractError("projection contract provider firewall flags are invalid")
+    try:
+        if ipaddress.ip_address(provider_firewall["admin_ipv4"]).version != 4:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise ContractError(
+            "projection contract provider firewall admin IPv4 is invalid"
+        ) from exc
+    recursively_reject_secret_fields(contract, "projection_contract")
+
+
+def load_projection_contract(
+    policy: dict[str, Any], snapshots: dict[str, Path]
+) -> tuple[dict[str, Any], bytes, dict[str, Any]]:
+    """Load a policy-pinned contract only from an immutable repository snapshot."""
+    descriptor = require_mapping(
+        policy.get("projection_contract"), "policy projection contract"
+    )
+    repository = str(descriptor["repository"])
+    if repository not in snapshots:
+        raise ContractError("projection contract repository snapshot is missing")
+    relative = Path(str(descriptor["path"]))
+    root = snapshots[repository].resolve(strict=True)
+    candidate = (root / relative).resolve(strict=True)
+    if candidate == root or root not in candidate.parents:
+        raise ContractError("projection contract path escapes its repository snapshot")
+    contract_path = require_private_file(candidate, "projection contract")
+    contract, payload = read_json_object(contract_path, "projection contract")
+    digest = sha256_bytes(payload)
+    if digest != descriptor["sha256"]:
+        raise ContractError(
+            "projection contract does not match its policy-pinned digest"
+        )
+    validate_projection_contract(contract)
+    evidence = {
+        "repository": repository,
+        "relative_path": str(relative),
+        "sha256": digest,
+        "schema_version": contract["schema_version"],
+        "contract_id": contract["contract_id"],
+        "source": "POLICY_PINNED_PRIVATE_READ_ONLY_GIT_SNAPSHOT",
+    }
+    return contract, payload, evidence
+
+
+def revalidate_projection_contract(
+    policy: dict[str, Any],
+    snapshots: dict[str, Path],
+    expected_payload: bytes,
+) -> dict[str, Any]:
+    contract, payload, _evidence = load_projection_contract(policy, snapshots)
+    if not hmac.compare_digest(payload, expected_payload):
+        raise ContractError("projection contract changed after its trust boundary")
+    return contract
+
+
 def validate_effective_inventory_access(
-    document: dict[str, Any], *, controller_source_cidr: str, target_ipv4: str
+    document: dict[str, Any],
+    *,
+    controller_source_cidr: str,
+    target_ipv4: str,
+    expectations: dict[str, Any],
 ) -> dict[str, Any]:
     """Project the complete resolved, secret-free access semantics.
 
@@ -4794,46 +5238,28 @@ def validate_effective_inventory_access(
         document.get("host_firewall_management_access"),
         "resolved host-firewall management access",
     )
-    service_specs = {
-        "bootstrap_ssh": {"port": 22, "modes": ["bootstrap"]},
-        "openssh": {"port": 1905, "modes": ["bootstrap", "hardened"]},
-        "dropbear": {"port": 2222, "modes": ["bootstrap", "hardened"]},
-    }
-    if set(management) != set(service_specs) or host_management != management:
+    expected_management = require_mapping(
+        expectations.get("management_services"),
+        "projection contract management services",
+    )
+    if management != expected_management or host_management != expected_management:
         raise ContractError(
             "resolved host-firewall management services do not equal the canonical contract"
         )
-    normalized_management: dict[str, Any] = {}
-    for name, spec in service_specs.items():
+    for name, expected_service in expected_management.items():
         service = require_mapping(management[name], f"management service {name}")
-        require_exact_keys(
-            service,
-            {"port", "modes", "sources_ipv4", "sources_ipv6"},
-            f"management service {name}",
-        )
         sources_ipv4 = require_sequence(
             service["sources_ipv4"], f"management service {name} IPv4 sources"
         )
-        sources_ipv6 = require_sequence(
-            service["sources_ipv6"], f"management service {name} IPv6 sources"
-        )
         if (
-            service["port"] != spec["port"]
-            or service["modes"] != spec["modes"]
+            service != expected_service
             or sources_ipv4 != [approved_controller]
-            or sources_ipv6 != []
+            or service["sources_ipv6"] != []
         ):
             raise ContractError(
                 f"management service {name} is not port-, mode- and source-exact"
             )
         canonical_ipv4_host_cidr(sources_ipv4[0], f"management service {name} source")
-        normalized_management[name] = {
-            "protocol": "tcp",
-            "port": spec["port"],
-            "modes": list(spec["modes"]),
-            "sources_ipv4": list(sources_ipv4),
-            "sources_ipv6": [],
-        }
 
     bootstrap_rules = require_sequence(
         document.get("hetzner_baremetal_robot_firewall_bootstrap_input_rules"),
@@ -4843,30 +5269,35 @@ def validate_effective_inventory_access(
         document.get("hetzner_baremetal_robot_firewall_hardened_input_rules"),
         "provider hardened firewall rules",
     )
-    phase_rules = {"bootstrap": bootstrap_rules, "hardened": hardened_rules}
-    provider_rule_phases = {
-        "bootstrap_ssh": "bootstrap",
-        "openssh": "hardened",
-        "dropbear": "hardened",
+    provider_rules = require_mapping(
+        expectations.get("provider_input_rules"),
+        "projection contract provider input rules",
+    )
+    tang_rules = require_sequence(
+        document.get("hetzner_baremetal_robot_firewall_deferred_tang_input_rules"),
+        "provider deferred Tang rules",
+    )
+    if (
+        bootstrap_rules != provider_rules["bootstrap"]
+        or hardened_rules != provider_rules["hardened"]
+        or tang_rules != provider_rules["tang"]
+    ):
+        raise ContractError("provider input rules differ from the pinned contract")
+    management_ports = {
+        int(service["port"]) for service in expected_management.values()
     }
-    management_ports = {spec["port"] for spec in service_specs.values()}
-    all_management_rules: list[tuple[str, dict[str, Any]]] = []
-    for phase, raw_rules in phase_rules.items():
-        for index, raw_rule in enumerate(raw_rules, start=1):
-            rule = require_mapping(raw_rule, f"provider {phase} rule {index}")
-            try:
-                port = int(str(rule.get("dst_port", "")))
-            except ValueError:
-                continue
-            if port in management_ports:
-                all_management_rules.append((phase, rule))
+    management_rules = [
+        rule
+        for rule in [*bootstrap_rules, *hardened_rules]
+        if str(rule.get("dst_port", "")).isdigit()
+        and int(str(rule["dst_port"])) in management_ports
+    ]
+    normalized_management: dict[str, Any] = {}
     normalized_provider: dict[str, Any] = {}
-    for name, phase in provider_rule_phases.items():
-        port = service_specs[name]["port"]
+    for name, service in expected_management.items():
+        port = int(service["port"])
         matches = [
-            rule
-            for observed_phase, rule in all_management_rules
-            if observed_phase == phase and int(str(rule.get("dst_port"))) == port
+            rule for rule in management_rules if int(str(rule.get("dst_port"))) == port
         ]
         if len(matches) != 1:
             raise ContractError(
@@ -4876,78 +5307,39 @@ def validate_effective_inventory_access(
         source = canonical_ipv4_host_cidr(
             rule.get("src_ip"), f"provider management rule {name} source"
         )
-        if (
-            rule.get("ip_version") != "ipv4"
-            or rule.get("protocol") != "tcp"
-            or rule.get("action") != "accept"
-            or str(rule.get("dst_port")) != str(port)
-            or source != approved_controller
-            or str(rule.get("dst_ip")) != target_ipv4
-        ):
+        if source != approved_controller or str(rule.get("dst_ip")) != target_ipv4:
             raise ContractError(
                 f"provider management rule {name} is not target- and source-exact"
             )
+        normalized_management[name] = {
+            "protocol": rule["protocol"],
+            "port": port,
+            "modes": list(service["modes"]),
+            "sources_ipv4": list(service["sources_ipv4"]),
+            "sources_ipv6": list(service["sources_ipv6"]),
+        }
         normalized_provider[name] = {
-            "protocol": "tcp",
+            "protocol": rule["protocol"],
             "port": port,
             "sources_ipv4": [source],
             "sources_ipv6": [],
         }
-    if len(all_management_rules) != len(provider_rule_phases):
+    if len(management_rules) != len(expected_management):
         raise ContractError("provider firewall contains extra management-port rules")
-    for phase, raw_rules in phase_rules.items():
-        for index, raw_rule in enumerate(raw_rules, start=1):
-            rule = require_mapping(raw_rule, f"provider {phase} rule {index}")
-            try:
-                port = int(str(rule.get("dst_port", "")))
-            except ValueError:
-                port = None
-            if port in management_ports:
-                continue
-            if (
-                rule.get("ip_version") != "ipv4"
-                or rule.get("action") != "accept"
-                or str(rule.get("dst_ip", target_ipv4)) != target_ipv4
-            ):
-                raise ContractError(
-                    f"provider {phase} residual rule {index} is not target-bound"
-                )
-            protocol = rule.get("protocol")
-            if protocol == "tcp":
-                if (
-                    str(rule.get("tcp_flags", "")).lower() != "ack"
-                    or str(rule.get("dst_port")) != "32768-65535"
-                    or rule.get("src_ip") is not None
-                ):
-                    raise ContractError(
-                        "provider firewall contains an unprojected inbound TCP rule"
-                    )
-            elif protocol == "udp":
-                if (
-                    str(rule.get("src_port")) not in {"53", "123"}
-                    or str(rule.get("dst_port")) != "32768-65535"
-                ):
-                    raise ContractError(
-                        "provider firewall contains an unapproved UDP response rule"
-                    )
-            elif protocol != "icmp":
-                raise ContractError(
-                    "provider firewall contains an unapproved residual protocol"
-                )
 
     host_tang = require_mapping(
         document.get("host_firewall_tang_access"), "resolved host-firewall Tang access"
     )
-    require_exact_keys(
-        host_tang,
-        {"port", "sources_ipv4", "sources_ipv6"},
-        "resolved host-firewall Tang access",
+    expected_tang = require_mapping(
+        expectations.get("tang_access"), "projection contract Tang access"
     )
+    if host_tang != expected_tang:
+        raise ContractError(
+            "host-firewall Tang access differs from the pinned contract"
+        )
     host_tang_sources = require_sequence(
         host_tang["sources_ipv4"], "host-firewall Tang IPv4 sources"
     )
-    if host_tang["port"] != 80 or host_tang.get("sources_ipv6") != []:
-        raise ContractError("host-firewall Tang access is not TCP/80 IPv4-only")
     canonical_host_tang_sources = [
         canonical_ipv4_host_cidr(source, "host-firewall Tang source")
         for source in host_tang_sources
@@ -4955,21 +5347,14 @@ def validate_effective_inventory_access(
     if len(canonical_host_tang_sources) != len(set(canonical_host_tang_sources)):
         raise ContractError("host-firewall Tang sources are not unique")
 
-    provider_tang_rules = require_sequence(
-        document.get("hetzner_baremetal_robot_firewall_deferred_tang_input_rules"),
-        "provider deferred Tang rules",
-    )
     provider_tang_sources: list[str] = []
-    for index, raw_rule in enumerate(provider_tang_rules, start=1):
+    for index, raw_rule in enumerate(tang_rules, start=1):
         rule = require_mapping(raw_rule, f"provider Tang rule {index}")
         source = canonical_ipv4_host_cidr(
             rule.get("src_ip"), f"provider Tang rule {index} source"
         )
         if (
-            rule.get("ip_version") != "ipv4"
-            or rule.get("protocol") != "tcp"
-            or rule.get("action") != "accept"
-            or str(rule.get("dst_port")) != "80"
+            str(rule.get("dst_port")) != str(expected_tang["port"])
             or str(rule.get("dst_ip")) != target_ipv4
         ):
             raise ContractError(f"provider Tang rule {index} is not target-exact")
@@ -4989,7 +5374,14 @@ def validate_effective_inventory_access(
         document.get("host_firewall_recovery_source_cidrs"),
         "legacy recovery aggregate sources",
     )
-    if legacy_controller != [] or legacy_recovery != []:
+    expected_legacy = require_mapping(
+        expectations.get("legacy_aggregate_sources"),
+        "projection contract legacy aggregate sources",
+    )
+    if {
+        "controller": legacy_controller,
+        "recovery": legacy_recovery,
+    } != expected_legacy:
         raise ContractError("legacy cross-port aggregate sources must remain empty")
 
     projection = {
@@ -4998,8 +5390,8 @@ def validate_effective_inventory_access(
         "provider_management_rules": normalized_provider,
         "host_firewall_management_services": normalized_management,
         "tang": {
-            "protocol": "tcp",
-            "port": 80,
+            "protocol": tang_rules[0]["protocol"] if tang_rules else "",
+            "port": expected_tang["port"],
             "provider_sources_ipv4": provider_tang_sources,
             "host_sources_ipv4": canonical_host_tang_sources,
             "sources_ipv6": [],
@@ -5014,19 +5406,16 @@ def validate_effective_inventory_access(
 
 
 def validate_inventory_host_firewall_contract(
-    document: dict[str, Any], target: dict[str, Any]
+    document: dict[str, Any], expectations: dict[str, Any]
 ) -> dict[str, Any]:
     """Bind the complete inert, IPv4-only target firewall contract."""
 
-    expected_identity = {
-        "inventory_hostname": target["fqdn"],
-        "public_ipv4": target["public_ipv4"],
-        "management_ipv4": "10.10.30.23",
-        "public_ipv6": "",
-        "management_ipv6": "",
-        "public_interface": "enp4s0",
-        "management_interface": "enp4s0.4091",
-    }
+    expected = require_mapping(
+        expectations.get("host_firewall"), "projection contract host firewall"
+    )
+    expected_identity = require_mapping(
+        expected.get("identity"), "projection contract host-firewall identity"
+    )
     observed_identity = {
         "inventory_hostname": document.get("host_firewall_expected_inventory_hostname"),
         "public_ipv4": document.get("host_firewall_expected_public_ipv4"),
@@ -5039,9 +5428,9 @@ def validate_inventory_host_firewall_contract(
     if observed_identity != expected_identity:
         raise ContractError("inventory host-firewall identity or interface drifted")
     if (
-        document.get("host_firewall_enabled") is not False
-        or document.get("host_firewall_action") != "plan"
-        or document.get("host_firewall_mode") != "bootstrap"
+        document.get("host_firewall_enabled") != expected["enabled"]
+        or document.get("host_firewall_action") != expected["action"]
+        or document.get("host_firewall_mode") != expected["mode"]
     ):
         raise ContractError(
             "committed host-firewall execution must remain inert in bootstrap plan mode"
@@ -5051,43 +5440,45 @@ def validate_inventory_host_firewall_contract(
         document.get("host_firewall_egress_policies"),
         "inventory host-firewall egress policies",
     )
-    if set(policies) != {"bootstrap", "hardened"}:
-        raise ContractError("inventory host-firewall egress modes are not exact")
     policies_sha256 = sha256_bytes(canonical_json_bytes(policies))
-    if policies_sha256 != WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256:
+    if policies_sha256 != expected["egress_policies_sha256"]:
         raise ContractError("inventory host-firewall egress policies have drifted")
     selector = document.get("host_firewall_egress_policy")
-    if selector != WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR:
+    if selector != expected["egress_selector"]:
         raise ContractError(
             "inventory host-firewall egress selector is not exact and fail-closed"
         )
     mode = str(document.get("host_firewall_mode", ""))
+    if mode not in policies:
+        raise ContractError("inventory host-firewall mode has no pinned egress policy")
     selected = require_mapping(
         policies[mode],
         "selected inventory host-firewall egress policy",
     )
-    if (
-        document.get("host_firewall_provider_ipv6_filter_enabled") is not False
-        or document.get("host_firewall_provider_ipv6_filter_evidence_reference")
-        != WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE
-    ):
+    expected_ipv6_filter = require_mapping(
+        expected.get("provider_ipv6_filter"),
+        "projection contract provider IPv6 filter",
+    )
+    if {
+        "verified_enabled": document.get("host_firewall_provider_ipv6_filter_enabled"),
+        "evidence_reference": document.get(
+            "host_firewall_provider_ipv6_filter_evidence_reference"
+        ),
+        "claim_basis": expected_ipv6_filter["claim_basis"],
+    } != expected_ipv6_filter:
         raise ContractError(
             "provider IPv6-filter evidence must remain explicitly pending in inventory"
         )
 
     projection = {
-        "enabled": False,
-        "action": "plan",
-        "mode": "bootstrap",
+        "enabled": expected["enabled"],
+        "action": expected["action"],
+        "mode": expected["mode"],
         "identity": observed_identity,
         "egress_policies": policies,
         "egress_policies_sha256": policies_sha256,
         "selected_egress_policy": selected,
-        "provider_ipv6_filter": {
-            "verified_enabled": False,
-            "evidence_reference": WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE,
-            "claim_basis": "PENDING_EXTERNAL_READBACK",
-        },
+        "provider_ipv6_filter": dict(expected_ipv6_filter),
     }
     recursively_reject_secret_fields(projection, "host_firewall_contract")
     return projection
@@ -5097,7 +5488,23 @@ def validate_inventory_target_projection(
     document: dict[str, Any],
     target: dict[str, Any],
     controller: dict[str, Any],
+    projection_contract: dict[str, Any],
 ) -> dict[str, Any]:
+    validate_projection_contract(projection_contract)
+    if projection_contract["target"] != target:
+        raise ContractError(
+            "projection contract target differs from the signed manifest"
+        )
+    expected_controller = require_mapping(
+        projection_contract["controller"], "projection contract controller"
+    )
+    if expected_controller["source_cidr"] != controller["source_cidr"]:
+        raise ContractError(
+            "projection contract controller differs from the signed manifest"
+        )
+    expectations = require_mapping(
+        projection_contract["expectations"], "projection contract expectations"
+    )
     root_of_trust = require_mapping(
         document.get("hetzner_baremetal_root_of_trust"),
         "inventory root-of-trust contract",
@@ -5123,29 +5530,9 @@ def validate_inventory_target_projection(
     dns_identity = require_mapping(
         document.get("wunderbox_dns_identity"), "inventory DNS identity"
     )
-    expected_dns_identity = {
-        "schema_version": 1,
-        "desired": {
-            "public": {
-                "fqdn": target["fqdn"],
-                "a_records": [target["public_ipv4"]],
-                "ptr_records": [target["fqdn"]],
-                "aaaa_records": [],
-                "cname_records": [],
-            },
-            "management": {
-                "fqdn": "wunderbox01-edge.mgmt.corp.l-it.io",
-                "a_records": ["10.10.30.23"],
-                "aaaa_records": [],
-                "cname_records": [],
-            },
-        },
-        "verification": {
-            "accepted": False,
-            "fresh_readback": False,
-            "evidence_reference": WUNDERBOX_PENDING_DNS_EVIDENCE,
-        },
-    }
+    expected_dns_identity = require_mapping(
+        expectations.get("dns_identity"), "projection contract DNS identity"
+    )
     if dns_identity != expected_dns_identity:
         raise ContractError(
             "inventory DNS/rDNS desired state or fail-closed readback drifted"
@@ -5223,13 +5610,16 @@ def validate_inventory_target_projection(
         document,
         controller_source_cidr=str(controller["source_cidr"]),
         target_ipv4=str(target["public_ipv4"]),
+        expectations=expectations,
     )
-    host_firewall_contract = validate_inventory_host_firewall_contract(document, target)
+    host_firewall_contract = validate_inventory_host_firewall_contract(
+        document, expectations
+    )
     ipv4_only_baseline = require_mapping(
         inventory_contract.get("ipv4_only_baseline"),
         "inventory IPv4-only baseline",
     )
-    if ipv4_only_baseline != IPV4_ONLY_BASELINE:
+    if ipv4_only_baseline != expectations["ipv4_only_baseline"]:
         raise ContractError(
             "inventory IPv4-only decision/evidence baseline has drifted"
         )
@@ -5237,98 +5627,107 @@ def validate_inventory_target_projection(
         document.get("hetzner_installimage_layout"),
         "inventory installimage layout",
     )
-    if (
-        installimage_layout.get("ipv4_only") is not True
-        or document.get("ubtu24cis_ipv4_required") is not True
-        or document.get("ubtu24cis_ipv6_required") is not False
-        or document.get("ubtu24cis_ipv6_disable") != "grub"
-    ):
+    observed_installimage_and_cis = {
+        "installimage_ipv4_only": installimage_layout.get("ipv4_only"),
+        "cis_ipv4_required": document.get("ubtu24cis_ipv4_required"),
+        "cis_ipv6_required": document.get("ubtu24cis_ipv6_required"),
+        "cis_ipv6_disable": document.get("ubtu24cis_ipv6_disable"),
+    }
+    if observed_installimage_and_cis != expectations["installimage_and_cis"]:
         raise ContractError(
             "Installimage and CIS do not implement the accepted IPv4-only baseline"
         )
     netplan_ethernets = require_mapping(
         document.get("netplan_ethernets"), "inventory netplan ethernets"
     )
-    if set(netplan_ethernets) != {"enp4s0"}:
-        raise ContractError("public Netplan interface set is not exact")
-    public_netplan = require_mapping(
-        netplan_ethernets["enp4s0"], "public Netplan interface"
-    )
-    require_exact_keys(
-        public_netplan,
-        {
-            "dhcp4",
-            "dhcp6",
-            "accept-ra",
-            "link-local",
-            "addresses",
-            "routes",
-            "nameservers",
-        },
-        "public Netplan interface",
-    )
-    public_addresses = require_sequence(
-        public_netplan["addresses"], "public Netplan addresses"
-    )
-    routes = require_sequence(public_netplan["routes"], "public Netplan routes")
-    nameservers = require_mapping(
-        public_netplan["nameservers"], "public Netplan nameservers"
-    )
-    require_exact_keys(nameservers, {"addresses"}, "public Netplan nameservers")
-    try:
-        public_interface = ipaddress.ip_interface(public_addresses[0])
-        route = require_mapping(routes[0], "public Netplan default route")
-        resolver_addresses = [
-            ipaddress.ip_address(value)
-            for value in require_sequence(
-                nameservers["addresses"], "public Netplan resolver addresses"
-            )
-        ]
-        gateway = ipaddress.ip_address(route.get("via"))
-    except (IndexError, TypeError, ValueError) as exc:
-        raise ContractError("public Netplan IPv4 fields are invalid") from exc
-    if (
-        public_netplan["dhcp4"] is not False
-        or public_netplan["dhcp6"] is not False
-        or public_netplan["accept-ra"] is not False
-        or public_netplan["link-local"] != []
-        or len(public_addresses) != 1
-        or public_interface.version != 4
-        or str(public_interface.ip) != str(target["public_ipv4"])
-        or len(routes) != 1
-        or route != {"to": "default", "via": str(gateway)}
-        or gateway.version != 4
-        or not resolver_addresses
-        or any(address.version != 4 for address in resolver_addresses)
-    ):
-        raise ContractError(
-            "public Netplan interface is not IPv4-only and target-exact"
+    if netplan_ethernets != expectations["netplan_ethernets"]:
+        raise ContractError("public Netplan interface set is not contract-exact")
+    public_addresses: list[ipaddress.IPv4Interface] = []
+    for interface_name, raw_netplan in netplan_ethernets.items():
+        netplan = require_mapping(
+            raw_netplan, f"public Netplan interface {interface_name}"
         )
+        try:
+            addresses = [
+                ipaddress.ip_interface(value)
+                for value in require_sequence(
+                    netplan["addresses"],
+                    f"public Netplan interface {interface_name} addresses",
+                )
+            ]
+            routes = require_sequence(
+                netplan["routes"], f"public Netplan interface {interface_name} routes"
+            )
+            resolver_addresses = [
+                ipaddress.ip_address(value)
+                for value in require_sequence(
+                    require_mapping(
+                        netplan["nameservers"],
+                        f"public Netplan interface {interface_name} nameservers",
+                    )["addresses"],
+                    f"public Netplan interface {interface_name} resolver addresses",
+                )
+            ]
+            route_gateways = [
+                ipaddress.ip_address(
+                    require_mapping(route, "public Netplan route")["via"]
+                )
+                for route in routes
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError("public Netplan IPv4 fields are invalid") from exc
+        if (
+            netplan["dhcp6"] is not False
+            or netplan["accept-ra"] is not False
+            or netplan["link-local"] != []
+            or not addresses
+            or any(address.version != 4 for address in addresses)
+            or not resolver_addresses
+            or any(address.version != 4 for address in resolver_addresses)
+            or any(gateway.version != 4 for gateway in route_gateways)
+        ):
+            raise ContractError("public Netplan interfaces must remain IPv4-only")
+        public_addresses.extend(addresses)
+    if [str(address.ip) for address in public_addresses].count(
+        str(target["public_ipv4"])
+    ) != 1:
+        raise ContractError("public Netplan addresses do not bind the signed target")
     netplan_vlans = require_mapping(
         document.get("netplan_vlans"), "inventory netplan VLANs"
     )
-    if netplan_vlans != {
-        "enp4s0.4091": {
-            "id": 4091,
-            "link": "enp4s0",
-            "addresses": ["10.10.30.23/24"],
-            "dhcp6": False,
-            "accept-ra": False,
-            "link-local": [],
-            "mtu": 1400,
-            "optional": True,
-        }
-    }:
+    if netplan_vlans != expectations["netplan_vlans"]:
         raise ContractError("management Netplan VLAN is not IPv4-only and target-exact")
+    for vlan_name, raw_vlan in netplan_vlans.items():
+        vlan = require_mapping(raw_vlan, f"management Netplan VLAN {vlan_name}")
+        try:
+            vlan_addresses = [
+                ipaddress.ip_interface(value)
+                for value in require_sequence(
+                    vlan["addresses"], f"management Netplan VLAN {vlan_name} addresses"
+                )
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError(
+                "management Netplan VLAN addresses are invalid"
+            ) from exc
+        if (
+            vlan["dhcp6"] is not False
+            or vlan["accept-ra"] is not False
+            or vlan["link-local"] != []
+            or not vlan_addresses
+            or any(address.version != 4 for address in vlan_addresses)
+        ):
+            raise ContractError("management Netplan VLAN must remain IPv4-only")
     provider_firewall = require_mapping(
         document.get("hetzner_baremetal_robot_firewall"),
         "inventory provider firewall",
     )
-    if (
-        provider_firewall.get("enabled") is not True
-        or provider_firewall.get("admin_ipv4") != "153.53.58.197"
-        or provider_firewall.get("filter_ipv6") is not True
-    ):
+    observed_provider_firewall = {
+        "enabled": provider_firewall.get("enabled"),
+        "admin_ipv4": provider_firewall.get("admin_ipv4"),
+        "filter_ipv6": provider_firewall.get("filter_ipv6"),
+    }
+    if observed_provider_firewall != expectations["provider_firewall"]:
         raise ContractError(
             "provider IPv4-only desired firewall configuration is not enabled"
         )
@@ -5596,9 +5995,27 @@ def main(argv: list[str] | None = None) -> int:
         snapshots, snapshot_evidence = create_repository_snapshots(
             repository_states, runtime_root
         )
+        (
+            projection_contract,
+            projection_contract_payload,
+            projection_contract_evidence,
+        ) = load_projection_contract(policy, snapshots)
+        for policy_action_id, policy_action in policy["actions"].items():
+            if (
+                policy_action.get("mode") == "inventory_projection"
+                and policy_action.get("projection_paths")
+                != projection_contract["projection_paths"]
+            ):
+                raise ContractError(
+                    f"action {policy_action_id} projection paths differ from the "
+                    "policy-pinned private contract"
+                )
         verify_external_anchor_sources(trust, snapshots)
         verified_claims.append(
             "execution inputs were materialized from tracked Git objects as private read-only snapshots and matched the installed root-owned recorder, launcher and policy anchors"
+        )
+        verified_claims.append(
+            "environment-specific projection expectations were loaded from a policy-pinned private read-only Git snapshot and matched its exact SHA-256"
         )
         governed_input_directory = runtime_root / "governed-input"
         governed_input_directory.mkdir(mode=0o700)
@@ -5715,6 +6132,7 @@ def main(argv: list[str] | None = None) -> int:
                 "sha256": sha256_bytes(manifest_payload),
                 "signature_verified": True,
             },
+            "projection_contract": projection_contract_evidence,
             "repository_sources": repository_states,
             "repository_snapshots": snapshot_evidence,
             "runtime": {
@@ -5823,7 +6241,12 @@ def main(argv: list[str] | None = None) -> int:
                 "pre-live inventory projection",
             )
             pre_live_projection = validate_inventory_target_projection(
-                pre_live_document, manifest["target"], manifest["controller"]
+                pre_live_document,
+                manifest["target"],
+                manifest["controller"],
+                revalidate_projection_contract(
+                    policy, snapshots, projection_contract_payload
+                ),
             )
             pre_live_artifact = write_artifact(
                 evidence_dir
@@ -5892,7 +6315,12 @@ def main(argv: list[str] | None = None) -> int:
                 "inventory host document",
             )
             projection = validate_inventory_target_projection(
-                inventory_document, manifest["target"], manifest["controller"]
+                inventory_document,
+                manifest["target"],
+                manifest["controller"],
+                revalidate_projection_contract(
+                    policy, snapshots, projection_contract_payload
+                ),
             )
             produced_artifact = write_artifact(
                 evidence_dir / f"{execution_id.lower()}.inventory-projection.json",
@@ -5941,6 +6369,7 @@ def main(argv: list[str] | None = None) -> int:
                 "every consumer approval claim was read back from the root-brokered append-only replay store"
             )
         verify_repository_snapshots(snapshots, snapshot_evidence)
+        revalidate_projection_contract(policy, snapshots, projection_contract_payload)
         final_attestation, final_attestation_payload = (
             load_and_verify_runtime_attestation(
                 manifest,
