@@ -17,19 +17,65 @@ inventory variables.
   Nessus CaC, Forgejo CaC, Keycloak CaC, and Nexus initial
   config.
 
-## Run
+## Orchestration Safety Boundary
 
-```bash
-ansible-playbook -i inventory.yml \
-  ansible/runbooks/50-applications/wunderbox/10-deploy.yml
+Every runbook requires an exact `--limit` equal to the one inventory FQDN.
+Patterns, groups, and multi-host selections are refused. The connected host,
+the Ansible destination, and a runtime target confirmation must all match the
+inventory-declared target ID, FQDN, IPv4 address, and provider ID.
+
+The public inventory contract is:
+
+```yaml
+wunderbox_orchestration:
+  schema_version: 1
+  enabled: false
+  target:
+    id: asset-placeholder
+    fqdn: wunderbox.example.invalid
+    ipv4: 192.0.2.10
+    provider_id: provider-resource-placeholder
+  gate:
+    id: change-gate-placeholder
+    required_status: approved
+  approval_tokens:
+    prepare_sha256: disabled
+    deploy_sha256: disabled
+    retirement_sha256: disabled
+  retirement:
+    allowed: false
 ```
+
+`wunderbox_request_target` is a runtime-only mapping with the same four target
+fields. It must be injected at higher precedence for every invocation; do not
+copy it into the expected inventory contract. A productive run additionally
+requires `wunderbox_orchestration_action: apply`, a runtime-only
+`wunderbox_request_gate` containing `id` and `observed_status`, and the matching
+phase approval token. The inventory stores only the expected lowercase SHA-256
+digest, never the supplied token.
+
+The default action is `plan`. Both plan action and Ansible check mode run the
+identity guard and deployment preflight, then end before any preparation,
+deployment, or retirement role. Check mode is therefore a safety preflight,
+not a simulated change report from the composed roles.
 
 ## Runbooks
 
-- `05-prepare.yml`: prepare optional repos and firewall policy.
-- `07-preflight.yml`: validate service inventory and guarded DHCP enablement.
-- `10-deploy.yml`: deploy and configure the full Wunderbox stack.
-- `20-ops.yml`: inspect Wunderbox runtime status.
+- `05-prepare.yml`: plan or apply optional repos and firewall policy; apply
+  requires the prepare approval.
+- `07-preflight.yml`: read-only target, service inventory, runtime, and guarded
+  DHCP validation.
+- `10-deploy.yml`: always import `07-preflight.yml` before the guarded deploy
+  play; apply requires the deploy approval.
+- `20-ops.yml`: inspect Wunderbox runtime status without changing it.
+
+Semaphore retirement is disabled unless all of these conditions hold:
+
+- the service is disabled in inventory;
+- `wunderbox_orchestration.retirement.allowed` is explicitly `true`;
+- the runtime-only `wunderbox_retirement_requested` value is the Boolean
+  `true` during a non-check deploy apply; and
+- the separate retirement approval token matches its inventory hash.
 
 Enable services through inventory:
 
@@ -84,11 +130,9 @@ At the end of the playbook, the `wunderbox_verify` tag checks enabled HTTP
 endpoints from the control node. Current checks cover CoreDNS, NGINX, Vault,
 MinIO, Nexus, Nessus, Forgejo, Keycloak, Grafana, and Checkmk.
 
-```bash
-ansible-playbook -i inventory.yml \
-  ansible/runbooks/50-applications/wunderbox/10-deploy.yml \
-  --tags wunderbox_verify
-```
+Tag selection does not bypass the imported deployment preflight. Endpoint-only
+verification through the deploy runbook remains behind the same exact target
+and deployment approval boundary.
 
 DHCP is guarded by explicit production validation variables because it depends
 on L2/broadcast behavior. Keep DHCP disabled until network validation evidence
