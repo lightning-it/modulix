@@ -217,6 +217,19 @@ INVENTORY_PROJECTION_PATHS = [
     "hostname_fqdn",
     "hostname_etc_hosts_ip",
     "hetzner_robot_server_number",
+    "wunderbox_dns_identity.schema_version",
+    "wunderbox_dns_identity.desired.public.fqdn",
+    "wunderbox_dns_identity.desired.public.a_records",
+    "wunderbox_dns_identity.desired.public.ptr_records",
+    "wunderbox_dns_identity.desired.public.aaaa_records",
+    "wunderbox_dns_identity.desired.public.cname_records",
+    "wunderbox_dns_identity.desired.management.fqdn",
+    "wunderbox_dns_identity.desired.management.a_records",
+    "wunderbox_dns_identity.desired.management.aaaa_records",
+    "wunderbox_dns_identity.desired.management.cname_records",
+    "wunderbox_dns_identity.verification.accepted",
+    "wunderbox_dns_identity.verification.fresh_readback",
+    "wunderbox_dns_identity.verification.evidence_reference",
     "hetzner_baremetal_root_of_trust.schema_version",
     "hetzner_baremetal_root_of_trust.selection_scope",
     "hetzner_baremetal_root_of_trust.inventory_hostname",
@@ -224,20 +237,36 @@ INVENTORY_PROJECTION_PATHS = [
     "hetzner_baremetal_root_of_trust.server_lifecycle.status",
     "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled",
     "wunderbox_inventory_contract.controller_access.management_services",
+    "host_firewall_enabled",
+    "host_firewall_action",
+    "host_firewall_mode",
+    "host_firewall_expected_inventory_hostname",
+    "host_firewall_expected_public_ipv4",
+    "host_firewall_expected_management_ipv4",
+    "host_firewall_expected_public_ipv6",
+    "host_firewall_expected_management_ipv6",
+    "host_firewall_public_interface",
+    "host_firewall_management_interface",
     "host_firewall_management_access",
     "host_firewall_tang_access",
     "host_firewall_controller_source_cidrs",
     "host_firewall_recovery_source_cidrs",
+    "host_firewall_egress_policies",
+    "host_firewall_egress_policy",
+    "host_firewall_provider_ipv6_filter_enabled",
+    "host_firewall_provider_ipv6_filter_evidence_reference",
     "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
     "hetzner_baremetal_robot_firewall_hardened_input_rules",
     "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
     "hetzner_installimage_layout.ipv4_only",
+    "ubtu24cis_ipv4_required",
     "ubtu24cis_ipv6_required",
     "ubtu24cis_ipv6_disable",
     "netplan_ethernets",
     "netplan_vlans",
     "wunderbox_inventory_contract.ipv4_only_baseline",
     "hetzner_baremetal_robot_firewall.enabled",
+    "hetzner_baremetal_robot_firewall.admin_ipv4",
     "hetzner_baremetal_robot_firewall.filter_ipv6",
 ]
 IPV4_ONLY_BASELINE = {
@@ -247,6 +276,7 @@ IPV4_ONLY_BASELINE = {
         "49d045cf2e1d11180209e87ab8e1e3a78bcaf5b1df63415c87008ac409b68d88"
     ),
     "installimage_ipv4_only": True,
+    "cis_ipv4_required": True,
     "cis_ipv6_required": False,
     "cis_ipv6_disable": "grub",
     "kernel_ipv6_disabled": True,
@@ -259,12 +289,24 @@ IPV4_ONLY_BASELINE = {
     },
     "dns": {"aaaa_records": []},
     "provider": {
-        "filter_enabled": True,
+        "required_filter_enabled": True,
         "ipv6_rules": [],
         "assigned_prefix": "2a01:4f8:212:69e::/64",
         "assignment_state": "assigned-but-unconfigured",
     },
 }
+WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256 = (
+    "c3fb79396d3e704ffabc53d392868fb2bb4809621b80537c0399664be36a81a4"
+)
+WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE = (
+    "PENDING - fresh recorder-bound provider IPv6-filter readback required"
+)
+WUNDERBOX_PENDING_DNS_EVIDENCE = (
+    "PENDING - fresh DNS and provider rDNS readback required"
+)
+WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR = (
+    "{{ host_firewall_egress_policies[host_firewall_mode] }}"
+)
 COLLECTION_PROVENANCE_KEYS = {
     "fqcn",
     "version",
@@ -4971,6 +5013,86 @@ def validate_effective_inventory_access(
     return projection
 
 
+def validate_inventory_host_firewall_contract(
+    document: dict[str, Any], target: dict[str, Any]
+) -> dict[str, Any]:
+    """Bind the complete inert, IPv4-only target firewall contract."""
+
+    expected_identity = {
+        "inventory_hostname": target["fqdn"],
+        "public_ipv4": target["public_ipv4"],
+        "management_ipv4": "10.10.30.23",
+        "public_ipv6": "",
+        "management_ipv6": "",
+        "public_interface": "enp4s0",
+        "management_interface": "enp4s0.4091",
+    }
+    observed_identity = {
+        "inventory_hostname": document.get("host_firewall_expected_inventory_hostname"),
+        "public_ipv4": document.get("host_firewall_expected_public_ipv4"),
+        "management_ipv4": document.get("host_firewall_expected_management_ipv4"),
+        "public_ipv6": document.get("host_firewall_expected_public_ipv6"),
+        "management_ipv6": document.get("host_firewall_expected_management_ipv6"),
+        "public_interface": document.get("host_firewall_public_interface"),
+        "management_interface": document.get("host_firewall_management_interface"),
+    }
+    if observed_identity != expected_identity:
+        raise ContractError("inventory host-firewall identity or interface drifted")
+    if (
+        document.get("host_firewall_enabled") is not False
+        or document.get("host_firewall_action") != "plan"
+        or document.get("host_firewall_mode") != "bootstrap"
+    ):
+        raise ContractError(
+            "committed host-firewall execution must remain inert in bootstrap plan mode"
+        )
+
+    policies = require_mapping(
+        document.get("host_firewall_egress_policies"),
+        "inventory host-firewall egress policies",
+    )
+    if set(policies) != {"bootstrap", "hardened"}:
+        raise ContractError("inventory host-firewall egress modes are not exact")
+    policies_sha256 = sha256_bytes(canonical_json_bytes(policies))
+    if policies_sha256 != WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256:
+        raise ContractError("inventory host-firewall egress policies have drifted")
+    selector = document.get("host_firewall_egress_policy")
+    if selector != WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR:
+        raise ContractError(
+            "inventory host-firewall egress selector is not exact and fail-closed"
+        )
+    mode = str(document.get("host_firewall_mode", ""))
+    selected = require_mapping(
+        policies[mode],
+        "selected inventory host-firewall egress policy",
+    )
+    if (
+        document.get("host_firewall_provider_ipv6_filter_enabled") is not False
+        or document.get("host_firewall_provider_ipv6_filter_evidence_reference")
+        != WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE
+    ):
+        raise ContractError(
+            "provider IPv6-filter evidence must remain explicitly pending in inventory"
+        )
+
+    projection = {
+        "enabled": False,
+        "action": "plan",
+        "mode": "bootstrap",
+        "identity": observed_identity,
+        "egress_policies": policies,
+        "egress_policies_sha256": policies_sha256,
+        "selected_egress_policy": selected,
+        "provider_ipv6_filter": {
+            "verified_enabled": False,
+            "evidence_reference": WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE,
+            "claim_basis": "PENDING_EXTERNAL_READBACK",
+        },
+    }
+    recursively_reject_secret_fields(projection, "host_firewall_contract")
+    return projection
+
+
 def validate_inventory_target_projection(
     document: dict[str, Any],
     target: dict[str, Any],
@@ -4998,6 +5120,36 @@ def validate_inventory_target_projection(
     orchestration_target = require_mapping(
         orchestration.get("target"), "inventory orchestration target"
     )
+    dns_identity = require_mapping(
+        document.get("wunderbox_dns_identity"), "inventory DNS identity"
+    )
+    expected_dns_identity = {
+        "schema_version": 1,
+        "desired": {
+            "public": {
+                "fqdn": target["fqdn"],
+                "a_records": [target["public_ipv4"]],
+                "ptr_records": [target["fqdn"]],
+                "aaaa_records": [],
+                "cname_records": [],
+            },
+            "management": {
+                "fqdn": "wunderbox01-edge.mgmt.corp.l-it.io",
+                "a_records": ["10.10.30.23"],
+                "aaaa_records": [],
+                "cname_records": [],
+            },
+        },
+        "verification": {
+            "accepted": False,
+            "fresh_readback": False,
+            "evidence_reference": WUNDERBOX_PENDING_DNS_EVIDENCE,
+        },
+    }
+    if dns_identity != expected_dns_identity:
+        raise ContractError(
+            "inventory DNS/rDNS desired state or fail-closed readback drifted"
+        )
     observed = {
         "inventory_hostname": target["fqdn"],
         "ansible_host": str(document.get("ansible_host", "")),
@@ -5024,6 +5176,7 @@ def validate_inventory_target_projection(
             "lifecycle_status": str(lifecycle.get("status", "")),
             "cancelled": lifecycle.get("cancelled"),
         },
+        "dns_identity": dns_identity,
     }
     expected_fqdn = target["fqdn"]
     expected_ipv4 = target["public_ipv4"]
@@ -5071,6 +5224,7 @@ def validate_inventory_target_projection(
         controller_source_cidr=str(controller["source_cidr"]),
         target_ipv4=str(target["public_ipv4"]),
     )
+    host_firewall_contract = validate_inventory_host_firewall_contract(document, target)
     ipv4_only_baseline = require_mapping(
         inventory_contract.get("ipv4_only_baseline"),
         "inventory IPv4-only baseline",
@@ -5085,6 +5239,7 @@ def validate_inventory_target_projection(
     )
     if (
         installimage_layout.get("ipv4_only") is not True
+        or document.get("ubtu24cis_ipv4_required") is not True
         or document.get("ubtu24cis_ipv6_required") is not False
         or document.get("ubtu24cis_ipv6_disable") != "grub"
     ):
@@ -5171,9 +5326,12 @@ def validate_inventory_target_projection(
     )
     if (
         provider_firewall.get("enabled") is not True
+        or provider_firewall.get("admin_ipv4") != "153.53.58.197"
         or provider_firewall.get("filter_ipv6") is not True
     ):
-        raise ContractError("provider IPv4-only filter is not active")
+        raise ContractError(
+            "provider IPv4-only desired firewall configuration is not enabled"
+        )
     provider_input_rules = [
         *require_sequence(
             document.get("hetzner_baremetal_robot_firewall_bootstrap_input_rules"),
@@ -5199,6 +5357,7 @@ def validate_inventory_target_projection(
         "controller": {"source_cidr": controller["source_cidr"]},
         "observed": observed,
         "effective_access": effective_access,
+        "host_firewall_contract": host_firewall_contract,
         "ipv4_only_baseline": ipv4_only_baseline,
     }
     recursively_reject_secret_fields(projection, "inventory_projection")

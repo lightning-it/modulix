@@ -27,6 +27,169 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def sample_host_firewall_egress_policies() -> dict:
+    def common_functions() -> dict:
+        return {
+            "dns_udp": {
+                "enabled": True,
+                "status": "approved",
+                "protocol": "udp",
+                "port": 53,
+                "modes": ["bootstrap", "hardened"],
+                "interface": "enp4s0",
+                "destinations_ipv4": ["1.1.1.1/32", "8.8.8.8/32"],
+                "destinations_ipv6": [],
+                "declared_fqdns": [],
+                "mtls_required": False,
+                "residual": "",
+            },
+            "dns_tcp": {
+                "enabled": True,
+                "status": "approved",
+                "protocol": "tcp",
+                "port": 53,
+                "modes": ["bootstrap", "hardened"],
+                "interface": "enp4s0",
+                "destinations_ipv4": ["1.1.1.1/32", "8.8.8.8/32"],
+                "destinations_ipv6": [],
+                "declared_fqdns": [],
+                "mtls_required": False,
+                "residual": "",
+            },
+            "ntp": {
+                "enabled": True,
+                "status": "transitional-port-only",
+                "protocol": "udp",
+                "port": 123,
+                "modes": ["bootstrap", "hardened"],
+                "interface": "enp4s0",
+                "destinations_ipv4": ["0.0.0.0/0"],
+                "destinations_ipv6": [],
+                "declared_fqdns": [
+                    "ntp1.hetzner.de",
+                    "ntp2.hetzner.com",
+                    "ntp3.hetzner.net",
+                ],
+                "mtls_required": False,
+                "residual": (
+                    "Destination restriction remains open until stable "
+                    "resolver-bound NTP addresses exist."
+                ),
+            },
+            "atlas_loki": {
+                "enabled": True,
+                "status": "approved",
+                "protocol": "tcp",
+                "port": 3100,
+                "modes": ["bootstrap", "hardened"],
+                "interface": "enp4s0.4091",
+                "destinations_ipv4": ["10.10.30.24/32"],
+                "destinations_ipv6": [],
+                "declared_fqdns": [],
+                "mtls_required": True,
+                "residual": (
+                    "mTLS identity and trust evidence are validated outside nftables."
+                ),
+            },
+        }
+
+    bootstrap_functions = common_functions()
+    bootstrap_functions.update(
+        {
+            "bootstrap_https": {
+                "enabled": True,
+                "status": "temporary-maintenance",
+                "protocol": "tcp",
+                "port": 443,
+                "modes": ["bootstrap"],
+                "interface": "enp4s0",
+                "destinations_ipv4": ["0.0.0.0/0"],
+                "destinations_ipv6": [],
+                "declared_fqdns": [],
+                "mtls_required": False,
+                "residual": (
+                    "Temporary package bootstrap exception; productive "
+                    "confirmation is prohibited."
+                ),
+            },
+            "https_proxy": {
+                "enabled": False,
+                "status": "disabled-staged-transfer",
+                "protocol": "tcp",
+                "port": 3128,
+                "modes": ["hardened"],
+                "interface": "enp4s0.4091",
+                "destinations_ipv4": [],
+                "destinations_ipv6": [],
+                "declared_fqdns": [
+                    "mirror.hetzner.com",
+                    "fsn1.your-objectstorage.com",
+                    "bucket.fsn1.your-objectstorage.com",
+                ],
+                "mtls_required": False,
+                "residual": (
+                    "Controller-pull and staged transfer remain authoritative "
+                    "while the management proxy is disabled."
+                ),
+            },
+        }
+    )
+    hardened_functions = common_functions()
+    hardened_functions.update(
+        {
+            "bootstrap_https": {
+                "enabled": False,
+                "status": "disabled-staged-transfer",
+                "protocol": "tcp",
+                "port": 443,
+                "modes": ["bootstrap"],
+                "interface": "enp4s0",
+                "destinations_ipv4": [],
+                "destinations_ipv6": [],
+                "declared_fqdns": [],
+                "mtls_required": False,
+                "residual": "Bootstrap HTTPS is closed before productive confirmation.",
+            },
+            "https_proxy": {
+                "enabled": False,
+                "status": "disabled-staged-transfer",
+                "protocol": "tcp",
+                "port": 3128,
+                "modes": ["hardened"],
+                "interface": "enp4s0.4091",
+                "destinations_ipv4": [],
+                "destinations_ipv6": [],
+                "declared_fqdns": [
+                    "mirror.hetzner.com",
+                    "fsn1.your-objectstorage.com",
+                    "bucket.fsn1.your-objectstorage.com",
+                ],
+                "mtls_required": False,
+                "residual": (
+                    "Controller-pull and staged transfer remain authoritative "
+                    "while the management proxy is disabled."
+                ),
+            },
+        }
+    )
+    return {
+        "bootstrap": {
+            "schema": "lit.host_firewall.egress/v1",
+            "status": "draft",
+            "stance": "bootstrap-restricted",
+            "ipv4_only": True,
+            "functions": bootstrap_functions,
+        },
+        "hardened": {
+            "schema": "lit.host_firewall.egress/v1",
+            "status": "approved",
+            "stance": "deny-by-default",
+            "ipv4_only": True,
+            "functions": hardened_functions,
+        },
+    }
+
+
 def sample_policy() -> dict:
     return {
         "schema_version": 2,
@@ -1587,11 +1750,39 @@ class GovernedRecorderTests(unittest.TestCase):
                 "action": "accept",
             }
 
+        egress_policies = sample_host_firewall_egress_policies()
+        self.assertEqual(
+            MODULE.sha256_bytes(MODULE.canonical_json_bytes(egress_policies)),
+            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256,
+        )
         document = {
             "ansible_host": target["public_ipv4"],
             "hostname_fqdn": target["fqdn"],
             "hostname_etc_hosts_ip": target["public_ipv4"],
             "hetzner_robot_server_number": target["provider_id"],
+            "wunderbox_dns_identity": {
+                "schema_version": 1,
+                "desired": {
+                    "public": {
+                        "fqdn": target["fqdn"],
+                        "a_records": [target["public_ipv4"]],
+                        "ptr_records": [target["fqdn"]],
+                        "aaaa_records": [],
+                        "cname_records": [],
+                    },
+                    "management": {
+                        "fqdn": "wunderbox01-edge.mgmt.corp.l-it.io",
+                        "a_records": ["10.10.30.23"],
+                        "aaaa_records": [],
+                        "cname_records": [],
+                    },
+                },
+                "verification": {
+                    "accepted": False,
+                    "fresh_readback": False,
+                    "evidence_reference": MODULE.WUNDERBOX_PENDING_DNS_EVIDENCE,
+                },
+            },
             "wunderbox_inventory_contract": {
                 "target_id": target["target_id"],
                 "provider": {"server_id": target["provider_id"]},
@@ -1604,6 +1795,16 @@ class GovernedRecorderTests(unittest.TestCase):
                     "management_services": management_services,
                 },
             },
+            "host_firewall_enabled": False,
+            "host_firewall_action": "plan",
+            "host_firewall_mode": "bootstrap",
+            "host_firewall_expected_inventory_hostname": target["fqdn"],
+            "host_firewall_expected_public_ipv4": target["public_ipv4"],
+            "host_firewall_expected_management_ipv4": "10.10.30.23",
+            "host_firewall_expected_public_ipv6": "",
+            "host_firewall_expected_management_ipv6": "",
+            "host_firewall_public_interface": "enp4s0",
+            "host_firewall_management_interface": "enp4s0.4091",
             "host_firewall_management_access": management_services,
             "host_firewall_controller_source_cidrs": [],
             "host_firewall_recovery_source_cidrs": [],
@@ -1612,6 +1813,14 @@ class GovernedRecorderTests(unittest.TestCase):
                 "sources_ipv4": tang_sources,
                 "sources_ipv6": [],
             },
+            "host_firewall_egress_policies": egress_policies,
+            "host_firewall_egress_policy": (
+                MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR
+            ),
+            "host_firewall_provider_ipv6_filter_enabled": False,
+            "host_firewall_provider_ipv6_filter_evidence_reference": (
+                MODULE.WUNDERBOX_PENDING_PROVIDER_IPV6_EVIDENCE
+            ),
             "hetzner_baremetal_robot_firewall_bootstrap_input_rules": [
                 provider_rule(22, controller["source_cidr"], "bootstrap SSH")
             ],
@@ -1630,6 +1839,7 @@ class GovernedRecorderTests(unittest.TestCase):
                 for index, source in enumerate(tang_sources, start=1)
             ],
             "hetzner_installimage_layout": {"ipv4_only": True},
+            "ubtu24cis_ipv4_required": True,
             "ubtu24cis_ipv6_required": False,
             "ubtu24cis_ipv6_disable": "grub",
             "netplan_ethernets": {
@@ -1657,6 +1867,7 @@ class GovernedRecorderTests(unittest.TestCase):
             },
             "hetzner_baremetal_robot_firewall": {
                 "enabled": True,
+                "admin_ipv4": "153.53.58.197",
                 "filter_ipv6": True,
             },
             "wunderbox_orchestration": {
@@ -1691,6 +1902,49 @@ class GovernedRecorderTests(unittest.TestCase):
         self.assertEqual(
             projection["effective_access"]["tang"]["provider_sources_ipv4"],
             tang_sources,
+        )
+        self.assertEqual(
+            projection["host_firewall_contract"]["egress_policies_sha256"],
+            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_POLICIES_SHA256,
+        )
+        self.assertEqual(
+            projection["host_firewall_contract"]["provider_ipv6_filter"]["claim_basis"],
+            "PENDING_EXTERNAL_READBACK",
+        )
+        document["host_firewall_egress_policy"] = (
+            "{{ host_firewall_egress_policies.get(host_firewall_mode, "
+            "host_firewall_egress_policies.bootstrap) }}"
+        )
+        with self.assertRaisesRegex(MODULE.ContractError, "selector"):
+            MODULE.validate_inventory_target_projection(document, target, controller)
+        document["host_firewall_egress_policy"] = (
+            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR
+        )
+        document["wunderbox_dns_identity"]["verification"] = {
+            "accepted": True,
+            "fresh_readback": False,
+            "evidence_reference": "WBX-EV-002-Supplement",
+        }
+        with self.assertRaisesRegex(MODULE.ContractError, "DNS/rDNS"):
+            MODULE.validate_inventory_target_projection(document, target, controller)
+        document["wunderbox_dns_identity"]["verification"] = {
+            "accepted": False,
+            "fresh_readback": False,
+            "evidence_reference": MODULE.WUNDERBOX_PENDING_DNS_EVIDENCE,
+        }
+        document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "213.232.86.209"
+        with self.assertRaisesRegex(MODULE.ContractError, "IPv4-only"):
+            MODULE.validate_inventory_target_projection(document, target, controller)
+        document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "153.53.58.197"
+        document["host_firewall_egress_policies"]["hardened"]["functions"][
+            "atlas_loki"
+        ]["destinations_ipv4"] = ["10.10.30.99/32"]
+        with self.assertRaisesRegex(MODULE.ContractError, "egress policies"):
+            MODULE.validate_inventory_target_projection(document, target, controller)
+        egress_policies = sample_host_firewall_egress_policies()
+        document["host_firewall_egress_policies"] = egress_policies
+        document["host_firewall_egress_policy"] = (
+            MODULE.WUNDERBOX_HOST_FIREWALL_EGRESS_SELECTOR
         )
         document["wunderbox_orchestration"]["target"]["ipv4"] = "192.0.2.99"
         with self.assertRaisesRegex(MODULE.ContractError, "IPv4"):
