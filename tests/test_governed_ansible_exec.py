@@ -141,12 +141,30 @@ def sample_manifest(policy_digest: str) -> dict:
 
 
 def sample_container_engine() -> dict:
+    anchor = {
+        "transport": "local-root-unix-v1",
+        "uri": "unix:///private/runtime/podman.sock",
+        "socket_path": "/private/runtime/podman.sock",
+        "owner_uid": 0,
+        "owner_gid": 0,
+        "mode": 0o600,
+        "device": 1,
+        "inode": 2,
+    }
     return {
         "kind": "podman",
         "path": "/usr/bin/true",
         "sha256": "7" * 64,
         "backend_uri": "unix:///private/runtime/podman.sock",
         "backend_identity_sha256": "6" * 64,
+        "backend_transport": "local-root-unix-v1",
+        "backend_socket_path": "/private/runtime/podman.sock",
+        "backend_socket_owner_uid": 0,
+        "backend_socket_owner_gid": 0,
+        "backend_socket_mode": 0o600,
+        "backend_socket_device": 1,
+        "backend_socket_inode": 2,
+        "_backend_anchor": anchor,
     }
 
 
@@ -293,37 +311,57 @@ class GovernedRecorderTests(unittest.TestCase):
             executable.chmod(0o500)
             executable = executable.resolve()
             digest = MODULE.sha256_file(executable)
+            receipt = Path(directory) / "receipt.json"
+            receipt_document = {
+                "status": "ACCEPTED",
+                "launcher_sha256": digest,
+                "interpreter_sha256": digest,
+                "recorder_sha256": digest,
+            }
+            receipt.write_text(json.dumps(receipt_document), encoding="utf-8")
+            receipt.chmod(0o400)
             trust = {
+                "_trusted_uids": frozenset({0, os.geteuid()}),
                 "execution_anchor": {
-                    "launcher": {"path": "/trusted/launcher", "sha256": "1" * 64},
+                    "launcher": {"path": str(executable), "sha256": digest},
                     "interpreter": {"path": str(executable), "sha256": digest},
                     "recorder": {"path": str(executable), "sha256": digest},
                     "acceptance_receipt": {
-                        "path": "/trusted/receipt",
-                        "sha256": "2" * 64,
+                        "path": str(receipt.resolve()),
+                        "sha256": MODULE.sha256_file(receipt),
                     },
-                }
+                },
             }
-            evidence = MODULE.validate_execution_anchor_runtime(
-                trust,
-                recorder_path=executable,
-                interpreter_path=executable,
-                isolated=True,
-                safe_path=True,
-                launcher_path="/trusted/launcher",
-                python_environment={},
-            )
-            self.assertEqual(evidence["python_mode"], "ISOLATED_SAFE_PATH")
-            with self.assertRaises(MODULE.ContractError):
-                MODULE.validate_execution_anchor_runtime(
+            recorder_fd = os.open(executable, os.O_RDONLY)
+            launcher_fd = os.open(executable, os.O_RDONLY)
+            receipt_fd = os.open(receipt, os.O_RDONLY)
+            try:
+                evidence = MODULE.validate_execution_anchor_runtime(
                     trust,
-                    recorder_path=executable,
                     interpreter_path=executable,
-                    isolated=False,
+                    isolated=True,
                     safe_path=True,
-                    launcher_path="/trusted/launcher",
+                    launcher_fd=launcher_fd,
+                    recorder_fd=recorder_fd,
+                    receipt_fd=receipt_fd,
                     python_environment={},
                 )
+                self.assertEqual(evidence["python_mode"], "ISOLATED_SAFE_PATH")
+                with self.assertRaises(MODULE.ContractError):
+                    MODULE.validate_execution_anchor_runtime(
+                        trust,
+                        interpreter_path=executable,
+                        isolated=False,
+                        safe_path=True,
+                        launcher_fd=launcher_fd,
+                        recorder_fd=recorder_fd,
+                        receipt_fd=receipt_fd,
+                        python_environment={},
+                    )
+            finally:
+                os.close(receipt_fd)
+                os.close(launcher_fd)
+                os.close(recorder_fd)
 
     def test_external_execution_anchor_must_match_frozen_reviewed_sources(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -376,6 +414,7 @@ class GovernedRecorderTests(unittest.TestCase):
         }
         minimal = MODULE.make_pre_live_environment(environment)
         self.assertEqual(minimal["ANSIBLE_TOOLBOX_MOUNT_INVENTORIES"], "true")
+        self.assertEqual(minimal["ANSIBLE_TOOLBOX_NETWORK_MODE"], "none")
         for forbidden in (
             "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE",
             "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE",
@@ -424,6 +463,25 @@ class GovernedRecorderTests(unittest.TestCase):
         }
         with self.assertRaises(MODULE.ContractError):
             MODULE.validate_policy(policy)
+
+    def test_policy_and_manifest_nested_contracts_are_closed(self):
+        policy = sample_policy()
+        policy["target_contract"]["unexpected"] = True
+        with self.assertRaisesRegex(MODULE.ContractError, "exact-key schema"):
+            MODULE.validate_policy(policy)
+
+        policy = sample_policy()
+        policy["actions"]["target_plan"]["unexpected"] = True
+        with self.assertRaisesRegex(MODULE.ContractError, "closed schema"):
+            MODULE.validate_policy(policy)
+
+        policy = sample_policy()
+        MODULE.validate_policy(policy)
+        payload = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
+        manifest = sample_manifest(MODULE.sha256_bytes(payload))
+        manifest["repositories"]["automation"]["unexpected"] = True
+        with self.assertRaisesRegex(MODULE.ContractError, "exact-key schema"):
+            MODULE.validate_manifest(manifest, policy, MODULE.sha256_bytes(payload))
 
     def test_payload_launcher_is_recorded_by_exact_path_and_digest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -715,10 +773,25 @@ class GovernedRecorderTests(unittest.TestCase):
             MODULE._claim_local_approval_marker_for_test(
                 consumers["onepassword_approval"], now
             )
-            claims = MODULE.verify_consumer_claims(consumers)
-            self.assertEqual(
-                claims[0]["claim_status"], "CLAIMED_BY_FOUNDATIONAL_CONSUMER"
-            )
+            consumer_claim = {
+                "store_id": "test-root-store",
+                "approval_digest": consumers["onepassword_approval"]["approval_digest"],
+                "replay_digest": consumers["onepassword_approval"]["replay_digest"],
+            }
+            with mock.patch.object(
+                MODULE,
+                "invoke_replay_broker",
+                return_value=consumer_claim,
+            ):
+                claims = MODULE.verify_consumer_claims(
+                    consumers,
+                    {
+                        "path": "/trusted/replay-broker",
+                        "store_id": "test-root-store",
+                    },
+                    {"onepassword_approval": consumer_claim},
+                )
+            self.assertEqual(claims[0]["claim_status"], "ROOT_BROKER_CLAIM_VERIFIED")
 
             execution_marker = Path(execution["_marker"])
             execution_marker.write_text("{}", encoding="utf-8")
@@ -872,9 +945,12 @@ class GovernedRecorderTests(unittest.TestCase):
                 "interpreter_sha256": executable_sha256,
                 "recorder_sha256": executable_sha256,
                 "replay_broker_sha256": executable_sha256,
+                "process_supervisor_sha256": executable_sha256,
                 "container_engine_sha256": executable_sha256,
                 "negative_replay_test": True,
                 "controller_readback_test": True,
+                "escaped_descendant_test": True,
+                "bounded_output_test": True,
             }
             receipt_path = root / "execution-anchor-receipt.json"
             receipt_path.write_text(
@@ -905,11 +981,24 @@ class GovernedRecorderTests(unittest.TestCase):
                     **executable_pin,
                     "store_id": "test-append-only-store",
                 },
+                "process_supervisor": {
+                    "kind": "root-brokered-process-domain-v1",
+                    **executable_pin,
+                    "backend": "launchd-job",
+                    "profile_id": "test-process-domain",
+                },
                 "container_engine": {
                     "kind": "podman",
                     **executable_pin,
                     "backend_uri": "unix:///private/runtime/podman.sock",
                     "backend_identity_sha256": "6" * 64,
+                    "backend_transport": "local-root-unix-v1",
+                    "backend_socket_path": "/private/runtime/podman.sock",
+                    "backend_socket_owner_uid": 0,
+                    "backend_socket_owner_gid": 0,
+                    "backend_socket_mode": 0o600,
+                    "backend_socket_device": 1,
+                    "backend_socket_inode": 2,
                 },
                 "manifest_signature": signature_trust,
                 "runtime_attestation_signature": signature_trust,
@@ -922,13 +1011,24 @@ class GovernedRecorderTests(unittest.TestCase):
                 json.dumps(descriptor, sort_keys=True), encoding="utf-8"
             )
             descriptor_path.chmod(0o400)
-            loaded, policy, observed_payload = MODULE.load_controller_trust(
-                descriptor_path.resolve(), trusted_uids={0, os.geteuid()}
-            )
+            backend_anchor = sample_container_engine()["_backend_anchor"]
+            with mock.patch.object(
+                MODULE,
+                "validate_container_backend_anchor",
+                return_value=backend_anchor,
+            ):
+                loaded, policy, observed_payload = MODULE.load_controller_trust(
+                    descriptor_path.resolve(), trusted_uids={0, os.geteuid()}
+                )
             self.assertEqual(policy, sample_policy())
             self.assertEqual(observed_payload, policy_payload)
             self.assertEqual(loaded["_descriptor_path"], str(descriptor_path.resolve()))
-            MODULE.revalidate_controller_trust(loaded)
+            with mock.patch.object(
+                MODULE,
+                "validate_container_backend_anchor",
+                return_value=backend_anchor,
+            ):
+                MODULE.revalidate_controller_trust(loaded)
 
             descriptor["unexpected"] = True
             descriptor_path.chmod(0o600)
@@ -1121,6 +1221,35 @@ class GovernedRecorderTests(unittest.TestCase):
                 ],
                 check=True,
             )
+            with self.assertRaisesRegex(
+                MODULE.ContractError, "forbidden key core.attributesfile"
+            ):
+                MODULE.collect_repository_state("automation", repo, expected)
+            subprocess.run(
+                [git, "-C", str(repo), "config", "--unset", "core.attributesFile"],
+                check=True,
+            )
+
+            fsmonitor_marker = root / "fsmonitor-executed"
+            fsmonitor = root / "malicious-fsmonitor"
+            fsmonitor.write_text(
+                f"#!/bin/sh\nprintf compromised > {fsmonitor_marker}\n",
+                encoding="utf-8",
+            )
+            fsmonitor.chmod(0o700)
+            subprocess.run(
+                [git, "-C", str(repo), "config", "core.fsmonitor", str(fsmonitor)],
+                check=True,
+            )
+            with self.assertRaisesRegex(
+                MODULE.ContractError, "forbidden key core.fsmonitor"
+            ):
+                MODULE.collect_repository_state("automation", repo, expected)
+            self.assertFalse(fsmonitor_marker.exists())
+            subprocess.run(
+                [git, "-C", str(repo), "config", "--unset", "core.fsmonitor"],
+                check=True,
+            )
             info_attributes = repo / ".git" / "info" / "attributes"
             info_attributes.write_text("tracked.txt export-ignore\n", encoding="utf-8")
 
@@ -1135,6 +1264,103 @@ class GovernedRecorderTests(unittest.TestCase):
                 (snapshots["automation"] / "tracked.txt").read_text(), "frozen\n"
             )
             self.assertTrue(MODULE.remove_private_runtime_tree(attributes_runtime))
+
+    def test_linked_worktree_common_and_worktree_configs_are_audited(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            common = root / "common"
+            linked = root / "linked"
+            common.mkdir(mode=0o700)
+            git = str(MODULE.SYSTEM_GIT)
+            subprocess.run([git, "-C", str(common), "init", "-q"], check=True)
+            subprocess.run(
+                [
+                    git,
+                    "-C",
+                    str(common),
+                    "config",
+                    "user.email",
+                    "test@example.invalid",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                [git, "-C", str(common), "config", "user.name", "Recorder Test"],
+                check=True,
+            )
+            (common / "tracked.txt").write_text("frozen\n", encoding="utf-8")
+            subprocess.run([git, "-C", str(common), "add", "tracked.txt"], check=True)
+            subprocess.run(
+                [git, "-C", str(common), "commit", "-q", "-m", "frozen"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    git,
+                    "-C",
+                    str(common),
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    "linked",
+                    str(linked),
+                ],
+                check=True,
+            )
+
+            marker = root / "fsmonitor-executed"
+            fsmonitor = root / "malicious-fsmonitor"
+            fsmonitor.write_text(
+                f"#!/bin/sh\nprintf compromised > {marker}\n",
+                encoding="utf-8",
+            )
+            fsmonitor.chmod(0o700)
+            subprocess.run(
+                [git, "-C", str(common), "config", "core.fsmonitor", str(fsmonitor)],
+                check=True,
+            )
+            self.assertEqual(MODULE.git_environment()["GIT_CONFIG_VALUE_4"], "false")
+            with self.assertRaisesRegex(
+                MODULE.ContractError,
+                "Git common config enables forbidden key core.fsmonitor",
+            ):
+                MODULE.run_git(linked, "status", "--porcelain=v1")
+            self.assertFalse(marker.exists())
+
+            subprocess.run(
+                [git, "-C", str(common), "config", "--unset", "core.fsmonitor"],
+                check=True,
+            )
+            subprocess.run(
+                [git, "-C", str(common), "config", "extensions.worktreeConfig", "true"],
+                check=True,
+            )
+            safe_audit = MODULE.audit_local_git_config(linked)
+            self.assertEqual(
+                safe_audit["common_directory"]["path"],
+                str((common / ".git").resolve()),
+            )
+            self.assertTrue(safe_audit["worktree_config_enabled"])
+            self.assertEqual(MODULE.run_git(linked, "status", "--porcelain=v1"), "")
+            subprocess.run(
+                [
+                    git,
+                    "-C",
+                    str(linked),
+                    "config",
+                    "--worktree",
+                    "core.fsmonitor",
+                    str(fsmonitor),
+                ],
+                check=True,
+            )
+            with self.assertRaisesRegex(
+                MODULE.ContractError,
+                "Git worktree config enables forbidden key core.fsmonitor",
+            ):
+                MODULE.run_git(linked, "status", "--porcelain=v1")
+            self.assertFalse(marker.exists())
 
     def test_signed_runtime_attestation_matches_effective_collection_tree_probe(self):
         policy = sample_policy()
@@ -1373,6 +1599,7 @@ class GovernedRecorderTests(unittest.TestCase):
                     "fqdn": target["fqdn"],
                     "ipv4": target["public_ipv4"],
                 },
+                "ipv4_only_baseline": copy.deepcopy(MODULE.IPV4_ONLY_BASELINE),
                 "controller_access": {
                     "management_services": management_services,
                 },
@@ -1402,6 +1629,36 @@ class GovernedRecorderTests(unittest.TestCase):
                 provider_rule(80, source, f"Tang {index}")
                 for index, source in enumerate(tang_sources, start=1)
             ],
+            "hetzner_installimage_layout": {"ipv4_only": True},
+            "ubtu24cis_ipv6_required": False,
+            "ubtu24cis_ipv6_disable": "grub",
+            "netplan_ethernets": {
+                "enp4s0": {
+                    "dhcp4": False,
+                    "dhcp6": False,
+                    "accept-ra": False,
+                    "link-local": [],
+                    "addresses": [f"{target['public_ipv4']}/24"],
+                    "routes": [{"to": "default", "via": "192.0.2.1"}],
+                    "nameservers": {"addresses": ["192.0.2.53"]},
+                }
+            },
+            "netplan_vlans": {
+                "enp4s0.4091": {
+                    "id": 4091,
+                    "link": "enp4s0",
+                    "addresses": ["10.10.30.23/24"],
+                    "dhcp6": False,
+                    "accept-ra": False,
+                    "link-local": [],
+                    "mtu": 1400,
+                    "optional": True,
+                }
+            },
+            "hetzner_baremetal_robot_firewall": {
+                "enabled": True,
+                "filter_ipv6": True,
+            },
             "wunderbox_orchestration": {
                 "target": {
                     "id": target["target_id"],
@@ -1420,7 +1677,7 @@ class GovernedRecorderTests(unittest.TestCase):
             document, target, controller
         )
         self.assertEqual(projection["target"], target)
-        self.assertEqual(projection["schema_version"], 2)
+        self.assertEqual(projection["schema_version"], 3)
         self.assertEqual(
             projection["effective_access"]["management_services"]["openssh"],
             {
@@ -1437,6 +1694,10 @@ class GovernedRecorderTests(unittest.TestCase):
         )
         document["wunderbox_orchestration"]["target"]["ipv4"] = "192.0.2.99"
         with self.assertRaisesRegex(MODULE.ContractError, "IPv4"):
+            MODULE.validate_inventory_target_projection(document, target, controller)
+        document["wunderbox_orchestration"]["target"]["ipv4"] = target["public_ipv4"]
+        document["netplan_ethernets"]["enp4s0"]["dhcp6"] = True
+        with self.assertRaisesRegex(MODULE.ContractError, "IPv4-only"):
             MODULE.validate_inventory_target_projection(document, target, controller)
 
     def test_inventory_projection_rejects_cross_port_and_tang_policy_drift(self):

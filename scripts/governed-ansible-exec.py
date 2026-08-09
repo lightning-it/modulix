@@ -128,6 +128,7 @@ CONTROLLER_TRUST_KEYS = {
     "policy",
     "execution_anchor",
     "replay_broker",
+    "process_supervisor",
     "container_engine",
     "manifest_signature",
     "runtime_attestation_signature",
@@ -140,6 +141,7 @@ EXECUTION_ANCHOR_KEYS = {
     "acceptance_receipt",
 }
 REPLAY_BROKER_KEYS = {"kind", "path", "sha256", "store_id"}
+PROCESS_SUPERVISOR_KEYS = {"kind", "path", "sha256", "backend", "profile_id"}
 ANCHOR_RECEIPT_KEYS = {
     "schema_version",
     "status",
@@ -147,15 +149,25 @@ ANCHOR_RECEIPT_KEYS = {
     "interpreter_sha256",
     "recorder_sha256",
     "replay_broker_sha256",
+    "process_supervisor_sha256",
     "container_engine_sha256",
     "negative_replay_test",
     "controller_readback_test",
+    "escaped_descendant_test",
+    "bounded_output_test",
 }
 PINNED_FILE_KEYS = {"path", "sha256"}
 PINNED_EXECUTABLE_KEYS = {"kind", "path", "sha256"}
 CONTAINER_ENGINE_KEYS = PINNED_EXECUTABLE_KEYS | {
     "backend_uri",
     "backend_identity_sha256",
+    "backend_transport",
+    "backend_socket_path",
+    "backend_socket_owner_uid",
+    "backend_socket_owner_gid",
+    "backend_socket_mode",
+    "backend_socket_device",
+    "backend_socket_inode",
 }
 MANIFEST_KEYS = {
     "schema_version",
@@ -219,7 +231,40 @@ INVENTORY_PROJECTION_PATHS = [
     "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
     "hetzner_baremetal_robot_firewall_hardened_input_rules",
     "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
+    "hetzner_installimage_layout.ipv4_only",
+    "ubtu24cis_ipv6_required",
+    "ubtu24cis_ipv6_disable",
+    "netplan_ethernets",
+    "netplan_vlans",
+    "wunderbox_inventory_contract.ipv4_only_baseline",
+    "hetzner_baremetal_robot_firewall.enabled",
+    "hetzner_baremetal_robot_firewall.filter_ipv6",
 ]
+IPV4_ONLY_BASELINE = {
+    "decision_id": "LIT-PIS-ADR-WBX-016",
+    "evidence_id": "WBX-EV-032",
+    "evidence_sha256": (
+        "49d045cf2e1d11180209e87ab8e1e3a78bcaf5b1df63415c87008ac409b68d88"
+    ),
+    "installimage_ipv4_only": True,
+    "cis_ipv6_required": False,
+    "cis_ipv6_disable": "grub",
+    "kernel_ipv6_disabled": True,
+    "netplan": {
+        "dhcp6": False,
+        "accept_ra": False,
+        "link_local": [],
+        "source_ipv6": [],
+        "destination_ipv6": [],
+    },
+    "dns": {"aaaa_records": []},
+    "provider": {
+        "filter_enabled": True,
+        "ipv6_rules": [],
+        "assigned_prefix": "2a01:4f8:212:69e::/64",
+        "assignment_state": "assigned-but-unconfigured",
+    },
+}
 COLLECTION_PROVENANCE_KEYS = {
     "fqcn",
     "version",
@@ -246,6 +291,43 @@ POLICY_KEYS = {
     "target_contract",
     "actions",
 }
+TARGET_CONTRACT_KEYS = {"target_id_pattern", "fqdn_pattern"}
+ACTION_ALLOWED_KEYS = {
+    "allowed_extra_vars",
+    "allowed_under_safety_hold",
+    "artifact_projection_paths",
+    "artifact_schema",
+    "expected_artifact",
+    "extra_var_allowed_values",
+    "extra_var_bindings",
+    "gate",
+    "impact",
+    "implementation_blocker",
+    "implementation_status",
+    "max_output_bytes",
+    "mode",
+    "nonsecret_secret_named_vars",
+    "playbook",
+    "prerequisite_gates",
+    "projection_paths",
+    "record_prefix",
+    "required_evidence_references",
+    "required_extra_vars",
+    "requires_ssh_agent",
+    "requires_ssh_private_key",
+    "safe_artifact_tasks",
+    "tags",
+    "timeout_seconds",
+}
+ACTION_REQUIRED_KEYS = {
+    "gate",
+    "impact",
+    "mode",
+    "prerequisite_gates",
+    "record_prefix",
+    "required_evidence_references",
+}
+REPOSITORY_BINDING_KEYS = {"branch", "commit"}
 ARTIFACT_SCHEMA_KEYS = {"schema_id", "fields"}
 ARTIFACT_FIELD_TYPES = {
     "string",
@@ -261,6 +343,9 @@ ARTIFACT_FIELD_TYPES = {
 
 class ContractError(RuntimeError):
     """Raised before execution or when produced output violates the contract."""
+
+
+ACTIVE_PROCESS_SUPERVISOR: dict[str, str] | None = None
 
 
 def utc_now() -> str:
@@ -399,6 +484,84 @@ def read_trusted_file(
     ):
         raise ContractError(f"{label} does not match its pinned SHA-256")
     return resolved, bytes(payload)
+
+
+def read_trusted_inherited_fd(
+    descriptor: int,
+    pinned_path: Path,
+    label: str,
+    *,
+    trusted_uids: set[int],
+    expected_sha256: str,
+    maximum_size: int,
+) -> tuple[bytes, os.stat_result]:
+    """Read one inherited regular-file descriptor without path re-opening."""
+    if (
+        not isinstance(descriptor, int)
+        or isinstance(descriptor, bool)
+        or not 3 <= descriptor <= 1024
+    ):
+        raise ContractError(f"{label} descriptor is invalid")
+    try:
+        before = os.fstat(descriptor)
+        pinned_status = os.lstat(pinned_path)
+    except OSError as exc:
+        raise ContractError(
+            f"{label} descriptor or pinned path is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or not stat.S_ISREG(pinned_status.st_mode)
+        or stat.S_ISLNK(pinned_status.st_mode)
+        or before.st_nlink != 1
+        or pinned_status.st_nlink != 1
+        or before.st_uid not in trusted_uids
+        or pinned_status.st_uid not in trusted_uids
+        or before.st_mode & 0o022
+        or pinned_status.st_mode & 0o022
+        or (before.st_dev, before.st_ino)
+        != (pinned_status.st_dev, pinned_status.st_ino)
+        or before.st_size <= 0
+        or before.st_size > maximum_size
+    ):
+        raise ContractError(f"{label} descriptor is not bound to the pinned file")
+    payload = bytearray()
+    offset = 0
+    try:
+        while offset < before.st_size:
+            chunk = os.pread(
+                descriptor,
+                min(1024 * 1024, before.st_size - offset),
+                offset,
+            )
+            if not chunk:
+                break
+            payload.extend(chunk)
+            offset += len(chunk)
+    except OSError as exc:
+        raise ContractError(f"{label} descriptor read failed") from exc
+    after = os.fstat(descriptor)
+
+    def identity(value: os.stat_result) -> tuple[int, ...]:
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_nlink,
+            value.st_uid,
+            value.st_gid,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+    if (
+        len(payload) != before.st_size
+        or identity(before) != identity(after)
+        or not hmac.compare_digest(sha256_bytes(bytes(payload)), expected_sha256)
+    ):
+        raise ContractError(f"{label} descriptor changed or failed its digest pin")
+    return bytes(payload), after
 
 
 def _ed25519_fingerprint(public_key: str) -> str:
@@ -547,6 +710,73 @@ def validate_approval_authority(
     }
 
 
+def validate_container_backend_anchor(
+    engine: dict[str, Any], *, trusted_uids: set[int]
+) -> dict[str, Any]:
+    if engine.get("backend_transport") != "local-root-unix-v1":
+        raise ContractError("container backend must use the local root Unix transport")
+    socket_path = Path(str(engine.get("backend_socket_path", "")))
+    socket_text = str(socket_path)
+    expected_uri = f"unix://{socket_text}"
+    if (
+        not socket_path.is_absolute()
+        or os.path.normpath(socket_text) != socket_text
+        or engine.get("backend_uri") != expected_uri
+        or URI_CREDENTIAL_RE.search(expected_uri)
+    ):
+        raise ContractError("container backend socket path or URI is invalid")
+    if engine.get("backend_socket_owner_uid") != 0:
+        raise ContractError("container backend socket must be root-owned")
+    expected_gid = engine.get("backend_socket_owner_gid")
+    expected_mode = engine.get("backend_socket_mode")
+    expected_device = engine.get("backend_socket_device")
+    expected_inode = engine.get("backend_socket_inode")
+    if (
+        not isinstance(expected_gid, int)
+        or isinstance(expected_gid, bool)
+        or expected_gid < 0
+        or not isinstance(expected_mode, int)
+        or isinstance(expected_mode, bool)
+        or expected_mode not in {0o600, 0o660}
+        or not isinstance(expected_device, int)
+        or isinstance(expected_device, bool)
+        or expected_device <= 0
+        or not isinstance(expected_inode, int)
+        or isinstance(expected_inode, bool)
+        or expected_inode <= 0
+    ):
+        raise ContractError("container backend socket identity pin is invalid")
+    try:
+        resolved = socket_path.resolve(strict=True)
+        status = os.lstat(socket_path)
+    except OSError as exc:
+        raise ContractError("container backend socket is unavailable") from exc
+    if resolved != socket_path or socket_path.is_symlink():
+        raise ContractError("container backend socket path contains a link")
+    _validate_trusted_parent_chain(socket_path.parent, "container backend socket", {0})
+    if (
+        not stat.S_ISSOCK(status.st_mode)
+        or status.st_uid != 0
+        or status.st_gid != expected_gid
+        or stat.S_IMODE(status.st_mode) != expected_mode
+        or status.st_dev != expected_device
+        or status.st_ino != expected_inode
+    ):
+        raise ContractError("container backend socket identity changed")
+    if not trusted_uids.issubset({0}):
+        raise ContractError("container backend trust cannot include caller ownership")
+    return {
+        "transport": "local-root-unix-v1",
+        "uri": expected_uri,
+        "socket_path": socket_text,
+        "owner_uid": status.st_uid,
+        "owner_gid": status.st_gid,
+        "mode": stat.S_IMODE(status.st_mode),
+        "device": status.st_dev,
+        "inode": status.st_ino,
+    }
+
+
 def load_controller_trust(
     path: Path = CONTROLLER_TRUST_DESCRIPTOR,
     *,
@@ -602,6 +832,10 @@ def load_controller_trust(
         maximum_size=256 * 1024 * 1024,
         executable=True,
     )
+    backend_anchor = validate_container_backend_anchor(
+        engine_pin,
+        trusted_uids=effective_trusted_uids,
+    )
     replay_pin = require_mapping(
         descriptor["replay_broker"], "controller replay broker pin"
     )
@@ -620,6 +854,32 @@ def load_controller_trust(
         "controller replay broker",
         trusted_uids=effective_trusted_uids,
         expected_sha256=str(replay_pin["sha256"]),
+        maximum_size=64 * 1024 * 1024,
+        executable=True,
+    )
+    supervisor_pin = require_mapping(
+        descriptor["process_supervisor"], "controller process supervisor pin"
+    )
+    require_exact_keys(
+        supervisor_pin,
+        PROCESS_SUPERVISOR_KEYS,
+        "controller process supervisor pin",
+    )
+    if (
+        supervisor_pin.get("kind") != "root-brokered-process-domain-v1"
+        or supervisor_pin.get("backend") not in {"launchd-job", "cgroup-v2"}
+        or not SHA256_RE.fullmatch(str(supervisor_pin.get("sha256", "")))
+        or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{2,127}",
+            str(supervisor_pin.get("profile_id", "")),
+        )
+    ):
+        raise ContractError("controller process supervisor pin is invalid")
+    supervisor_path, _supervisor_payload = read_trusted_file(
+        Path(str(supervisor_pin["path"])),
+        "controller process supervisor",
+        trusted_uids=effective_trusted_uids,
+        expected_sha256=str(supervisor_pin["sha256"]),
         maximum_size=64 * 1024 * 1024,
         executable=True,
     )
@@ -668,9 +928,12 @@ def load_controller_trust(
         "interpreter_sha256": normalized_anchor["interpreter"]["sha256"],
         "recorder_sha256": normalized_anchor["recorder"]["sha256"],
         "replay_broker_sha256": str(replay_pin["sha256"]),
+        "process_supervisor_sha256": str(supervisor_pin["sha256"]),
         "container_engine_sha256": str(engine_pin["sha256"]),
         "negative_replay_test": True,
         "controller_readback_test": True,
+        "escaped_descendant_test": True,
+        "bounded_output_test": True,
     }
     if receipt != expected_receipt:
         raise ContractError("execution anchor acceptance receipt is not accepted")
@@ -691,12 +954,27 @@ def load_controller_trust(
         "sha256": str(engine_pin["sha256"]),
         "backend_uri": backend_uri,
         "backend_identity_sha256": str(engine_pin["backend_identity_sha256"]),
+        "backend_transport": "local-root-unix-v1",
+        "backend_socket_path": str(engine_pin["backend_socket_path"]),
+        "backend_socket_owner_uid": 0,
+        "backend_socket_owner_gid": int(engine_pin["backend_socket_owner_gid"]),
+        "backend_socket_mode": int(engine_pin["backend_socket_mode"]),
+        "backend_socket_device": int(engine_pin["backend_socket_device"]),
+        "backend_socket_inode": int(engine_pin["backend_socket_inode"]),
+        "_backend_anchor": backend_anchor,
     }
     descriptor["replay_broker"] = {
         "kind": "root-brokered-append-only-v1",
         "path": str(replay_path),
         "sha256": str(replay_pin["sha256"]),
         "store_id": str(replay_pin["store_id"]),
+    }
+    descriptor["process_supervisor"] = {
+        "kind": "root-brokered-process-domain-v1",
+        "path": str(supervisor_path),
+        "sha256": str(supervisor_pin["sha256"]),
+        "backend": str(supervisor_pin["backend"]),
+        "profile_id": str(supervisor_pin["profile_id"]),
     }
     descriptor["execution_anchor"] = normalized_anchor
     descriptor["manifest_signature"] = validate_signature_trust(
@@ -732,6 +1010,8 @@ def revalidate_controller_trust(expected: dict[str, Any]) -> dict[str, Any]:
         raise ContractError("controller container engine changed before execution")
     if observed["replay_broker"] != expected["replay_broker"]:
         raise ContractError("controller replay broker changed before execution")
+    if observed["process_supervisor"] != expected["process_supervisor"]:
+        raise ContractError("controller process supervisor changed before execution")
     if observed["execution_anchor"] != expected["execution_anchor"]:
         raise ContractError("controller execution anchor changed before execution")
     if observed_policy != strict_json_loads(
@@ -753,39 +1033,84 @@ def revalidate_controller_trust(expected: dict[str, Any]) -> dict[str, Any]:
 def validate_execution_anchor_runtime(
     trust: dict[str, Any],
     *,
-    recorder_path: Path | None = None,
     interpreter_path: Path | None = None,
     isolated: bool | None = None,
     safe_path: bool | None = None,
-    launcher_path: str | None = None,
+    launcher_fd: int | None = None,
+    recorder_fd: int | None = None,
+    receipt_fd: int | None = None,
     python_environment: dict[str, str] | None = None,
 ) -> dict[str, str]:
     anchor = trust["execution_anchor"]
-    actual_recorder = (recorder_path or Path(__file__)).resolve(strict=True)
+    trusted_uids = set(trust.get("_trusted_uids", {0}))
     actual_interpreter = (interpreter_path or Path(sys.executable)).resolve(strict=True)
     actual_isolated = bool(sys.flags.isolated) if isolated is None else isolated
     actual_safe_path = bool(sys.flags.safe_path) if safe_path is None else safe_path
-    actual_launcher = (
-        os.environ.get("LIT_GOVERNED_LAUNCHER_PATH", "")
-        if launcher_path is None
-        else launcher_path
-    )
-    if (
-        str(actual_recorder) != anchor["recorder"]["path"]
-        or sha256_file(actual_recorder) != anchor["recorder"]["sha256"]
-    ):
-        raise ContractError(
-            "running recorder is not the root-pinned installed recorder"
+    try:
+        effective_launcher_fd = (
+            int(os.environ.get("LIT_GOVERNED_LAUNCHER_FD", ""))
+            if launcher_fd is None
+            else launcher_fd
         )
-    if (
-        str(actual_interpreter) != anchor["interpreter"]["path"]
-        or sha256_file(actual_interpreter) != anchor["interpreter"]["sha256"]
-    ):
+        effective_recorder_fd = (
+            int(os.environ.get("LIT_GOVERNED_RECORDER_FD", ""))
+            if recorder_fd is None
+            else recorder_fd
+        )
+        effective_receipt_fd = (
+            int(os.environ.get("LIT_GOVERNED_LAUNCH_RECEIPT_FD", ""))
+            if receipt_fd is None
+            else receipt_fd
+        )
+    except ValueError as exc:
+        raise ContractError("launcher descriptor environment is invalid") from exc
+    launcher_payload, launcher_status = read_trusted_inherited_fd(
+        effective_launcher_fd,
+        Path(anchor["launcher"]["path"]),
+        "inherited launcher",
+        trusted_uids=trusted_uids,
+        expected_sha256=anchor["launcher"]["sha256"],
+        maximum_size=16 * 1024 * 1024,
+    )
+    recorder_payload, recorder_status = read_trusted_inherited_fd(
+        effective_recorder_fd,
+        Path(anchor["recorder"]["path"]),
+        "inherited recorder",
+        trusted_uids=trusted_uids,
+        expected_sha256=anchor["recorder"]["sha256"],
+        maximum_size=256 * 1024 * 1024,
+    )
+    receipt_payload, receipt_status = read_trusted_inherited_fd(
+        effective_receipt_fd,
+        Path(anchor["acceptance_receipt"]["path"]),
+        "inherited launcher receipt",
+        trusted_uids=trusted_uids,
+        expected_sha256=anchor["acceptance_receipt"]["sha256"],
+        maximum_size=128 * 1024,
+    )
+    _interpreter, interpreter_payload = read_trusted_file(
+        actual_interpreter,
+        "running Python interpreter",
+        trusted_uids=trusted_uids,
+        expected_sha256=anchor["interpreter"]["sha256"],
+        maximum_size=256 * 1024 * 1024,
+        executable=True,
+    )
+    if str(actual_interpreter) != anchor["interpreter"]["path"]:
         raise ContractError("running Python interpreter is not root-pinned")
     if not actual_isolated or not actual_safe_path:
         raise ContractError("recorder Python must run with isolated safe imports")
-    if actual_launcher != anchor["launcher"]["path"]:
-        raise ContractError("recorder was not entered through the root-owned launcher")
+    receipt = require_mapping(
+        strict_json_loads(receipt_payload, "inherited launcher receipt"),
+        "inherited launcher receipt",
+    )
+    if (
+        receipt.get("status") != "ACCEPTED"
+        or receipt.get("launcher_sha256") != sha256_bytes(launcher_payload)
+        or receipt.get("recorder_sha256") != sha256_bytes(recorder_payload)
+        or receipt.get("interpreter_sha256") != sha256_bytes(interpreter_payload)
+    ):
+        raise ContractError("inherited launcher receipt does not bind this runtime")
     inherited = os.environ if python_environment is None else python_environment
     forbidden = {
         name
@@ -804,6 +1129,9 @@ def validate_execution_anchor_runtime(
         "recorder_path": anchor["recorder"]["path"],
         "recorder_sha256": anchor["recorder"]["sha256"],
         "acceptance_receipt_sha256": anchor["acceptance_receipt"]["sha256"],
+        "launcher_fd_identity": f"{launcher_status.st_dev}:{launcher_status.st_ino}",
+        "recorder_fd_identity": f"{recorder_status.st_dev}:{recorder_status.st_ino}",
+        "launch_receipt_fd_identity": f"{receipt_status.st_dev}:{receipt_status.st_ino}",
         "python_mode": "ISOLATED_SAFE_PATH",
     }
 
@@ -847,13 +1175,12 @@ def strict_json_loads(payload: bytes, label: str) -> Any:
 def read_json_object(
     path: Path, label: str, max_bytes: int = 2 * 1024 * 1024
 ) -> tuple[dict[str, Any], bytes]:
-    resolved = path.expanduser().resolve()
-    file_stat = resolved.stat()
-    if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size <= 0:
-        raise ContractError(f"{label} must be a nonempty regular file")
-    if file_stat.st_size > max_bytes:
-        raise ContractError(f"{label} exceeds {max_bytes} bytes")
-    payload = resolved.read_bytes()
+    resolved, payload = read_trusted_file(
+        path.expanduser(),
+        label,
+        trusted_uids={0, os.geteuid()},
+        maximum_size=max_bytes,
+    )
     parsed = strict_json_loads(payload, label)
     return require_mapping(parsed, label), payload
 
@@ -874,6 +1201,11 @@ def require_private_file(
     allowed = {0o400, 0o600} if allow_readonly else {0o600}
     if mode not in allowed:
         raise ContractError(f"{label} must have mode 0400 or 0600")
+    _validate_trusted_parent_chain(
+        resolved.parent,
+        label,
+        {0} if os.geteuid() == 0 else {0, os.geteuid()},
+    )
     return resolved
 
 
@@ -890,6 +1222,11 @@ def require_evidence_directory(path: Path) -> Path:
         raise ContractError("evidence directory must be owned by the effective user")
     if stat.S_IMODE(directory_stat.st_mode) != 0o700:
         raise ContractError("evidence directory must have mode 0700")
+    _validate_trusted_parent_chain(
+        resolved.parent,
+        "evidence directory",
+        {0} if os.geteuid() == 0 else {0, os.geteuid()},
+    )
     return resolved
 
 
@@ -905,7 +1242,19 @@ def require_private_directory(path: Path, label: str) -> Path:
         raise ContractError(f"{label} must be owned by the effective user")
     if stat.S_IMODE(directory_stat.st_mode) != 0o700:
         raise ContractError(f"{label} must have mode 0700")
+    _validate_trusted_parent_chain(
+        resolved.parent,
+        label,
+        {0} if os.geteuid() == 0 else {0, os.geteuid()},
+    )
     return resolved
+
+
+def require_root_execution_context() -> None:
+    if os.geteuid() != 0 or os.getegid() != 0:
+        raise ContractError(
+            "governed execution requires the root-owned launcher and root staging"
+        )
 
 
 def fsync_directory(path: Path) -> None:
@@ -965,7 +1314,9 @@ def git_environment() -> dict[str, str]:
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_NO_LAZY_FETCH": "1",
-        "GIT_CONFIG_COUNT": "4",
+        "GIT_PAGER": "cat",
+        "PAGER": "cat",
+        "GIT_CONFIG_COUNT": "7",
         "GIT_CONFIG_KEY_0": "core.attributesFile",
         "GIT_CONFIG_VALUE_0": "/dev/null",
         "GIT_CONFIG_KEY_1": "fsck.skipList",
@@ -974,27 +1325,386 @@ def git_environment() -> dict[str, str]:
         "GIT_CONFIG_VALUE_2": "/dev/null",
         "GIT_CONFIG_KEY_3": "core.replaceRefs",
         "GIT_CONFIG_VALUE_3": "false",
+        "GIT_CONFIG_KEY_4": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_4": "false",
+        "GIT_CONFIG_KEY_5": "core.pager",
+        "GIT_CONFIG_VALUE_5": "cat",
+        "GIT_CONFIG_KEY_6": "interactive.diffFilter",
+        "GIT_CONFIG_VALUE_6": "",
     }
 
 
-def run_git(repo: Path, *args: str) -> str:
+GIT_DANGEROUS_SECTIONS = {
+    "alias",
+    "credential",
+    "diff",
+    "filter",
+    "include",
+    "includeif",
+    "merge",
+    "pager",
+    "submodule",
+}
+GIT_DANGEROUS_KEYS = {
+    "core.attributesfile",
+    "core.excludesfile",
+    "core.fsmonitor",
+    "core.fsmonitorhookversion",
+    "core.hookspath",
+    "core.pager",
+    "core.sshcommand",
+    "core.worktree",
+    "diff.external",
+    "fsck.skiplist",
+    "interactive.difffilter",
+}
+GIT_CONFIG_SECTION_RE = re.compile(
+    r"^\[\s*([A-Za-z][A-Za-z0-9-]*)" r'(?:\s+"(?:[^"\\]|\\.)*")?\s*\]$'
+)
+GIT_CONFIG_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*)(?:(?:\s*=\s*|\s+).*)?$")
+MAX_GIT_CONTROL_BYTES = 4096
+MAX_GIT_CONFIG_BYTES = 1024 * 1024
+
+
+def git_path_identity(status: os.stat_result) -> list[int]:
+    return [
+        status.st_dev,
+        status.st_ino,
+        status.st_mode,
+        status.st_nlink,
+        status.st_uid,
+        status.st_gid,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+    ]
+
+
+def validate_git_directory(path: Path, label: str) -> tuple[Path, os.stat_result]:
+    """Resolve one existing Git directory and reject every symlink component."""
+    if not path.is_absolute():
+        raise ContractError(f"{label} path is not absolute")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ContractError(f"{label} is unavailable") from exc
+    if resolved != path:
+        raise ContractError(f"{label} path contains a symbolic-link boundary")
+    cursor = Path(path.anchor)
+    try:
+        for component in path.parts[1:]:
+            cursor /= component
+            if stat.S_ISLNK(os.lstat(cursor).st_mode):
+                raise ContractError(f"{label} path contains a symbolic-link boundary")
+        status = os.lstat(path)
+    except OSError as exc:
+        raise ContractError(f"{label} path could not be inspected") from exc
+    if not stat.S_ISDIR(status.st_mode):
+        raise ContractError(f"{label} is not a directory")
+    return resolved, status
+
+
+def read_git_control_file(
+    path: Path,
+    label: str,
+    *,
+    maximum_size: int,
+    required: bool,
+) -> dict[str, Any]:
+    """Read a Git pointer/config through one stable descriptor."""
+    if not os.path.lexists(path):
+        if required:
+            raise ContractError(f"{label} is missing")
+        return {"path": str(path), "present": False, "_payload": b""}
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ContractError(f"{label} is unavailable") from exc
+    if resolved != path or path.is_symlink():
+        raise ContractError(f"{label} path contains a symbolic-link boundary")
+    validate_git_directory(path.parent, f"{label} parent")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ContractError(f"{label} could not be opened safely") from exc
+    payload = bytearray()
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size > maximum_size
+        ):
+            raise ContractError(f"{label} is not one bounded regular file")
+        while chunk := os.read(descriptor, min(65536, maximum_size + 1)):
+            payload.extend(chunk)
+            if len(payload) > maximum_size:
+                raise ContractError(f"{label} exceeds its size boundary")
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if git_path_identity(before) != git_path_identity(after):
+        raise ContractError(f"{label} changed while it was inspected")
+    return {
+        "path": str(path),
+        "present": True,
+        "sha256": sha256_bytes(bytes(payload)),
+        "identity": git_path_identity(after),
+        "_payload": bytes(payload),
+    }
+
+
+def parse_git_pointer(payload: bytes, label: str, prefix: str = "") -> str:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ContractError(f"{label} is not UTF-8") from exc
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not text or "\n" in text or "\r" in text or "\x00" in text:
+        raise ContractError(f"{label} is malformed")
+    if prefix:
+        if not text.startswith(prefix):
+            raise ContractError(f"{label} is malformed")
+        text = text.removeprefix(prefix)
+    if not text or text != text.strip():
+        raise ContractError(f"{label} target is malformed")
+    return text
+
+
+def resolve_git_pointer_target(base: Path, raw_target: str, label: str) -> Path:
+    target = Path(raw_target)
+    candidate = target if target.is_absolute() else base / target
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ContractError(f"{label} target is unavailable") from exc
+    validate_git_directory(resolved, f"{label} target")
+    return resolved
+
+
+def public_git_control_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in record.items() if key != "_payload"}
+
+
+def audit_git_config_payload(payload: bytes, label: str) -> bool:
+    """Reject executable/redirection surfaces and report worktreeConfig state."""
+    try:
+        rows = payload.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ContractError(f"{label} is not UTF-8") from exc
+    section = ""
+    worktree_config_enabled = False
+    for raw_row in rows:
+        if raw_row.rstrip().endswith("\\"):
+            raise ContractError(f"{label} contains a continuation line")
+        row = raw_row.strip()
+        if not row or row.startswith(("#", ";")):
+            continue
+        if row.startswith("["):
+            match = GIT_CONFIG_SECTION_RE.fullmatch(row)
+            if match is None:
+                raise ContractError(f"{label} contains a malformed section")
+            section = match.group(1).lower()
+            if section in GIT_DANGEROUS_SECTIONS:
+                raise ContractError(f"{label} enables forbidden section {section}")
+            continue
+        match = GIT_CONFIG_KEY_RE.fullmatch(row)
+        if match is None or not section:
+            raise ContractError(f"{label} contains a malformed key")
+        key = match.group(1).lower()
+        full_key = f"{section}.{key}"
+        if full_key in GIT_DANGEROUS_KEYS:
+            raise ContractError(f"{label} enables forbidden key {full_key}")
+        if full_key == "extensions.worktreeconfig":
+            value = row[len(match.group(1)) :].strip()
+            if value.startswith("="):
+                value = value[1:].strip()
+            normalized = value.lower()
+            if normalized not in {"true", "yes", "on", "1", "false", "no", "off", "0"}:
+                raise ContractError(f"{label} has an invalid worktreeConfig value")
+            worktree_config_enabled = normalized in {"true", "yes", "on", "1"}
+    return worktree_config_enabled
+
+
+def resolve_local_git_config(repo: Path) -> dict[str, Any]:
+    """Resolve every repository config surface without invoking Git."""
+    try:
+        repository = repo.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise ContractError("repository path is unavailable") from exc
+    validate_git_directory(repository, "repository")
+    dot_git = repository / ".git"
+    dot_git_status = os.lstat(dot_git) if os.path.lexists(dot_git) else None
+    if dot_git_status is not None and stat.S_ISDIR(dot_git_status.st_mode):
+        git_directory, git_directory_status = validate_git_directory(
+            dot_git, "Git directory"
+        )
+        dot_git_record = {
+            "path": str(dot_git),
+            "kind": "directory",
+            "identity": git_path_identity(git_directory_status),
+        }
+    elif dot_git_status is not None and stat.S_ISREG(dot_git_status.st_mode):
+        pointer_record = read_git_control_file(
+            dot_git,
+            "Git directory pointer",
+            maximum_size=MAX_GIT_CONTROL_BYTES,
+            required=True,
+        )
+        pointer_target = parse_git_pointer(
+            pointer_record["_payload"], "Git directory pointer", "gitdir: "
+        )
+        git_directory = resolve_git_pointer_target(
+            dot_git.parent, pointer_target, "Git directory pointer"
+        )
+        _resolved, git_directory_status = validate_git_directory(
+            git_directory, "Git directory"
+        )
+        dot_git_record = {
+            **public_git_control_record(pointer_record),
+            "kind": "pointer",
+            "target": str(git_directory),
+        }
+    else:
+        raise ContractError("repository lacks one regular Git directory binding")
+
+    commondir_path = git_directory / "commondir"
+    commondir_record = read_git_control_file(
+        commondir_path,
+        "Git commondir pointer",
+        maximum_size=MAX_GIT_CONTROL_BYTES,
+        required=False,
+    )
+    backlink_record = read_git_control_file(
+        git_directory / "gitdir",
+        "Git worktree backlink",
+        maximum_size=MAX_GIT_CONTROL_BYTES,
+        required=False,
+    )
+    if commondir_record["present"]:
+        common_target = parse_git_pointer(
+            commondir_record["_payload"], "Git commondir pointer"
+        )
+        common_directory = resolve_git_pointer_target(
+            git_directory, common_target, "Git commondir pointer"
+        )
+        if (
+            git_directory.parent.name != "worktrees"
+            or git_directory.parent.parent != common_directory
+            or not backlink_record["present"]
+        ):
+            raise ContractError("linked-worktree Git directory topology is invalid")
+        backlink_target = parse_git_pointer(
+            backlink_record["_payload"], "Git worktree backlink"
+        )
+        resolved_backlink = Path(backlink_target).expanduser().resolve(strict=True)
+        if resolved_backlink != dot_git:
+            raise ContractError("Git worktree backlink does not bind repository .git")
+    else:
+        common_directory = git_directory
+        if backlink_record["present"]:
+            raise ContractError("standalone Git directory has a worktree backlink")
+    _common, common_directory_status = validate_git_directory(
+        common_directory, "Git common directory"
+    )
+
+    configs = [
+        read_git_control_file(
+            common_directory / "config",
+            "Git common config",
+            maximum_size=MAX_GIT_CONFIG_BYTES,
+            required=False,
+        ),
+        read_git_control_file(
+            git_directory / "config.worktree",
+            "Git worktree config",
+            maximum_size=MAX_GIT_CONFIG_BYTES,
+            required=False,
+        ),
+    ]
+    return {
+        "repository": str(repository),
+        "dot_git": dot_git_record,
+        "git_directory": {
+            "path": str(git_directory),
+            "identity": git_path_identity(git_directory_status),
+        },
+        "common_directory": {
+            "path": str(common_directory),
+            "identity": git_path_identity(common_directory_status),
+        },
+        "commondir": commondir_record,
+        "backlink": backlink_record,
+        "configs": configs,
+    }
+
+
+def audit_local_git_config(repo: Path) -> dict[str, Any]:
+    """Reject dangerous common/worktree config and bind the complete file set."""
+    topology = resolve_local_git_config(repo)
+    worktree_config_enabled = False
+    config_records: list[dict[str, Any]] = []
+    for index, config in enumerate(topology["configs"]):
+        label = "Git common config" if index == 0 else "Git worktree config"
+        if config["present"]:
+            enabled = audit_git_config_payload(config["_payload"], label)
+            if index == 0:
+                worktree_config_enabled = enabled
+        config_records.append(public_git_control_record(config))
+    return {
+        "repository": topology["repository"],
+        "dot_git": topology["dot_git"],
+        "git_directory": topology["git_directory"],
+        "common_directory": topology["common_directory"],
+        "commondir": public_git_control_record(topology["commondir"]),
+        "backlink": public_git_control_record(topology["backlink"]),
+        "worktree_config_enabled": worktree_config_enabled,
+        "configs": config_records,
+    }
+
+
+def run_git_streaming(
+    repo: Path,
+    args: tuple[str, ...],
+    *,
+    input_payload: bytes | None,
+    maximum_output_bytes: int,
+    timeout_seconds: int,
+) -> bytes:
     if not SYSTEM_GIT.is_file():
         raise ContractError(f"required system Git is missing: {SYSTEM_GIT}")
+    config_before = audit_local_git_config(repo)
+    result = run_bounded(
+        [str(SYSTEM_GIT), "--no-replace-objects", "-C", str(repo), *args],
+        git_environment(),
+        repo,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=maximum_output_bytes,
+        input_payload=input_payload,
+    )
+    config_after = audit_local_git_config(repo)
+    if config_before != config_after:
+        raise ContractError("local Git config changed across a Git operation")
+    if result["exit_code"] != 0 or result["termination_reason"] is not None:
+        raise ContractError("system Git operation failed or exceeded its boundary")
+    return result["stdout"]
+
+
+def run_git(repo: Path, *args: str) -> str:
+    payload = run_git_streaming(
+        repo,
+        args,
+        input_payload=None,
+        maximum_output_bytes=MAX_GIT_LISTING_BYTES,
+        timeout_seconds=120,
+    )
     try:
-        completed = subprocess.run(
-            [str(SYSTEM_GIT), "--no-replace-objects", "-C", str(repo), *args],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=120,
-            env=git_environment(),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ContractError("system Git verification failed") from exc
-    if completed.returncode != 0:
-        raise ContractError("system Git verification failed")
-    return completed.stdout.strip()
+        return payload.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise ContractError("system Git output is not UTF-8") from exc
 
 
 def run_git_bytes(
@@ -1003,23 +1713,13 @@ def run_git_bytes(
     input_payload: bytes | None = None,
     maximum_output_bytes: int = MAX_GIT_LISTING_BYTES,
 ) -> bytes:
-    if not SYSTEM_GIT.is_file():
-        raise ContractError(f"required system Git is missing: {SYSTEM_GIT}")
-    try:
-        completed = subprocess.run(
-            [str(SYSTEM_GIT), "--no-replace-objects", "-C", str(repo), *args],
-            input=input_payload,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=300,
-            env=git_environment(),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ContractError("system Git object read failed") from exc
-    if completed.returncode != 0 or len(completed.stdout) > maximum_output_bytes:
-        raise ContractError("system Git object read failed or exceeded its boundary")
-    return completed.stdout
+    return run_git_streaming(
+        repo,
+        args,
+        input_payload=input_payload,
+        maximum_output_bytes=maximum_output_bytes,
+        timeout_seconds=300,
+    )
 
 
 def parse_repo(value: str) -> tuple[str, Path]:
@@ -1510,6 +2210,7 @@ def validate_policy(policy: dict[str, Any]) -> None:
     target_contract = require_mapping(
         policy.get("target_contract"), "policy target_contract"
     )
+    require_exact_keys(target_contract, TARGET_CONTRACT_KEYS, "policy target_contract")
     try:
         re.compile(str(target_contract["target_id_pattern"]))
         re.compile(str(target_contract["fqdn_pattern"]))
@@ -1521,6 +2222,14 @@ def validate_policy(policy: dict[str, Any]) -> None:
         if not ACTION_ID_RE.fullmatch(action_id):
             raise ContractError(f"invalid action ID: {action_id}")
         action = require_mapping(raw_action, f"action {action_id}")
+        unexpected_action_keys = set(action) - ACTION_ALLOWED_KEYS
+        missing_action_keys = ACTION_REQUIRED_KEYS - set(action)
+        if unexpected_action_keys or missing_action_keys:
+            raise ContractError(
+                f"action {action_id} has an invalid closed schema; "
+                f"missing={sorted(missing_action_keys)}, "
+                f"unexpected={sorted(unexpected_action_keys)}"
+            )
         prefix = str(action.get("record_prefix", ""))
         if not RECORD_PREFIX_RE.fullmatch(prefix) or prefix in record_prefixes:
             raise ContractError(f"action {action_id} has an invalid/duplicate prefix")
@@ -1547,6 +2256,25 @@ def validate_policy(policy: dict[str, Any]) -> None:
             "playbook",
         }:
             raise ContractError(f"action {action_id} has an invalid mode")
+        for sequence_key in (
+            "allowed_extra_vars",
+            "artifact_projection_paths",
+            "nonsecret_secret_named_vars",
+            "prerequisite_gates",
+            "projection_paths",
+            "required_evidence_references",
+            "required_extra_vars",
+            "tags",
+        ):
+            if sequence_key not in action:
+                continue
+            values = require_sequence(
+                action[sequence_key], f"action {action_id} {sequence_key}"
+            )
+            if any(not isinstance(value, str) or not value for value in values):
+                raise ContractError(
+                    f"action {action_id} {sequence_key} must contain nonempty strings"
+                )
         if (
             action.get("mode") == "inventory_projection"
             and action.get("projection_paths") != INVENTORY_PROJECTION_PATHS
@@ -1867,6 +2595,21 @@ def validate_manifest(
     )
     if set(repositories) != set(policy["required_repositories"]):
         raise ContractError("manifest repository set does not match policy")
+    for repository_name, raw_repository in repositories.items():
+        repository = require_mapping(
+            raw_repository, f"manifest repository {repository_name}"
+        )
+        require_exact_keys(
+            repository,
+            REPOSITORY_BINDING_KEYS,
+            f"manifest repository {repository_name}",
+        )
+        if not GIT_SHA_RE.fullmatch(str(repository["commit"])) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", str(repository["branch"])
+        ):
+            raise ContractError(
+                f"manifest repository {repository_name} binding is invalid"
+            )
     authorizations = require_mapping(
         manifest.get("authorizations"), "manifest authorizations"
     )
@@ -2065,27 +2808,46 @@ def verify_ssh_signature(
         _write_private_bytes(signers_copy, signers_payload)
         _write_private_bytes(signature_copy, signature_payload)
         try:
-            completed = runner(
-                [
-                    str(verifier_path),
-                    "-Y",
-                    "verify",
-                    "-f",
-                    str(signers_copy),
-                    "-I",
-                    str(trust["identity"]),
-                    "-n",
-                    str(trust["namespace"]),
-                    "-s",
-                    str(signature_copy),
-                ],
-                input=payload,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=30,
-                env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
-            )
+            command = [
+                str(verifier_path),
+                "-Y",
+                "verify",
+                "-f",
+                str(signers_copy),
+                "-I",
+                str(trust["identity"]),
+                "-n",
+                str(trust["namespace"]),
+                "-s",
+                str(signature_copy),
+            ]
+            if runner is subprocess.run:
+                bounded = run_bounded(
+                    command,
+                    {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+                    temporary_root,
+                    timeout_seconds=30,
+                    max_output_bytes=64 * 1024,
+                    input_payload=payload,
+                )
+                completed = subprocess.CompletedProcess(
+                    command,
+                    bounded["exit_code"],
+                    stdout=bounded["stdout"],
+                    stderr=bounded["stderr"],
+                )
+                if bounded["termination_reason"] is not None:
+                    raise ContractError("SSH signature verifier exceeded its boundary")
+            else:
+                completed = runner(
+                    command,
+                    input=payload,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=30,
+                    env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+                )
         except (OSError, subprocess.SubprocessError) as exc:
             raise ContractError("SSH signature verifier failed to execute") from exc
         if completed.returncode != 0:
@@ -2104,9 +2866,13 @@ def verify_manifest_signature(
     runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
 ) -> None:
     signature_path = require_private_file(signature, "gate manifest signature")
-    verify_ssh_signature(
-        manifest_payload, signature_path.read_bytes(), trust, runner=runner
+    _signature_path, signature_payload = read_trusted_file(
+        signature_path,
+        "gate manifest signature",
+        trusted_uids={0, os.geteuid()},
+        maximum_size=16384,
     )
+    verify_ssh_signature(manifest_payload, signature_payload, trust, runner=runner)
 
 
 def validate_authorization(
@@ -2505,15 +3271,35 @@ def invoke_replay_broker(
         "replay_digest": normalized["replay_digest"],
     }
     try:
-        completed = runner(
-            [broker["path"], operation],
-            input=canonical_json_bytes(request),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=30,
-            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
-        )
+        command = [broker["path"], operation]
+        request_payload = canonical_json_bytes(request)
+        if runner is subprocess.run:
+            bounded = run_bounded(
+                command,
+                {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+                Path(broker["path"]).parent,
+                timeout_seconds=30,
+                max_output_bytes=64 * 1024,
+                input_payload=request_payload,
+            )
+            completed = subprocess.CompletedProcess(
+                command,
+                bounded["exit_code"],
+                stdout=bounded["stdout"],
+                stderr=bounded["stderr"],
+            )
+            if bounded["termination_reason"] is not None:
+                raise ContractError("root-brokered replay store exceeded its boundary")
+        else:
+            completed = runner(
+                command,
+                input=request_payload,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=30,
+                env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+            )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ContractError("root-brokered replay store failed") from exc
     if completed.returncode != 0 or len(completed.stdout) > 64 * 1024:
@@ -2828,19 +3614,32 @@ def prepare_approvals(
 
 
 def verify_consumer_claims(
-    consumers: dict[str, dict[str, Any]]
+    consumers: dict[str, dict[str, Any]],
+    broker: dict[str, str],
+    claims_by_variable: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
+    if set(consumers) != set(claims_by_variable):
+        raise ContractError("consumer replay claim set is incomplete")
     claims: list[dict[str, str]] = []
     for variable, normalized in consumers.items():
-        verified = verify_claimed_approval_marker(
-            normalized, f"consumer approval {variable}"
+        claimed = claims_by_variable[variable]
+        verified = invoke_replay_broker(
+            "verify",
+            normalized,
+            broker,
         )
+        if any(
+            claimed.get(key) != verified.get(key)
+            for key in ("store_id", "approval_digest", "replay_digest")
+        ):
+            raise ContractError(f"consumer approval {variable} broker claim changed")
         claims.append(
             {
                 "variable": variable,
                 "approval_digest": verified["approval_digest"],
                 "replay_digest": verified["replay_digest"],
-                "claim_status": "CLAIMED_BY_FOUNDATIONAL_CONSUMER",
+                "store_id": verified["store_id"],
+                "claim_status": "ROOT_BROKER_CLAIM_VERIFIED",
             }
         )
     return claims
@@ -2983,7 +3782,7 @@ def make_environment(
     action: dict[str, Any],
     repos: dict[str, Path] | None = None,
     *,
-    container_engine: dict[str, str],
+    container_engine: dict[str, Any],
     sealed_ssh_directory: Path | None = None,
     execution_id: str | None = None,
     runtime_root: Path | None = None,
@@ -2999,7 +3798,7 @@ def make_environment(
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     }
     if (
-        set(container_engine) != CONTAINER_ENGINE_KEYS
+        set(container_engine) != CONTAINER_ENGINE_KEYS | {"_backend_anchor"}
         or container_engine.get("kind") != "podman"
         or not Path(str(container_engine.get("path", ""))).is_absolute()
         or not SHA256_RE.fullmatch(str(container_engine.get("sha256", "")))
@@ -3092,6 +3891,7 @@ def make_environment(
             "ANSIBLE_TOOLBOX_IMAGE": runtime["toolbox_image"],
             "ANSIBLE_TOOLBOX_RUN_EE_IMAGE": runtime["run_ee_image"],
             "ANSIBLE_TOOLBOX_ENGINE": "podman",
+            "ANSIBLE_TOOLBOX_NETWORK_MODE": "default",
             "ANSIBLE_TOOLBOX_PULL_POLICY": "never",
             "ANSIBLE_TOOLBOX_RUNTIME_MODE": "disconnected",
             "ANSIBLE_TOOLBOX_RUN_EE_PRELOAD": "true",
@@ -3189,15 +3989,24 @@ def load_and_verify_runtime_attestation(
     attestation_path = require_private_file(
         Path(runtime["attestation_path"]), "runtime attestation"
     )
-    payload = attestation_path.read_bytes()
+    _attestation_path, payload = read_trusted_file(
+        attestation_path,
+        "runtime attestation",
+        trusted_uids={0, os.geteuid()},
+        maximum_size=2 * 1024 * 1024,
+    )
     if sha256_bytes(payload) != runtime["attestation_sha256"]:
         raise ContractError("runtime attestation hash mismatch")
     signature_path = require_private_file(
         Path(runtime["attestation_signature_path"]), "runtime attestation signature"
     )
-    verify_ssh_signature(
-        payload, signature_path.read_bytes(), signature_trust, runner=runner
+    _signature_path, signature_payload = read_trusted_file(
+        signature_path,
+        "runtime attestation signature",
+        trusted_uids={0, os.geteuid()},
+        maximum_size=16384,
     )
+    verify_ssh_signature(payload, signature_payload, signature_trust, runner=runner)
     document = require_mapping(
         strict_json_loads(payload, "runtime attestation"), "runtime attestation"
     )
@@ -3329,6 +4138,7 @@ def run_runtime_provenance_probes(
         "ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE",
         "ANSIBLE_TOOLBOX_AUTO_COLLECTIONS",
         "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS",
+        "ANSIBLE_TOOLBOX_NETWORK_MODE",
         "ANSIBLE_COLLECTIONS_SCAN_SYS_PATH",
         "ANSIBLE_NOCOLOR",
     }
@@ -3356,6 +4166,7 @@ def run_runtime_provenance_probes(
             "ANSIBLE_TOOLBOX_MOUNT_INVENTORIES": "false",
             "ANSIBLE_TOOLBOX_MOUNT_SSH": "false",
             "ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT": "false",
+            "ANSIBLE_TOOLBOX_NETWORK_MODE": "none",
         }
     )
     evidence: dict[str, dict[str, Any]] = {}
@@ -3445,8 +4256,11 @@ def normalized_container_backend_identity(
 
 
 def measure_container_backend_identity(
-    environment: dict[str, str], engine: dict[str, str], cwd: Path
-) -> dict[str, str]:
+    environment: dict[str, str], engine: dict[str, Any], cwd: Path
+) -> dict[str, Any]:
+    socket_anchor = validate_container_backend_anchor(engine, trusted_uids={0})
+    if socket_anchor != engine.get("_backend_anchor"):
+        raise ContractError("authenticated container backend anchor changed")
     backend_environment = {
         name: environment[name]
         for name in (
@@ -3472,8 +4286,12 @@ def measure_container_backend_identity(
     digest = sha256_bytes(canonical_json_bytes(identity))
     if digest != engine["backend_identity_sha256"]:
         raise ContractError("container backend identity does not match its root pin")
+    final_socket_anchor = validate_container_backend_anchor(engine, trusted_uids={0})
+    if final_socket_anchor != socket_anchor:
+        raise ContractError("container backend socket changed during identity readback")
     return {
         "backend_uri": engine["backend_uri"],
+        "authenticated_socket": socket_anchor,
         "identity_sha256": digest,
         "identity": identity,
         "stdout_sha256": result["stdout_sha256"],
@@ -3499,6 +4317,7 @@ def make_pre_live_environment(environment: dict[str, str]) -> dict[str, str]:
         "ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE",
         "ANSIBLE_TOOLBOX_AUTO_COLLECTIONS",
         "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS",
+        "ANSIBLE_TOOLBOX_NETWORK_MODE",
         "ANSIBLE_COLLECTIONS_SCAN_SYS_PATH",
         "ANSIBLE_NOCOLOR",
     }
@@ -3508,6 +4327,7 @@ def make_pre_live_environment(environment: dict[str, str]) -> dict[str, str]:
             "ANSIBLE_TOOLBOX_MOUNT_INVENTORIES": "true",
             "ANSIBLE_TOOLBOX_MOUNT_SSH": "false",
             "ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT": "false",
+            "ANSIBLE_TOOLBOX_NETWORK_MODE": "none",
         }
     )
     forbidden = {
@@ -3532,22 +4352,59 @@ def terminate_process(
         return
 
 
+def activate_process_supervisor(supervisor: dict[str, str]) -> None:
+    """Enable the accepted root broker for every subsequently spawned process."""
+    global ACTIVE_PROCESS_SUPERVISOR
+    if set(supervisor) != PROCESS_SUPERVISOR_KEYS:
+        raise ContractError("process supervisor activation contract is incomplete")
+    ACTIVE_PROCESS_SUPERVISOR = dict(supervisor)
+
+
 def run_bounded(
     command: list[str],
     environment: dict[str, str],
     cwd: Path,
     timeout_seconds: int,
     max_output_bytes: int,
+    input_payload: bytes | None = None,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> dict[str, Any]:
     """Run without a TTY and retain only bounded stdout/stderr in memory."""
+    supervisor = ACTIVE_PROCESS_SUPERVISOR
+    effective_command = list(command)
+    effective_timeout = timeout_seconds
+    if supervisor is not None and command[0] != supervisor["path"]:
+        # The accepted root broker owns a launchd job or cgroup-v2 domain and
+        # guarantees that timeout kills include descendants that call setsid,
+        # double-fork, or retain inherited pipes after their parent exits.
+        effective_command = [
+            supervisor["path"],
+            "run",
+            "--profile",
+            supervisor["profile_id"],
+            "--timeout-seconds",
+            str(timeout_seconds),
+            "--max-output-bytes",
+            str(max_output_bytes),
+            "--",
+            *command,
+        ]
+        effective_timeout = timeout_seconds + 15
     started = utc_now()
     monotonic_start = time.monotonic()
+    input_stream = None
+    if input_payload is not None:
+        if len(input_payload) > 2 * 1024 * 1024:
+            raise ContractError("bounded process input exceeds 2 MiB")
+        input_stream = tempfile.TemporaryFile(mode="w+b")
+        input_stream.write(input_payload)
+        input_stream.flush()
+        input_stream.seek(0)
     process = popen_factory(
-        command,
+        effective_command,
         cwd=str(cwd),
         env=environment,
-        stdin=subprocess.DEVNULL,
+        stdin=input_stream if input_stream is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
@@ -3562,6 +4419,8 @@ def run_bounded(
     totals = {"stdout": 0, "stderr": 0}
     termination_reason: str | None = None
     termination_started: float | None = None
+    process_exit_observed: float | None = None
+    pipes_forced_closed = False
     interrupted_signal: int | None = None
     previous_handlers: dict[int, Any] = {}
 
@@ -3574,11 +4433,14 @@ def run_bounded(
         previous_handlers[signum] = signal.signal(signum, forward_signal)
     try:
         while selector.get_map():
-            elapsed = time.monotonic() - monotonic_start
-            if elapsed > timeout_seconds and termination_reason is None:
+            now_monotonic = time.monotonic()
+            elapsed = now_monotonic - monotonic_start
+            if elapsed > effective_timeout and termination_reason is None:
                 termination_reason = "timeout"
-                termination_started = time.monotonic()
+                termination_started = now_monotonic
                 terminate_process(process)
+            if process.poll() is not None and process_exit_observed is None:
+                process_exit_observed = now_monotonic
             for key, _mask in selector.select(timeout=0.2):
                 chunk = os.read(key.fileobj.fileno(), 65536)
                 if not chunk:
@@ -3602,9 +4464,23 @@ def run_bounded(
             if (
                 termination_started is not None
                 and process.poll() is None
-                and time.monotonic() - termination_started > 5
+                and now_monotonic - termination_started > 5
             ):
                 terminate_process(process, signal.SIGKILL)
+            hard_pipe_deadline_reached = (
+                termination_started is not None
+                and now_monotonic - termination_started > 7
+            ) or (
+                process_exit_observed is not None
+                and now_monotonic - process_exit_observed > 2
+            )
+            if hard_pipe_deadline_reached and selector.get_map():
+                termination_reason = termination_reason or "escaped_descendant_pipe"
+                for key in list(selector.get_map().values()):
+                    selector.unregister(key.fileobj)
+                    key.fileobj.close()
+                pipes_forced_closed = True
+                break
         try:
             return_code = process.wait(timeout=5)
         except subprocess.TimeoutExpired:
@@ -3615,8 +4491,12 @@ def run_bounded(
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
         selector.close()
-        process.stdout.close()
-        process.stderr.close()
+        if not process.stdout.closed:
+            process.stdout.close()
+        if not process.stderr.closed:
+            process.stderr.close()
+        if input_stream is not None:
+            input_stream.close()
     ended = utc_now()
     if interrupted_signal is not None:
         termination_reason = f"signal_{interrupted_signal}"
@@ -3632,6 +4512,7 @@ def run_bounded(
         "stderr_sha256": hashes["stderr"].hexdigest(),
         "stdout_bytes": totals["stdout"],
         "stderr_bytes": totals["stderr"],
+        "pipes_forced_closed": pipes_forced_closed,
     }
 
 
@@ -4190,12 +5071,135 @@ def validate_inventory_target_projection(
         controller_source_cidr=str(controller["source_cidr"]),
         target_ipv4=str(target["public_ipv4"]),
     )
+    ipv4_only_baseline = require_mapping(
+        inventory_contract.get("ipv4_only_baseline"),
+        "inventory IPv4-only baseline",
+    )
+    if ipv4_only_baseline != IPV4_ONLY_BASELINE:
+        raise ContractError(
+            "inventory IPv4-only decision/evidence baseline has drifted"
+        )
+    installimage_layout = require_mapping(
+        document.get("hetzner_installimage_layout"),
+        "inventory installimage layout",
+    )
+    if (
+        installimage_layout.get("ipv4_only") is not True
+        or document.get("ubtu24cis_ipv6_required") is not False
+        or document.get("ubtu24cis_ipv6_disable") != "grub"
+    ):
+        raise ContractError(
+            "Installimage and CIS do not implement the accepted IPv4-only baseline"
+        )
+    netplan_ethernets = require_mapping(
+        document.get("netplan_ethernets"), "inventory netplan ethernets"
+    )
+    if set(netplan_ethernets) != {"enp4s0"}:
+        raise ContractError("public Netplan interface set is not exact")
+    public_netplan = require_mapping(
+        netplan_ethernets["enp4s0"], "public Netplan interface"
+    )
+    require_exact_keys(
+        public_netplan,
+        {
+            "dhcp4",
+            "dhcp6",
+            "accept-ra",
+            "link-local",
+            "addresses",
+            "routes",
+            "nameservers",
+        },
+        "public Netplan interface",
+    )
+    public_addresses = require_sequence(
+        public_netplan["addresses"], "public Netplan addresses"
+    )
+    routes = require_sequence(public_netplan["routes"], "public Netplan routes")
+    nameservers = require_mapping(
+        public_netplan["nameservers"], "public Netplan nameservers"
+    )
+    require_exact_keys(nameservers, {"addresses"}, "public Netplan nameservers")
+    try:
+        public_interface = ipaddress.ip_interface(public_addresses[0])
+        route = require_mapping(routes[0], "public Netplan default route")
+        resolver_addresses = [
+            ipaddress.ip_address(value)
+            for value in require_sequence(
+                nameservers["addresses"], "public Netplan resolver addresses"
+            )
+        ]
+        gateway = ipaddress.ip_address(route.get("via"))
+    except (IndexError, TypeError, ValueError) as exc:
+        raise ContractError("public Netplan IPv4 fields are invalid") from exc
+    if (
+        public_netplan["dhcp4"] is not False
+        or public_netplan["dhcp6"] is not False
+        or public_netplan["accept-ra"] is not False
+        or public_netplan["link-local"] != []
+        or len(public_addresses) != 1
+        or public_interface.version != 4
+        or str(public_interface.ip) != str(target["public_ipv4"])
+        or len(routes) != 1
+        or route != {"to": "default", "via": str(gateway)}
+        or gateway.version != 4
+        or not resolver_addresses
+        or any(address.version != 4 for address in resolver_addresses)
+    ):
+        raise ContractError(
+            "public Netplan interface is not IPv4-only and target-exact"
+        )
+    netplan_vlans = require_mapping(
+        document.get("netplan_vlans"), "inventory netplan VLANs"
+    )
+    if netplan_vlans != {
+        "enp4s0.4091": {
+            "id": 4091,
+            "link": "enp4s0",
+            "addresses": ["10.10.30.23/24"],
+            "dhcp6": False,
+            "accept-ra": False,
+            "link-local": [],
+            "mtu": 1400,
+            "optional": True,
+        }
+    }:
+        raise ContractError("management Netplan VLAN is not IPv4-only and target-exact")
+    provider_firewall = require_mapping(
+        document.get("hetzner_baremetal_robot_firewall"),
+        "inventory provider firewall",
+    )
+    if (
+        provider_firewall.get("enabled") is not True
+        or provider_firewall.get("filter_ipv6") is not True
+    ):
+        raise ContractError("provider IPv4-only filter is not active")
+    provider_input_rules = [
+        *require_sequence(
+            document.get("hetzner_baremetal_robot_firewall_bootstrap_input_rules"),
+            "provider bootstrap rules",
+        ),
+        *require_sequence(
+            document.get("hetzner_baremetal_robot_firewall_hardened_input_rules"),
+            "provider hardened rules",
+        ),
+        *require_sequence(
+            document.get("hetzner_baremetal_robot_firewall_deferred_tang_input_rules"),
+            "provider Tang rules",
+        ),
+    ]
+    if any(
+        require_mapping(rule, "provider input rule").get("ip_version") != "ipv4"
+        for rule in provider_input_rules
+    ):
+        raise ContractError("provider input rules contain an IPv6 rule")
     projection = {
-        "schema_version": 2,
+        "schema_version": 3,
         "target": dict(target),
         "controller": {"source_cidr": controller["source_cidr"]},
         "observed": observed,
         "effective_access": effective_access,
+        "ipv4_only_baseline": ipv4_only_baseline,
     }
     recursively_reject_secret_fields(projection, "inventory_projection")
     return projection
@@ -4224,6 +5228,7 @@ def process_phase_record(phase: str, result: dict[str, Any]) -> dict[str, Any]:
         "stderr_sha256": result["stderr_sha256"],
         "stdout_bytes": result["stdout_bytes"],
         "stderr_bytes": result["stderr_bytes"],
+        "pipes_forced_closed": result.get("pipes_forced_closed", False),
     }
 
 
@@ -4242,6 +5247,7 @@ def synthetic_process_result(
         "stderr_sha256": sha256_bytes(b""),
         "stdout_bytes": 0,
         "stderr_bytes": 0,
+        "pipes_forced_closed": False,
     }
 
 
@@ -4275,6 +5281,7 @@ def revalidate_execution_boundary(
     snapshot_evidence: list[dict[str, Any]],
     sealed_ssh_directory: Path | None,
     execution_claim: dict[str, str] | None,
+    consumer_claims: dict[str, dict[str, str]] | None,
     require_execution_unclaimed: bool,
 ) -> dict[str, Any]:
     observed_trust = revalidate_controller_trust(trust)
@@ -4299,13 +5306,25 @@ def revalidate_execution_boundary(
             execution_claim,
             now,
         )
-    for consumer in consumer_approvals.values():
-        revalidate_approval(
-            consumer,
-            observed_trust["approval_authority"],
-            now,
-            require_unclaimed=True,
-        )
+    if consumer_claims is None:
+        for consumer in consumer_approvals.values():
+            revalidate_approval(
+                consumer,
+                observed_trust["approval_authority"],
+                now,
+                require_unclaimed=True,
+            )
+    else:
+        if set(consumer_claims) != set(consumer_approvals):
+            raise ContractError("consumer replay claim set changed")
+        for variable, consumer in consumer_approvals.items():
+            revalidate_brokered_execution_approval(
+                consumer,
+                observed_trust["approval_authority"],
+                observed_trust["replay_broker"],
+                consumer_claims[variable],
+                now,
+            )
     verify_repository_snapshots(snapshots, snapshot_evidence)
     verify_sealed_ssh_inputs(sealed_ssh_directory, manifest, action)
     attestation, attestation_payload = load_and_verify_runtime_attestation(
@@ -4337,6 +5356,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_root_execution_context()
     args = build_parser().parse_args(argv)
     if not ACTION_ID_RE.fullmatch(args.action_id):
         raise SystemExit("invalid --action-id")
@@ -4353,6 +5373,7 @@ def main(argv: list[str] | None = None) -> int:
 
     trust, policy, policy_payload = load_controller_trust()
     execution_anchor_evidence = validate_execution_anchor_runtime(trust)
+    activate_process_supervisor(trust["process_supervisor"])
     policy_digest = sha256_bytes(policy_payload)
     validate_policy(policy)
     gate_manifest_path = require_private_file(
@@ -4406,6 +5427,7 @@ def main(argv: list[str] | None = None) -> int:
     recap: dict[str, Any] | None = None
     execution_claim: dict[str, str] | None = None
     consumer_claims: list[dict[str, str]] = []
+    consumer_broker_claims: dict[str, dict[str, str]] = {}
     runtime_probe_evidence: dict[str, Any] = {}
     container_backend_evidence: dict[str, Any] = {}
     runtime_cleanup_verified = False
@@ -4518,6 +5540,7 @@ def main(argv: list[str] | None = None) -> int:
                 "container_engine": trust["container_engine"],
                 "execution_anchor": execution_anchor_evidence,
                 "replay_broker": trust["replay_broker"],
+                "process_supervisor": trust["process_supervisor"],
                 "manifest_signature": public_signature_trust(
                     trust["manifest_signature"]
                 ),
@@ -4591,6 +5614,7 @@ def main(argv: list[str] | None = None) -> int:
             snapshot_evidence=snapshot_evidence,
             sealed_ssh_directory=sealed_ssh_directory,
             execution_claim=None,
+            consumer_claims=None,
             require_execution_unclaimed=True,
         )
         execution_claim = invoke_replay_broker(
@@ -4613,6 +5637,7 @@ def main(argv: list[str] | None = None) -> int:
                 snapshot_evidence=snapshot_evidence,
                 sealed_ssh_directory=sealed_ssh_directory,
                 execution_claim=execution_claim,
+                consumer_claims=None,
                 require_execution_unclaimed=False,
             )
             active_process_phase = "PRE_LIVE_INVENTORY_PROJECTION"
@@ -4651,6 +5676,19 @@ def main(argv: list[str] | None = None) -> int:
                 "live execution used an exact target-bound inventory projection before payload"
             )
 
+        consumer_broker_claims = {
+            variable: invoke_replay_broker(
+                "claim",
+                approval,
+                boundary["trust"]["replay_broker"],
+            )
+            for variable, approval in consumer_approvals.items()
+        }
+        if consumer_broker_claims:
+            verified_claims.append(
+                "every consumer approval was durably claimed by the root replay broker immediately before payload execution"
+            )
+
         boundary = revalidate_execution_boundary(
             trust=boundary["trust"],
             manifest=manifest,
@@ -4663,6 +5701,7 @@ def main(argv: list[str] | None = None) -> int:
             snapshot_evidence=snapshot_evidence,
             sealed_ssh_directory=sealed_ssh_directory,
             execution_claim=execution_claim,
+            consumer_claims=consumer_broker_claims,
             require_execution_unclaimed=False,
         )
         if (
@@ -4733,10 +5772,14 @@ def main(argv: list[str] | None = None) -> int:
         elif artifacts:
             raise ContractError("action emitted an unexpected governed artifact")
 
-        consumer_claims = verify_consumer_claims(consumer_approvals)
+        consumer_claims = verify_consumer_claims(
+            consumer_approvals,
+            boundary["trust"]["replay_broker"],
+            consumer_broker_claims,
+        )
         if consumer_approvals:
             verified_claims.append(
-                "every consumer approval was independently claimed by its Foundational consumer"
+                "every consumer approval claim was read back from the root-brokered append-only replay store"
             )
         verify_repository_snapshots(snapshots, snapshot_evidence)
         final_attestation, final_attestation_payload = (

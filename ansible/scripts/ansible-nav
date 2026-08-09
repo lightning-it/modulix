@@ -26,6 +26,7 @@ ssh_private_key_file="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE:-}"
 ssh_known_hosts_file="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE:-}"
 ssh_private_key_sha256="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256:-}"
 ssh_known_hosts_sha256="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256:-}"
+network_mode="${ANSIBLE_TOOLBOX_NETWORK_MODE:-default}"
 case "${runtime_mode}" in
   connected)
     run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
@@ -69,6 +70,7 @@ Environment:
   ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_SOURCE=<0700 dir> (required by governed playbook execution)
   ANSIBLE_TOOLBOX_GOVERNED_INPUT_SOURCE=<0700 dir> (mounted read-only at /runner/governed-input)
   ANSIBLE_TOOLBOX_ENGINE_BINARY=<trusted absolute Podman executable>
+  ANSIBLE_TOOLBOX_NETWORK_MODE=default|none         (default: default)
   ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only exact private key>
   ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<digest-bound known_hosts>
   ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=<expected lowercase SHA-256>
@@ -644,6 +646,14 @@ validate_bool "RH_COLLECTIONS_USE" "${rh_collections_use}"
 validate_bool "ANSIBLE_TOOLBOX_RUN_EE_PRELOAD" "${run_ee_preload}"
 validate_bool "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS" "${ee_only_collections}"
 
+case "${network_mode}" in
+  default|none) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NETWORK_MODE='${network_mode}' (use: default|none)." >&2
+    exit 1
+    ;;
+esac
+
 case "${nav_mode}" in
   stdout|interactive) ;;
   *)
@@ -681,6 +691,9 @@ fi
 
 if [[ "${engine}" == "podman" ]]; then
   container_args+=(--security-opt label=disable)
+fi
+if [[ "${network_mode}" == "none" ]]; then
+  container_args+=(--network none)
 fi
 
 if [[ "${ee_only_collections}" == "true" ]]; then
