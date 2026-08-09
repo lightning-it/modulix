@@ -316,6 +316,20 @@ PROJECTION_IPV4_BASELINE_KEYS = {
     "dns",
     "provider",
 }
+PROJECTION_IPV4_BASELINE_NETPLAN_KEYS = {
+    "dhcp6",
+    "accept_ra",
+    "link_local",
+    "source_ipv6",
+    "destination_ipv6",
+}
+PROJECTION_IPV4_BASELINE_DNS_KEYS = {"aaaa_records"}
+PROJECTION_IPV4_BASELINE_PROVIDER_KEYS = {
+    "required_filter_enabled",
+    "ipv6_rules",
+    "assigned_prefix",
+    "assignment_state",
+}
 ACTION_ALLOWED_KEYS = {
     "allowed_extra_vars",
     "allowed_under_safety_hold",
@@ -5065,14 +5079,105 @@ def validate_projection_contract(contract: dict[str, Any]) -> None:
     )
     if not SHA256_RE.fullmatch(str(baseline["evidence_sha256"])):
         raise ContractError("projection contract baseline evidence SHA-256 is invalid")
-    for key in (
-        "installimage_ipv4_only",
-        "cis_ipv4_required",
-        "cis_ipv6_required",
-        "kernel_ipv6_disabled",
-    ):
+    for key in ("decision_id", "evidence_id", "cis_ipv6_disable"):
+        _require_nonempty_string(
+            baseline[key], f"projection contract IPv4 baseline {key}"
+        )
+    required_baseline_flags = {
+        "installimage_ipv4_only": True,
+        "cis_ipv4_required": True,
+        "cis_ipv6_required": False,
+        "kernel_ipv6_disabled": True,
+    }
+    for key, required_value in required_baseline_flags.items():
         if not isinstance(baseline[key], bool):
             raise ContractError("projection contract baseline flags must be boolean")
+        if baseline[key] is not required_value:
+            raise ContractError(
+                f"projection contract IPv4 baseline {key} must be "
+                f"{str(required_value).lower()}"
+            )
+    baseline_netplan = require_mapping(
+        baseline["netplan"], "projection contract IPv4 baseline Netplan"
+    )
+    require_exact_keys(
+        baseline_netplan,
+        PROJECTION_IPV4_BASELINE_NETPLAN_KEYS,
+        "projection contract IPv4 baseline Netplan",
+    )
+    for key in ("dhcp6", "accept_ra"):
+        if not isinstance(baseline_netplan[key], bool):
+            raise ContractError(
+                f"projection contract IPv4 baseline Netplan {key} must be boolean"
+            )
+        if baseline_netplan[key]:
+            raise ContractError(
+                f"projection contract IPv4 baseline Netplan {key} must be false"
+            )
+    for key in ("link_local", "source_ipv6", "destination_ipv6"):
+        if require_sequence(
+            baseline_netplan[key],
+            f"projection contract IPv4 baseline Netplan {key}",
+        ):
+            raise ContractError(
+                f"projection contract IPv4 baseline Netplan {key} must be empty"
+            )
+    baseline_dns = require_mapping(
+        baseline["dns"], "projection contract IPv4 baseline DNS"
+    )
+    require_exact_keys(
+        baseline_dns,
+        PROJECTION_IPV4_BASELINE_DNS_KEYS,
+        "projection contract IPv4 baseline DNS",
+    )
+    if require_sequence(
+        baseline_dns["aaaa_records"],
+        "projection contract IPv4 baseline DNS AAAA records",
+    ):
+        raise ContractError(
+            "projection contract IPv4 baseline DNS AAAA records must be empty"
+        )
+    baseline_provider = require_mapping(
+        baseline["provider"], "projection contract IPv4 baseline provider"
+    )
+    require_exact_keys(
+        baseline_provider,
+        PROJECTION_IPV4_BASELINE_PROVIDER_KEYS,
+        "projection contract IPv4 baseline provider",
+    )
+    if not isinstance(baseline_provider["required_filter_enabled"], bool):
+        raise ContractError(
+            "projection contract IPv4 baseline provider filter flag must be boolean"
+        )
+    if not baseline_provider["required_filter_enabled"]:
+        raise ContractError(
+            "projection contract IPv4 baseline provider filter must be enabled"
+        )
+    if require_sequence(
+        baseline_provider["ipv6_rules"],
+        "projection contract IPv4 baseline provider IPv6 rules",
+    ):
+        raise ContractError(
+            "projection contract IPv4 baseline provider IPv6 rules must be empty"
+        )
+    assigned_prefix = _require_nonempty_string(
+        baseline_provider["assigned_prefix"],
+        "projection contract IPv4 baseline provider assigned prefix",
+    )
+    try:
+        parsed_prefix = ipaddress.ip_network(assigned_prefix, strict=True)
+    except (TypeError, ValueError) as exc:
+        raise ContractError(
+            "projection contract IPv4 baseline provider assigned prefix is invalid"
+        ) from exc
+    if parsed_prefix.version != 6:
+        raise ContractError(
+            "projection contract IPv4 baseline provider assigned prefix must be IPv6"
+        )
+    if baseline_provider["assignment_state"] != "assigned-but-unconfigured":
+        raise ContractError(
+            "projection contract IPv4 baseline provider assignment state is invalid"
+        )
     install = require_mapping(
         expectations["installimage_and_cis"],
         "projection contract installimage/CIS expectations",

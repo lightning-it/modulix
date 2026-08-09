@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -36,8 +37,8 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "udp",
                 "port": 53,
                 "modes": ["bootstrap", "hardened"],
-                "interface": "enp4s0",
-                "destinations_ipv4": ["1.1.1.1/32", "8.8.8.8/32"],
+                "interface": "testpub0",
+                "destinations_ipv4": ["192.0.2.53/32", "198.51.100.53/32"],
                 "destinations_ipv6": [],
                 "declared_fqdns": [],
                 "mtls_required": False,
@@ -49,8 +50,8 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "tcp",
                 "port": 53,
                 "modes": ["bootstrap", "hardened"],
-                "interface": "enp4s0",
-                "destinations_ipv4": ["1.1.1.1/32", "8.8.8.8/32"],
+                "interface": "testpub0",
+                "destinations_ipv4": ["192.0.2.53/32", "198.51.100.53/32"],
                 "destinations_ipv6": [],
                 "declared_fqdns": [],
                 "mtls_required": False,
@@ -62,13 +63,13 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "udp",
                 "port": 123,
                 "modes": ["bootstrap", "hardened"],
-                "interface": "enp4s0",
+                "interface": "testpub0",
                 "destinations_ipv4": ["0.0.0.0/0"],
                 "destinations_ipv6": [],
                 "declared_fqdns": [
-                    "ntp1.hetzner.de",
-                    "ntp2.hetzner.com",
-                    "ntp3.hetzner.net",
+                    "ntp1.example.test",
+                    "ntp2.example.test",
+                    "ntp3.example.test",
                 ],
                 "mtls_required": False,
                 "residual": (
@@ -76,14 +77,14 @@ def sample_host_firewall_egress_policies() -> dict:
                     "resolver-bound NTP addresses exist."
                 ),
             },
-            "atlas_loki": {
+            "observability_loki": {
                 "enabled": True,
                 "status": "approved",
                 "protocol": "tcp",
                 "port": 3100,
                 "modes": ["bootstrap", "hardened"],
-                "interface": "enp4s0.4091",
-                "destinations_ipv4": ["10.10.30.24/32"],
+                "interface": "testmgmt0",
+                "destinations_ipv4": ["198.51.100.24/32"],
                 "destinations_ipv6": [],
                 "declared_fqdns": [],
                 "mtls_required": True,
@@ -102,7 +103,7 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "tcp",
                 "port": 443,
                 "modes": ["bootstrap"],
-                "interface": "enp4s0",
+                "interface": "testpub0",
                 "destinations_ipv4": ["0.0.0.0/0"],
                 "destinations_ipv6": [],
                 "declared_fqdns": [],
@@ -118,13 +119,13 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "tcp",
                 "port": 3128,
                 "modes": ["hardened"],
-                "interface": "enp4s0.4091",
+                "interface": "testmgmt0",
                 "destinations_ipv4": [],
                 "destinations_ipv6": [],
                 "declared_fqdns": [
-                    "mirror.hetzner.com",
-                    "fsn1.your-objectstorage.com",
-                    "bucket.fsn1.your-objectstorage.com",
+                    "mirror.example.test",
+                    "region.object-storage.example.test",
+                    "bucket.region.object-storage.example.test",
                 ],
                 "mtls_required": False,
                 "residual": (
@@ -143,7 +144,7 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "tcp",
                 "port": 443,
                 "modes": ["bootstrap"],
-                "interface": "enp4s0",
+                "interface": "testpub0",
                 "destinations_ipv4": [],
                 "destinations_ipv6": [],
                 "declared_fqdns": [],
@@ -156,13 +157,13 @@ def sample_host_firewall_egress_policies() -> dict:
                 "protocol": "tcp",
                 "port": 3128,
                 "modes": ["hardened"],
-                "interface": "enp4s0.4091",
+                "interface": "testmgmt0",
                 "destinations_ipv4": [],
                 "destinations_ipv6": [],
                 "declared_fqdns": [
-                    "mirror.hetzner.com",
-                    "fsn1.your-objectstorage.com",
-                    "bucket.fsn1.your-objectstorage.com",
+                    "mirror.example.test",
+                    "region.object-storage.example.test",
+                    "bucket.region.object-storage.example.test",
                 ],
                 "mtls_required": False,
                 "residual": (
@@ -193,7 +194,7 @@ def sample_host_firewall_egress_policies() -> dict:
 def sample_policy() -> dict:
     return {
         "schema_version": 2,
-        "policy_id": "wunderbox-test-policy",
+        "policy_id": "root-of-trust-test-policy",
         "required_repositories": [
             "automation",
             "inventory",
@@ -2013,6 +2014,90 @@ class GovernedRecorderTests(unittest.TestCase):
                 with self.assertRaises(MODULE.ContractError):
                     MODULE.validate_projection_contract(candidate)
 
+    def test_projection_contract_closes_ipv4_only_baseline_nested_schemas(self):
+        contract = minimal_projection_contract()
+        MODULE.validate_projection_contract(contract)
+
+        mutations = {
+            "unexpected baseline field": lambda baseline: baseline.update(
+                {"unexpected": True}
+            ),
+            "missing baseline decision": lambda baseline: baseline.pop("decision_id"),
+            "wrong baseline decision type": lambda baseline: baseline.update(
+                {"decision_id": 1}
+            ),
+            "wrong baseline flag type": lambda baseline: baseline.update(
+                {"kernel_ipv6_disabled": "true"}
+            ),
+            "wrong baseline flag value": lambda baseline: baseline.update(
+                {"kernel_ipv6_disabled": False}
+            ),
+            "empty CIS disable mode": lambda baseline: baseline.update(
+                {"cis_ipv6_disable": ""}
+            ),
+            "wrong Netplan object type": lambda baseline: baseline.update(
+                {"netplan": []}
+            ),
+            "unexpected Netplan field": lambda baseline: baseline["netplan"].update(
+                {"unexpected": True}
+            ),
+            "missing Netplan field": lambda baseline: baseline["netplan"].pop("dhcp6"),
+            "wrong Netplan flag type": lambda baseline: baseline["netplan"].update(
+                {"dhcp6": "false"}
+            ),
+            "wrong Netplan flag value": lambda baseline: baseline["netplan"].update(
+                {"accept_ra": True}
+            ),
+            "nonempty Netplan IPv6 list": lambda baseline: baseline["netplan"].update(
+                {"source_ipv6": ["2001:db8::10/128"]}
+            ),
+            "wrong DNS object type": lambda baseline: baseline.update({"dns": []}),
+            "unexpected DNS field": lambda baseline: baseline["dns"].update(
+                {"unexpected": True}
+            ),
+            "missing DNS field": lambda baseline: baseline["dns"].pop("aaaa_records"),
+            "wrong DNS records type": lambda baseline: baseline["dns"].update(
+                {"aaaa_records": "2001:db8::10"}
+            ),
+            "nonempty DNS records": lambda baseline: baseline["dns"].update(
+                {"aaaa_records": ["2001:db8::10"]}
+            ),
+            "wrong provider object type": lambda baseline: baseline.update(
+                {"provider": []}
+            ),
+            "unexpected provider field": lambda baseline: baseline["provider"].update(
+                {"unexpected": True}
+            ),
+            "missing provider field": lambda baseline: baseline["provider"].pop(
+                "assigned_prefix"
+            ),
+            "wrong provider filter type": lambda baseline: baseline["provider"].update(
+                {"required_filter_enabled": "true"}
+            ),
+            "disabled provider filter": lambda baseline: baseline["provider"].update(
+                {"required_filter_enabled": False}
+            ),
+            "nonempty provider IPv6 rules": lambda baseline: baseline[
+                "provider"
+            ].update({"ipv6_rules": [{"action": "accept"}]}),
+            "wrong provider prefix type": lambda baseline: baseline["provider"].update(
+                {"assigned_prefix": 1}
+            ),
+            "IPv4 provider prefix": lambda baseline: baseline["provider"].update(
+                {"assigned_prefix": "192.0.2.0/24"}
+            ),
+            "invalid provider assignment state": lambda baseline: baseline[
+                "provider"
+            ].update({"assignment_state": "configured"}),
+        }
+        for case, mutate in mutations.items():
+            with self.subTest(case=case):
+                candidate = copy.deepcopy(contract)
+                baseline = candidate["expectations"]["ipv4_only_baseline"]
+                mutate(baseline)
+                with self.assertRaises(MODULE.ContractError):
+                    MODULE.validate_projection_contract(candidate)
+
     def test_projection_contract_loader_rejects_wrong_digest_and_tamper(self):
         contract = minimal_projection_contract()
         payload = MODULE.canonical_json_bytes(contract) + b"\n"
@@ -2046,18 +2131,19 @@ class GovernedRecorderTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.ContractError, "pinned digest"):
                 MODULE.load_projection_contract(policy, {"inventory": root})
 
-    def test_generic_recorder_contains_no_environment_topology_literals(self):
+    def test_generic_recorder_contains_no_concrete_environment_topology(self):
         source = SCRIPT.read_text(encoding="utf-8")
-        for forbidden in (
-            "10.10.30.23",
-            "wunderbox01-edge.mgmt.corp.l-it.io",
-            "wunderbox01.prd.edge.pub.l-it.io",
-            "enp4s0.4091",
-            "153.53.58.197",
-            "2a01:4f8:212:69e::/64",
-            "LIT-PIS-ADR-WBX-016",
-        ):
-            self.assertNotIn(forbidden, source)
+        concrete_patterns = {
+            "IPv4 literal": r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])",
+            "instance FQDN": (r"\b[a-z][a-z0-9-]*[0-9]{2}(?:\.[a-z0-9-]+){2,}\b"),
+            "predictable interface": r"\benp[0-9]+s[0-9]+(?:\.[0-9]+)?\b",
+            "numeric provider ID": (
+                r"['\"](?:provider_id|server_id)['\"]\s*:\s*['\"]?[0-9]{6,10}\b"
+            ),
+        }
+        for label, pattern in concrete_patterns.items():
+            with self.subTest(label=label):
+                self.assertIsNone(re.search(pattern, source, flags=re.IGNORECASE))
 
     def test_inventory_projection_is_exactly_target_controller_and_lifecycle_bound(
         self,
@@ -2145,8 +2231,8 @@ class GovernedRecorderTests(unittest.TestCase):
                         "cname_records": [],
                     },
                     "management": {
-                        "fqdn": "wunderbox01-edge.mgmt.corp.l-it.io",
-                        "a_records": ["10.10.30.23"],
+                        "fqdn": "host.management.example.test",
+                        "a_records": ["198.51.100.23"],
                         "aaaa_records": [],
                         "cname_records": [],
                     },
@@ -2174,11 +2260,11 @@ class GovernedRecorderTests(unittest.TestCase):
             "host_firewall_mode": "bootstrap",
             "host_firewall_expected_inventory_hostname": target["fqdn"],
             "host_firewall_expected_public_ipv4": target["public_ipv4"],
-            "host_firewall_expected_management_ipv4": "10.10.30.23",
+            "host_firewall_expected_management_ipv4": "198.51.100.23",
             "host_firewall_expected_public_ipv6": "",
             "host_firewall_expected_management_ipv6": "",
-            "host_firewall_public_interface": "enp4s0",
-            "host_firewall_management_interface": "enp4s0.4091",
+            "host_firewall_public_interface": "testpub0",
+            "host_firewall_management_interface": "testmgmt0",
             "host_firewall_management_access": management_services,
             "host_firewall_controller_source_cidrs": [],
             "host_firewall_recovery_source_cidrs": [],
@@ -2213,7 +2299,7 @@ class GovernedRecorderTests(unittest.TestCase):
             "ubtu24cis_ipv6_required": False,
             "ubtu24cis_ipv6_disable": "grub",
             "netplan_ethernets": {
-                "enp4s0": {
+                "testpub0": {
                     "dhcp4": False,
                     "dhcp6": False,
                     "accept-ra": False,
@@ -2224,10 +2310,10 @@ class GovernedRecorderTests(unittest.TestCase):
                 }
             },
             "netplan_vlans": {
-                "enp4s0.4091": {
-                    "id": 4091,
-                    "link": "enp4s0",
-                    "addresses": ["10.10.30.23/24"],
+                "testmgmt0": {
+                    "id": 4000,
+                    "link": "testpub0",
+                    "addresses": ["198.51.100.23/24"],
                     "dhcp6": False,
                     "accept-ra": False,
                     "link-local": [],
@@ -2237,7 +2323,7 @@ class GovernedRecorderTests(unittest.TestCase):
             },
             "hetzner_baremetal_robot_firewall": {
                 "enabled": True,
-                "admin_ipv4": "153.53.58.197",
+                "admin_ipv4": "192.0.2.20",
                 "filter_ipv6": True,
             },
             "wunderbox_orchestration": {
@@ -2305,15 +2391,15 @@ class GovernedRecorderTests(unittest.TestCase):
             "fresh_readback": False,
             "evidence_reference": pending_dns,
         }
-        document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "213.232.86.209"
+        document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "198.51.100.99"
         with self.assertRaisesRegex(MODULE.ContractError, "IPv4-only"):
             MODULE.validate_inventory_target_projection(
                 document, target, controller, projection_contract
             )
-        document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "153.53.58.197"
+        document["hetzner_baremetal_robot_firewall"]["admin_ipv4"] = "192.0.2.20"
         document["host_firewall_egress_policies"]["hardened"]["functions"][
-            "atlas_loki"
-        ]["destinations_ipv4"] = ["10.10.30.99/32"]
+            "observability_loki"
+        ]["destinations_ipv4"] = ["198.51.100.99/32"]
         with self.assertRaisesRegex(MODULE.ContractError, "egress policies"):
             MODULE.validate_inventory_target_projection(
                 document, target, controller, projection_contract
@@ -2327,7 +2413,7 @@ class GovernedRecorderTests(unittest.TestCase):
                 document, target, controller, projection_contract
             )
         document["wunderbox_orchestration"]["target"]["ipv4"] = target["public_ipv4"]
-        document["netplan_ethernets"]["enp4s0"]["dhcp6"] = True
+        document["netplan_ethernets"]["testpub0"]["dhcp6"] = True
         with self.assertRaisesRegex(MODULE.ContractError, "contract-exact"):
             MODULE.validate_inventory_target_projection(
                 document, target, controller, projection_contract
