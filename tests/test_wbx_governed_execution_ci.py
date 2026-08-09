@@ -119,7 +119,7 @@ class GovernedExecutionWorkflowTests(unittest.TestCase):
         recorder = self.steps["Run governed recorder and policy contracts"]["run"]
         wrappers = self.steps["Run execution wrapper contracts"]["run"]
         for command in (
-            'private_tmp="$(mktemp -d "$HOME/governed-tests.XXXXXX")"',
+            'private_tmp="$(mktemp -d /root/governed-tests.XXXXXX)"',
             'export TMPDIR="$private_tmp"',
             "/usr/bin/python3.11 tests/test_governed_ansible_exec.py",
             "python3 tests/test_governed_runtime_support.py",
