@@ -18,6 +18,9 @@ UBUNTU_DIRECTORY = (
     / "ubuntu"
     / "24"
 )
+CONTROLLER_DIRECTORY = (
+    REPOSITORY_ROOT / "ansible" / "runbooks" / "00-common" / "controller"
+)
 
 
 def load_yaml(path: Path):
@@ -69,6 +72,27 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("Report safe 1Password identity metadata", content)
         self.assertNotIn("onepassword_read_secret", content)
         self.assertNotIn("create_confirmation", content)
+
+    def test_macos_controller_runtime_is_plan_first_and_ansible_only(self):
+        path = CONTROLLER_DIRECTORY / "10-onepassword-runtime.yml"
+        content = path.read_text(encoding="utf-8")
+        plays = load_yaml(path)
+
+        self.assertEqual(len(plays), 1)
+        self.assertEqual(plays[0]["hosts"], "localhost")
+        self.assertEqual(plays[0]["connection"], "local")
+        self.assertIs(plays[0]["become"], False)
+        self.assertIn("onepassword_controller_target", content)
+        self.assertIn("onepassword_controller_runtime_action", content)
+        self.assertIn("['plan', 'apply']", content)
+        self.assertIn("_controller_runtime_action == 'apply'", content)
+        self.assertIn("ansible.builtin.copy", content)
+        self.assertIn("ansible.builtin.stat", content)
+        self.assertNotIn("ansible.builtin.shell", content)
+        self.assertNotIn("ansible.builtin.command", content)
+        self.assertNotIn("lookup('pipe'", content)
+        self.assertNotIn("op item", content)
+        self.assertNotIn("password_recipe", content)
 
     def test_every_onepassword_generation_or_transport_task_is_no_log(self):
         sensitive_modules = {

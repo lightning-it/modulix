@@ -146,6 +146,17 @@ installimage consumer must resolve the exact pinned Password item without
 returning the secret to an Ansible variable, fact, callback, file or command
 argument.
 
+`ansible/runbooks/00-common/controller/10-onepassword-runtime.yml` implements
+the plan-first controller preparation for that separate bootstrap phase. It
+copies one digest-pinned CLI into an inventory-selected root-owned path,
+installs only the public approval signer document and creates the private
+controller-owned consumer replay directory. It targets `localhost`, requires
+one explicit inventory target as context and performs mutations only for the
+explicit `apply` action. The runbook never authenticates to 1Password and never
+reads, creates or transports an item. A successful run therefore prepares the
+boundary but does not by itself clear any blocked action or advance a gate;
+independent readback and acceptance remain mandatory.
+
 Retries never reuse an execution ID, execution approval, consumer approval or
 nonce. Increment the attempt from `001` to `002` and retain the earlier
 Started/Result records, including interrupted or failed attempts. Recorder

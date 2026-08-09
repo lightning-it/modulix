@@ -26,6 +26,10 @@
           - hetzner_baremetal_onepassword.authorized_user_uuids is sequence
           - hetzner_baremetal_onepassword.authorized_user_uuids is not string
           - hetzner_baremetal_onepassword.authorized_user_uuids | length > 0
+          - >-
+            hetzner_baremetal_onepassword.authorized_user_uuids
+            | select('match', '^[A-Z0-9]{26}$') | list | length
+            == hetzner_baremetal_onepassword.authorized_user_uuids | length
           - hetzner_baremetal_onepassword.approval_authority is mapping
           - >-
             hetzner_baremetal_onepassword.approval_authority.keys()
@@ -69,7 +73,7 @@
             | default('') is match('^[0-9a-f]{64}$')
           - >-
             hetzner_baremetal_onepassword.account_id
-            | default('') is match('^[a-z0-9]{26}$')
+            | default('') is match('^[A-Z0-9]{26}$')
           - >-
             hetzner_baremetal_onepassword.vault_id
             | default('') is match('^[a-z0-9]{26}$')
