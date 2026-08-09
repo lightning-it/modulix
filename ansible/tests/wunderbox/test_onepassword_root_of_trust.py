@@ -94,6 +94,15 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertNotIn("op item", content)
         self.assertNotIn("password_recipe", content)
 
+        privileged_tasks = []
+        for section in ("pre_tasks", "tasks", "post_tasks"):
+            privileged_tasks.extend(
+                task for task in plays[0].get(section, []) if task.get("become") is True
+            )
+        self.assertGreater(len(privileged_tasks), 0)
+        for task in privileged_tasks:
+            self.assertIs(task.get("vars", {}).get("ansible_become"), True)
+
     def test_every_onepassword_generation_or_transport_task_is_no_log(self):
         sensitive_modules = {
             "lit.foundational.onepassword_secret_item",
