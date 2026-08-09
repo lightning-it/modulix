@@ -12,6 +12,10 @@ The main entrypoints are:
   secrets used during installation. The external `onepassword_cli` option
   supports an independent root-of-trust bootstrap without depending on a Vault
   service hosted by the target being built.
+- `09-onepassword-recovery-create.yml`: sign and immediately consume two
+  independent, short-lived approvals for initial external Password and
+  Dropbear SSH-key creation. It requires one exact target, six frozen Git
+  commits and an explicit target-bound creation confirmation.
 - `08-recovery-secrets-migrate.yml`: migrate bootstrap recovery documents to
   the declared HashiCorp Vault backend.
 - `08-robot-credentials-migrate.yml`: migrate the controller-local Robot

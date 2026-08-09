@@ -103,6 +103,20 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         for task in privileged_tasks:
             self.assertIs(task.get("vars", {}).get("ansible_become"), True)
 
+    def test_recovery_creation_uses_short_lived_separate_approvals(self):
+        path = HETZNER_DIRECTORY / "09-onepassword-recovery-create.yml"
+        content = path.read_text(encoding="utf-8")
+        plays = load_yaml(path)
+
+        self.assertEqual(plays[0]["hosts"], "hetzner_baremetal")
+        self.assertIn("CREATE-ONEPASSWORD-RECOVERY:", content)
+        self.assertEqual(content.count("lit.foundational.onepassword_approval:"), 2)
+        self.assertIn("create-onepassword-secret", content)
+        self.assertIn("create-onepassword-ssh-key", content)
+        self.assertIn("validity_seconds: 600", content)
+        self.assertIn("ansible.builtin.import_playbook: 08-recovery-secrets.yml", content)
+        self.assertNotIn("ansible.builtin.shell", content)
+
     def test_every_onepassword_generation_or_transport_task_is_no_log(self):
         sensitive_modules = {
             "lit.foundational.onepassword_secret_item",
