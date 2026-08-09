@@ -114,6 +114,8 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("create-onepassword-secret", content)
         self.assertIn("create-onepassword-ssh-key", content)
         self.assertIn("validity_seconds: 600", content)
+        self.assertEqual(content.count("signing_agent_socket_path:"), 2)
+        self.assertNotIn("onepassword_recovery_signing_key_path", content)
         self.assertIn("ansible.builtin.import_playbook: 08-recovery-secrets.yml", content)
         self.assertNotIn("ansible.builtin.shell", content)
 
