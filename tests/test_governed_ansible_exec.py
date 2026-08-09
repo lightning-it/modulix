@@ -1982,6 +1982,38 @@ class GovernedRecorderTests(unittest.TestCase):
                 "projection contract",
             )
 
+    def test_projection_contract_closes_nested_netplan_schema(self):
+        contract = minimal_projection_contract()
+        MODULE.validate_projection_contract(contract)
+
+        mutations = {
+            "unexpected nameserver field": lambda interface: interface[
+                "nameservers"
+            ].update({"unexpected": True}),
+            "missing nameserver addresses": lambda interface: interface[
+                "nameservers"
+            ].pop("addresses"),
+            "wrong nameserver addresses type": lambda interface: interface[
+                "nameservers"
+            ].update({"addresses": "192.0.2.53"}),
+            "unexpected route field": lambda interface: interface["routes"][0].update(
+                {"metric": 100}
+            ),
+            "missing route gateway": lambda interface: interface["routes"][0].pop(
+                "via"
+            ),
+            "wrong route gateway type": lambda interface: interface["routes"][0].update(
+                {"via": 192002001}
+            ),
+        }
+        for case, mutate in mutations.items():
+            with self.subTest(case=case):
+                candidate = copy.deepcopy(contract)
+                interface = candidate["expectations"]["netplan_ethernets"]["eth0"]
+                mutate(interface)
+                with self.assertRaises(MODULE.ContractError):
+                    MODULE.validate_projection_contract(candidate)
+
     def test_projection_contract_loader_rejects_wrong_digest_and_tamper(self):
         contract = minimal_projection_contract()
         payload = MODULE.canonical_json_bytes(contract) + b"\n"

@@ -5120,6 +5120,108 @@ def validate_projection_contract(contract: dict[str, Any]) -> None:
             },
             f"projection contract Netplan interface {name}",
         )
+        for key in ("dhcp4", "dhcp6", "accept-ra"):
+            if not isinstance(interface[key], bool):
+                raise ContractError(
+                    f"projection contract Netplan interface {name} {key} "
+                    "must be boolean"
+                )
+        link_local = require_sequence(
+            interface["link-local"],
+            f"projection contract Netplan interface {name} link-local",
+        )
+        if any(not isinstance(value, str) for value in link_local):
+            raise ContractError(
+                f"projection contract Netplan interface {name} link-local "
+                "must contain strings"
+            )
+        addresses = require_sequence(
+            interface["addresses"],
+            f"projection contract Netplan interface {name} addresses",
+        )
+        if not addresses:
+            raise ContractError(
+                f"projection contract Netplan interface {name} addresses "
+                "must be nonempty"
+            )
+        try:
+            parsed_addresses = [ipaddress.ip_interface(value) for value in addresses]
+        except (TypeError, ValueError) as exc:
+            raise ContractError(
+                f"projection contract Netplan interface {name} addresses are invalid"
+            ) from exc
+        if any(address.version != 4 for address in parsed_addresses):
+            raise ContractError(
+                f"projection contract Netplan interface {name} must remain IPv4-only"
+            )
+        routes = require_sequence(
+            interface["routes"],
+            f"projection contract Netplan interface {name} routes",
+        )
+        if not routes:
+            raise ContractError(
+                f"projection contract Netplan interface {name} routes must be nonempty"
+            )
+        for index, raw_route in enumerate(routes, start=1):
+            route = require_mapping(
+                raw_route,
+                f"projection contract Netplan interface {name} route {index}",
+            )
+            require_exact_keys(
+                route,
+                {"to", "via"},
+                f"projection contract Netplan interface {name} route {index}",
+            )
+            _require_nonempty_string(
+                route["to"],
+                f"projection contract Netplan interface {name} route {index} to",
+            )
+            _require_nonempty_string(
+                route["via"],
+                f"projection contract Netplan interface {name} route {index} via",
+            )
+            try:
+                gateway = ipaddress.ip_address(route["via"])
+            except (TypeError, ValueError) as exc:
+                raise ContractError(
+                    f"projection contract Netplan interface {name} route {index} "
+                    "gateway is invalid"
+                ) from exc
+            if gateway.version != 4:
+                raise ContractError(
+                    f"projection contract Netplan interface {name} route {index} "
+                    "gateway must remain IPv4-only"
+                )
+        nameservers = require_mapping(
+            interface["nameservers"],
+            f"projection contract Netplan interface {name} nameservers",
+        )
+        require_exact_keys(
+            nameservers,
+            {"addresses"},
+            f"projection contract Netplan interface {name} nameservers",
+        )
+        resolver_values = require_sequence(
+            nameservers["addresses"],
+            f"projection contract Netplan interface {name} nameserver addresses",
+        )
+        if not resolver_values:
+            raise ContractError(
+                f"projection contract Netplan interface {name} nameserver addresses "
+                "must be nonempty"
+            )
+        try:
+            resolvers = [ipaddress.ip_address(value) for value in resolver_values]
+        except (TypeError, ValueError) as exc:
+            raise ContractError(
+                f"projection contract Netplan interface {name} nameserver addresses "
+                "are invalid"
+            ) from exc
+        if any(resolver.version != 4 for resolver in resolvers):
+            raise ContractError(
+                f"projection contract Netplan interface {name} nameservers "
+                "must remain IPv4-only"
+            )
     vlans = require_mapping(
         expectations["netplan_vlans"], "projection contract Netplan VLANs"
     )
