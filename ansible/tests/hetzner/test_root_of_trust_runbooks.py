@@ -17,6 +17,7 @@ RUNBOOK_DIRECTORY = (
 )
 G0_RUNBOOK = RUNBOOK_DIRECTORY / "09-root-of-trust-g0-observe.yml"
 G2_RUNBOOK = RUNBOOK_DIRECTORY / "09-root-of-trust-g2-plan.yml"
+G3_PREFLIGHT = RUNBOOK_DIRECTORY / "09-root-of-trust-g3-preflight.yml"
 SELECTION_GUARD = RUNBOOK_DIRECTORY / "tasks" / "require-root-of-trust-selection.yml"
 
 
@@ -105,6 +106,11 @@ class RootOfTrustRunbookTests(unittest.TestCase):
         self.assertIn(
             "hetzner_baremetal_robot_firewall_deferred_tang_input_rules", text
         )
+        self.assertIn("controller_ipv4_cidr", text)
+        self.assertIn("server_lifecycle.status", text)
+        self.assertIn("server_lifecycle.cancelled", text)
+        self.assertIn("filter_ipv6", text)
+        self.assertIn("output_rules", text)
         for forbidden in (
             "resolve-robot-credentials",
             "community.hrobot",
@@ -116,6 +122,43 @@ class RootOfTrustRunbookTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, text.lower())
+
+    def test_g3_preflight_is_root_only_and_cannot_bypass_g2(self):
+        document = load_yaml(G3_PREFLIGHT)
+        self.assertEqual(
+            document[0]["ansible.builtin.import_playbook"],
+            "09-root-of-trust-g2-plan.yml",
+        )
+        self.assertEqual(len(document), 3)
+        for play in document[1:]:
+            self.assertEqual(play["hosts"], "hetzner_baremetal")
+            self.assertEqual(play["serial"], 1)
+            self.assertIs(play["any_errors_fatal"], True)
+            self.assertEqual(
+                play["pre_tasks"][0]["ansible.builtin.import_tasks"],
+                "tasks/require-root-of-trust-selection.yml",
+            )
+
+        text = G3_PREFLIGHT.read_text(encoding="utf-8").lower()
+        for required in (
+            "root_of_trust_validate_result.entrypoint == 'g2_plan'",
+            "provider_firewall_enabled",
+            "ipv6_filter_enabled",
+            "tasks_from: controller_preflight",
+            "lit.foundational.hetzner_rescue_validate",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        for forbidden in (
+            "09-rescue-preflight.yml",
+            "tasks_from: inventory_contract",
+            "tasks_from: data_plane",
+            "hetzner_installimage_action=install",
+            "lit.foundational.hetzner_installimage",
+            "community.hrobot",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, text)
 
 
 if __name__ == "__main__":

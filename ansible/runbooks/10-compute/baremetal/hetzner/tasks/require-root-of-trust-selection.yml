@@ -6,8 +6,8 @@
       - hetzner_baremetal_root_of_trust is mapping
       - >-
         hetzner_baremetal_root_of_trust.keys() | list | sort
-        == ['inventory_hostname', 'schema_version', 'selection_scope',
-            'server_lifecycle']
+        == ['controller_ipv4_cidr', 'inventory_hostname', 'schema_version',
+            'selection_scope', 'server_lifecycle']
       - hetzner_baremetal_root_of_trust.schema_version is integer
       - hetzner_baremetal_root_of_trust.schema_version == 1
       - >-
@@ -19,6 +19,12 @@
       - >-
         hetzner_baremetal_root_of_trust.inventory_hostname
         is not search('[\r\n]')
+      - >-
+        hetzner_baremetal_root_of_trust.controller_ipv4_cidr
+        is match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}/32$')
+      - >-
+        hetzner_baremetal_root_of_trust.controller_ipv4_cidr.split('/')[0].split('.')
+        | map('int') | select('gt', 255) | list | length == 0
       - >-
         hetzner_baremetal_root_of_trust.server_lifecycle.keys() | list | sort
         == ['cancelled', 'status']
@@ -49,7 +55,8 @@
     fail_msg: >-
       Pass one exact --limit equal to the inventory-declared root-of-trust
       hostname. The generic selection scope must be single_root_of_trust and
-      the target must have positive numeric Robot and non-empty network identity.
+      the target must have one exact controller IPv4 /32, positive numeric
+      Robot identity, and non-empty network identity.
     quiet: true
   changed_when: false
   tags: always

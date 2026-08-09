@@ -27,6 +27,10 @@
           inventory_hostname: "{{ inventory_hostname }}"
           server_number: "{{ hetzner_robot_server_number }}"
           public_ipv4: "{{ ansible_host }}"
+          status: >-
+            {{ hetzner_baremetal_root_of_trust.server_lifecycle.status }}
+          cancelled: >-
+            {{ hetzner_baremetal_root_of_trust.server_lifecycle.cancelled }}
         root_of_trust_validate_selected_hosts: "{{ ansible_play_hosts_all }}"
         root_of_trust_validate_expected_fleet: "{{ groups['hetzner_baremetal'] }}"
         root_of_trust_validate_install_order: "{{ hetzner_baremetal_install_order }}"
@@ -36,14 +40,25 @@
           {{ hetzner_baremetal_root_of_trust.inventory_hostname }}
         root_of_trust_validate_tang_host: "{{ hetzner_baremetal_tang_host }}"
         root_of_trust_validate_vault_host: "{{ hetzner_baremetal_vault.host }}"
-        root_of_trust_validate_bootstrap_input_rules: >-
-          {{
-            hetzner_baremetal_robot_firewall_bootstrap_input_rules
-            + hetzner_baremetal_robot_firewall_hardened_input_rules
-          }}
-        root_of_trust_validate_hardened_input_rules: >-
-          {{
-            hetzner_baremetal_robot_firewall_hardened_input_rules
-            + hetzner_baremetal_robot_firewall_deferred_tang_input_rules
-          }}
+        root_of_trust_validate_controller_ipv4_cidr: >-
+          {{ hetzner_baremetal_root_of_trust.controller_ipv4_cidr }}
+        root_of_trust_validate_firewall:
+          enabled: "{{ hetzner_baremetal_robot_firewall.enabled }}"
+          port: "{{ hetzner_baremetal_robot_firewall.port }}"
+          filter_ipv6: "{{ hetzner_baremetal_robot_firewall.filter_ipv6 }}"
+          allowlist_hos: "{{ hetzner_baremetal_robot_firewall.allowlist_hos }}"
+          bootstrap:
+            input: >-
+              {{
+                hetzner_baremetal_robot_firewall_bootstrap_input_rules
+                + hetzner_baremetal_robot_firewall_hardened_input_rules
+              }}
+            output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
+          hardened:
+            input: >-
+              {{
+                hetzner_baremetal_robot_firewall_hardened_input_rules
+                + hetzner_baremetal_robot_firewall_deferred_tang_input_rules
+              }}
+            output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
       tags: [always]

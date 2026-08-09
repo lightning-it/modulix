@@ -1,0 +1,130 @@
+---
+# Root-only preflight for the first provider installation. The imported G2
+# play proves the exact active /32 firewall plan before any controller or
+# Rescue observation. This runbook never calls installimage or a Robot
+# mutation operation and deliberately does not require the complete fleet in
+# Rescue at the same time.
+- name: Enforce the root-of-trust G2 plan before G3 preflight
+  ansible.builtin.import_playbook: 09-root-of-trust-g2-plan.yml
+
+- name: Validate root-only controller and installation declarations
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Enforce the generic single-root selection
+      ansible.builtin.import_tasks: tasks/require-root-of-trust-selection.yml
+      tags: [always]
+
+    - name: Require the imported fail-closed G2 result
+      ansible.builtin.assert:
+        that:
+          - root_of_trust_validate_result is defined
+          - root_of_trust_validate_result.entrypoint == 'g2_plan'
+          - root_of_trust_validate_result.validated | bool
+          - root_of_trust_validate_result.local_only | bool
+          - root_of_trust_validate_result.provider_firewall_enabled | bool
+          - root_of_trust_validate_result.ipv6_filter_enabled | bool
+        fail_msg: >-
+          Root-only G3 preflight requires the imported, successful, active
+          and IPv6-filtered G2 firewall result from this same execution.
+        quiet: true
+      changed_when: false
+      tags: [always]
+
+    - name: Require the root-first installation plan identity
+      ansible.builtin.assert:
+        that:
+          - hetzner_installimage_action == 'plan'
+          - hetzner_installimage_hostname == inventory_hostname
+          - hetzner_installimage_expected_identity.public_ipv4 == ansible_host
+          - hetzner_baremetal_install_order | unique | length
+            == hetzner_baremetal_install_order | length
+          - hetzner_baremetal_install_order | sort
+            == groups['hetzner_baremetal'] | sort
+          - hetzner_baremetal_install_order[0] == inventory_hostname
+          - hetzner_baremetal_install_prerequisite_hosts == [inventory_hostname]
+        fail_msg: >-
+          Root-only G3 preflight requires plan mode, exact target identity,
+          the complete unique fleet order, and the selected root as its sole
+          first prerequisite.
+        quiet: true
+      changed_when: false
+      tags: [always]
+
+  tasks:
+    - name: Validate controller trust identities and authoritative DNS
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_rescue_validate
+        tasks_from: controller_preflight
+      vars:
+        hetzner_rescue_validate_known_hosts_path: >-
+          {{ hetzner_baremetal_rescue_known_hosts_path }}
+        hetzner_rescue_validate_public_ipv4: "{{ ansible_host }}"
+        hetzner_rescue_validate_ssh_ed25519_sha256: >-
+          {{ hetzner_rescue_ssh_ed25519_sha256 }}
+        hetzner_rescue_validate_controller_required_ssh_public_keys: >-
+          {{ deploy_ssh_public_keys + breakglass_public_keys }}
+        hetzner_rescue_validate_controller_dns_resolver: >-
+          {{ hetzner_baremetal_dns_resolver }}
+        hetzner_rescue_validate_controller_dns_records:
+          - name: "{{ inventory_hostname }}"
+            type: A
+            value: "{{ ansible_host }}"
+          - name: "{{ ansible_host }}"
+            type: PTR
+            value: "{{ inventory_hostname }}."
+          - name: "{{ hetzner_baremetal_tang_fqdn }}"
+            type: CNAME
+            value: "{{ hetzner_baremetal_tang_host }}."
+          - name: "{{ hetzner_baremetal_vault.endpoint_fqdn }}"
+            type: CNAME
+            value: "{{ hetzner_baremetal_vault.host }}."
+      tags: [always]
+
+- name: Observe the exact root target in Hetzner Rescue
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+
+  pre_tasks:
+    - name: Enforce the generic single-root selection
+      ansible.builtin.import_tasks: tasks/require-root-of-trust-selection.yml
+      tags: [always]
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      hetzner_rescue_validate_expected_disks: >-
+        {{ hetzner_installimage_expected_disks }}
+      hetzner_rescue_validate_deploy_ssh_public_keys: >-
+        {{ deploy_ssh_public_keys }}
+      hetzner_rescue_validate_robot_user_keys_max_bytes: >-
+        {{ hetzner_baremetal_rescue_robot_user_keys_max_bytes }}
+      hetzner_rescue_validate_rescue_marker_path: >-
+        {{ hetzner_installimage_binary }}
+      hetzner_rescue_validate_smart_policy: >-
+        {{ hetzner_baremetal_smart_policy }}
+      hetzner_rescue_validate_smart_overrides: >-
+        {{ hetzner_baremetal_smart_overrides | default({}) }}
