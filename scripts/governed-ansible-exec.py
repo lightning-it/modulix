@@ -37,9 +37,9 @@ import stat
 import struct
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
+import unicodedata
 from typing import Any, Callable, Iterable
 
 
@@ -59,6 +59,11 @@ SYSTEM_GIT = Path("/usr/bin/git")
 FOUNDATIONAL_APPROVAL_NAMESPACE = "lit-onepassword-approval-v1"
 MAX_APPROVAL_SECONDS = 900
 MAX_CLOCK_SKEW_SECONDS = 60
+MAX_SNAPSHOT_FILES = 100_000
+MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
+MAX_SNAPSHOT_FILE_BYTES = 64 * 1024 * 1024
+MAX_GIT_LISTING_BYTES = 64 * 1024 * 1024
+MAX_GIT_TREE_DEPTH = 64
 SECRET_KEY_RE = re.compile(
     r"(?i)(?:password|passphrase|token|secret|private[_-]?key|credential|"
     r"recovery[_-]?key|unseal|root[_-]?token)"
@@ -947,18 +952,74 @@ def write_new_json(path: Path, payload: dict[str, Any]) -> str:
     return digest
 
 
+def git_environment() -> dict[str, str]:
+    """Return a non-interactive Git environment without local trust overlays."""
+    return {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_CONFIG_COUNT": "4",
+        "GIT_CONFIG_KEY_0": "core.attributesFile",
+        "GIT_CONFIG_VALUE_0": "/dev/null",
+        "GIT_CONFIG_KEY_1": "fsck.skipList",
+        "GIT_CONFIG_VALUE_1": "/dev/null",
+        "GIT_CONFIG_KEY_2": "core.hooksPath",
+        "GIT_CONFIG_VALUE_2": "/dev/null",
+        "GIT_CONFIG_KEY_3": "core.replaceRefs",
+        "GIT_CONFIG_VALUE_3": "false",
+    }
+
+
 def run_git(repo: Path, *args: str) -> str:
     if not SYSTEM_GIT.is_file():
         raise ContractError(f"required system Git is missing: {SYSTEM_GIT}")
-    completed = subprocess.run(
-        [str(SYSTEM_GIT), "-C", str(repo), *args],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
-    )
+    try:
+        completed = subprocess.run(
+            [str(SYSTEM_GIT), "--no-replace-objects", "-C", str(repo), *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+            env=git_environment(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ContractError("system Git verification failed") from exc
+    if completed.returncode != 0:
+        raise ContractError("system Git verification failed")
     return completed.stdout.strip()
+
+
+def run_git_bytes(
+    repo: Path,
+    *args: str,
+    input_payload: bytes | None = None,
+    maximum_output_bytes: int = MAX_GIT_LISTING_BYTES,
+) -> bytes:
+    if not SYSTEM_GIT.is_file():
+        raise ContractError(f"required system Git is missing: {SYSTEM_GIT}")
+    try:
+        completed = subprocess.run(
+            [str(SYSTEM_GIT), "--no-replace-objects", "-C", str(repo), *args],
+            input=input_payload,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=300,
+            env=git_environment(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ContractError("system Git object read failed") from exc
+    if completed.returncode != 0 or len(completed.stdout) > maximum_output_bytes:
+        raise ContractError("system Git object read failed or exceeded its boundary")
+    return completed.stdout
 
 
 def parse_repo(value: str) -> tuple[str, Path]:
@@ -1008,20 +1069,174 @@ def collect_repository_state(
     }
 
 
-def _safe_extract_git_archive(archive: Path, destination: Path) -> None:
-    with tarfile.open(archive, "r:") as stream:
-        members = stream.getmembers()
-        for member in members:
-            member_path = Path(member.name)
-            if (
-                member_path.is_absolute()
-                or ".." in member_path.parts
-                or member.issym()
-                or member.islnk()
-                or not (member.isdir() or member.isfile())
-            ):
-                raise ContractError("Git archive contains an unsafe entry")
-        stream.extractall(destination, members=members, filter="data")
+def git_object_sha1(object_type: str, payload: bytes) -> str:
+    header = f"{object_type} {len(payload)}\0".encode("ascii")
+    digest = hashlib.sha1(usedforsecurity=False)
+    digest.update(header)
+    digest.update(payload)
+    return digest.hexdigest()
+
+
+def read_git_object(repo: Path, object_id: str, object_type: str) -> bytes:
+    if not GIT_SHA_RE.fullmatch(object_id) or object_type not in {
+        "blob",
+        "commit",
+        "tree",
+    }:
+        raise ContractError("Git object request is not exact")
+    payload = run_git_bytes(
+        repo,
+        "cat-file",
+        object_type,
+        object_id,
+        maximum_output_bytes=(
+            MAX_SNAPSHOT_FILE_BYTES if object_type == "blob" else MAX_GIT_LISTING_BYTES
+        ),
+    )
+    if git_object_sha1(object_type, payload) != object_id:
+        raise ContractError("Git object content does not match its object ID")
+    return payload
+
+
+def parse_commit_root_tree(repo: Path, commit: str) -> str:
+    payload = read_git_object(repo, commit, "commit")
+    first_line, separator, _remainder = payload.partition(b"\n")
+    if not separator or not first_line.startswith(b"tree "):
+        raise ContractError("frozen Git commit has no canonical root tree")
+    try:
+        root_tree = first_line.removeprefix(b"tree ").decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ContractError("frozen Git commit root tree is malformed") from exc
+    if not GIT_SHA_RE.fullmatch(root_tree):
+        raise ContractError("frozen Git commit root tree is malformed")
+    return root_tree
+
+
+def safe_git_component(raw_name: bytes, parent: tuple[str, ...]) -> str:
+    try:
+        name = raw_name.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ContractError("Git tree path is not UTF-8") from exc
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or any(ord(character) < 32 or ord(character) == 127 for character in name)
+        or unicodedata.normalize("NFC", name) != name
+    ):
+        raise ContractError("Git tree path is unsafe or non-canonical")
+    full_path = Path(*parent, name)
+    if full_path.is_absolute() or ".." in full_path.parts:
+        raise ContractError("Git tree path escapes its snapshot")
+    return name
+
+
+def parse_git_tree(payload: bytes) -> list[tuple[str, bytes, str]]:
+    entries: list[tuple[str, bytes, str]] = []
+    offset = 0
+    while offset < len(payload):
+        space = payload.find(b" ", offset)
+        nul = payload.find(b"\0", space + 1)
+        if space <= offset or nul < 0 or nul + 21 > len(payload):
+            raise ContractError("Git tree object is malformed")
+        try:
+            mode = payload[offset:space].decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ContractError("Git tree mode is malformed") from exc
+        name = payload[space + 1 : nul]
+        object_id = payload[nul + 1 : nul + 21].hex()
+        entries.append((mode, name, object_id))
+        offset = nul + 21
+    return entries
+
+
+def create_snapshot_directory(path: Path) -> None:
+    try:
+        path.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    status = os.lstat(path)
+    if (
+        not stat.S_ISDIR(status.st_mode)
+        or stat.S_ISLNK(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or stat.S_IMODE(status.st_mode) != 0o700
+    ):
+        raise ContractError("repository snapshot directory is unsafe")
+
+
+def write_snapshot_blob(path: Path, payload: bytes, executable: bool) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o700 if executable else 0o600)
+    except OSError as exc:
+        raise ContractError(
+            "repository snapshot file could not be created safely"
+        ) from exc
+    try:
+        view = memoryview(payload)
+        offset = 0
+        while offset < len(view):
+            written = os.write(descriptor, view[offset:])
+            if written <= 0:
+                raise ContractError("repository snapshot file write was incomplete")
+            offset += written
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def materialize_git_tree(repo: Path, commit: str, destination: Path) -> dict[str, int]:
+    root_tree = parse_commit_root_tree(repo, commit)
+    counters = {"files": 0, "bytes": 0, "trees": 0}
+    collision_keys: set[str] = set()
+    active_trees: set[str] = set()
+
+    def walk(tree_id: str, parent: tuple[str, ...], depth: int) -> None:
+        if depth > MAX_GIT_TREE_DEPTH or tree_id in active_trees:
+            raise ContractError("Git tree depth or recursion exceeds its boundary")
+        active_trees.add(tree_id)
+        counters["trees"] += 1
+        if counters["trees"] > MAX_SNAPSHOT_FILES:
+            raise ContractError("Git snapshot exceeds its tree-count boundary")
+        try:
+            entries = parse_git_tree(read_git_object(repo, tree_id, "tree"))
+            local_names: set[str] = set()
+            for mode, raw_name, object_id in entries:
+                name = safe_git_component(raw_name, parent)
+                local_key = unicodedata.normalize("NFC", name).casefold()
+                if local_key in local_names:
+                    raise ContractError("Git tree has a filesystem-colliding path")
+                local_names.add(local_key)
+                relative_parts = (*parent, name)
+                collision_key = "/".join(relative_parts).casefold()
+                if collision_key in collision_keys:
+                    raise ContractError("Git tree has a filesystem-colliding path")
+                collision_keys.add(collision_key)
+                target = destination.joinpath(*relative_parts)
+                if mode == "40000":
+                    create_snapshot_directory(target)
+                    walk(object_id, relative_parts, depth + 1)
+                    continue
+                if mode not in {"100644", "100755"}:
+                    raise ContractError("Git tree contains an unsupported entry type")
+                payload = read_git_object(repo, object_id, "blob")
+                counters["files"] += 1
+                counters["bytes"] += len(payload)
+                if (
+                    counters["files"] > MAX_SNAPSHOT_FILES
+                    or counters["bytes"] > MAX_SNAPSHOT_BYTES
+                    or len(payload) > MAX_SNAPSHOT_FILE_BYTES
+                ):
+                    raise ContractError("Git snapshot exceeds its size boundary")
+                write_snapshot_blob(target, payload, mode == "100755")
+        finally:
+            active_trees.remove(tree_id)
+
+    walk(root_tree, (), 0)
+    return counters
 
 
 def snapshot_tree_sha256(root: Path) -> str:
@@ -1069,28 +1284,9 @@ def create_repository_snapshots(
         source_repo = Path(str(state["path"]))
         destination = snapshots_root / name
         destination.mkdir(mode=0o700)
-        archive = runtime_root / f"{name}.tar"
-        with archive.open("xb") as output:
-            completed = subprocess.run(
-                [
-                    str(SYSTEM_GIT),
-                    "-C",
-                    str(source_repo),
-                    "archive",
-                    "--format=tar",
-                    str(state["commit"]),
-                ],
-                stdout=output,
-                stderr=subprocess.PIPE,
-                check=False,
-                env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
-            )
-        if completed.returncode != 0:
-            raise ContractError(f"repository {name} snapshot archive failed")
-        try:
-            _safe_extract_git_archive(archive, destination)
-        finally:
-            archive.unlink(missing_ok=True)
+        materialized = materialize_git_tree(
+            source_repo, str(state["commit"]), destination
+        )
         tree_sha256 = snapshot_tree_sha256(destination)
         make_snapshot_read_only(destination)
         snapshots[name] = destination
@@ -1100,7 +1296,11 @@ def create_repository_snapshots(
                 "source_commit": str(state["commit"]),
                 "snapshot_tree_sha256": tree_sha256,
                 "read_only": True,
-                "tracked_archive_only": True,
+                "tracked_objects_only": True,
+                "git_object_integrity_verified": True,
+                "replace_refs_disabled": True,
+                "file_count": materialized["files"],
+                "byte_count": materialized["bytes"],
             }
         )
     os.chmod(snapshots_root, 0o500)
@@ -1110,10 +1310,37 @@ def create_repository_snapshots(
 def verify_repository_snapshots(
     snapshots: dict[str, Path], expected: list[dict[str, Any]]
 ) -> None:
+    evidence_keys = {
+        "name",
+        "source_commit",
+        "snapshot_tree_sha256",
+        "read_only",
+        "tracked_objects_only",
+        "git_object_integrity_verified",
+        "replace_refs_disabled",
+        "file_count",
+        "byte_count",
+    }
+    for entry in expected:
+        require_exact_keys(entry, evidence_keys, "repository snapshot evidence")
     expected_by_name = {entry["name"]: entry for entry in expected}
-    if set(snapshots) != set(expected_by_name):
+    if len(expected_by_name) != len(expected) or set(snapshots) != set(
+        expected_by_name
+    ):
         raise ContractError("repository snapshot set changed")
     for name, root in snapshots.items():
+        evidence = expected_by_name[name]
+        if (
+            evidence["read_only"] is not True
+            or evidence["tracked_objects_only"] is not True
+            or evidence["git_object_integrity_verified"] is not True
+            or evidence["replace_refs_disabled"] is not True
+            or not isinstance(evidence["file_count"], int)
+            or isinstance(evidence["file_count"], bool)
+            or not isinstance(evidence["byte_count"], int)
+            or isinstance(evidence["byte_count"], bool)
+        ):
+            raise ContractError("repository snapshot evidence is not fail-closed")
         root_status = os.lstat(root)
         if (
             not stat.S_ISDIR(root_status.st_mode)
@@ -1121,6 +1348,8 @@ def verify_repository_snapshots(
             or stat.S_IMODE(root_status.st_mode) != 0o500
         ):
             raise ContractError(f"repository snapshot {name} is not read-only")
+        observed_files = 0
+        observed_bytes = 0
         for path in root.rglob("*"):
             status = os.lstat(path)
             if status.st_uid != os.geteuid() or stat.S_ISLNK(status.st_mode):
@@ -1137,6 +1366,14 @@ def verify_repository_snapshots(
                 )
             if stat.S_IMODE(status.st_mode) != expected_mode:
                 raise ContractError(f"repository snapshot {name} permissions changed")
+            if stat.S_ISREG(status.st_mode):
+                observed_files += 1
+                observed_bytes += status.st_size
+        if (
+            observed_files != evidence["file_count"]
+            or observed_bytes != evidence["byte_count"]
+        ):
+            raise ContractError(f"repository snapshot {name} inventory changed")
         if snapshot_tree_sha256(root) != expected_by_name[name]["snapshot_tree_sha256"]:
             raise ContractError(f"repository snapshot {name} changed")
 

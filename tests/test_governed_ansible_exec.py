@@ -964,6 +964,10 @@ class GovernedRecorderTests(unittest.TestCase):
             )
             (repo / ".gitignore").write_text("ignored.tmp\n", encoding="utf-8")
             (repo / "tracked.txt").write_text("frozen\n", encoding="utf-8")
+            (repo / "nested").mkdir()
+            executable = repo / "nested" / "tool"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
             subprocess.run([git, "-C", str(repo), "add", "."], check=True)
             subprocess.run(
                 [git, "-C", str(repo), "commit", "-q", "-m", "frozen"],
@@ -978,8 +982,16 @@ class GovernedRecorderTests(unittest.TestCase):
             runtime.mkdir(mode=0o700)
             snapshots, evidence = MODULE.create_repository_snapshots([state], runtime)
             MODULE.verify_repository_snapshots(snapshots, evidence)
+            self.assertTrue(evidence[0]["tracked_objects_only"])
+            self.assertTrue(evidence[0]["git_object_integrity_verified"])
+            self.assertTrue(evidence[0]["replace_refs_disabled"])
+            self.assertEqual(evidence[0]["file_count"], 3)
             self.assertEqual(
                 (snapshots["automation"] / "tracked.txt").read_text(), "frozen\n"
+            )
+            self.assertEqual(
+                (snapshots["automation"] / "nested" / "tool").stat().st_mode & 0o777,
+                0o500,
             )
             self.assertEqual(
                 (snapshots["automation"] / "tracked.txt").stat().st_mode & 0o777,
@@ -1002,6 +1014,127 @@ class GovernedRecorderTests(unittest.TestCase):
             (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
             with self.assertRaises(MODULE.ContractError):
                 MODULE.collect_repository_state("automation", repo, expected)
+
+            (repo / "tracked.txt").write_text("frozen\n", encoding="utf-8")
+            os.symlink("tracked.txt", repo / "tracked-link")
+            subprocess.run([git, "-C", str(repo), "add", "tracked-link"], check=True)
+            subprocess.run(
+                [git, "-C", str(repo), "commit", "-q", "-m", "symlink"],
+                check=True,
+            )
+            expected = {
+                "branch": MODULE.run_git(repo, "branch", "--show-current"),
+                "commit": MODULE.run_git(repo, "rev-parse", "HEAD"),
+            }
+            state = MODULE.collect_repository_state("automation", repo, expected)
+            unsafe_runtime = root / "unsafe-runtime"
+            unsafe_runtime.mkdir(mode=0o700)
+            with self.assertRaisesRegex(MODULE.ContractError, "unsupported entry"):
+                MODULE.create_repository_snapshots([state], unsafe_runtime)
+
+    def test_repository_snapshots_ignore_replace_refs_and_attribute_overlays(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir(mode=0o700)
+            git = str(MODULE.SYSTEM_GIT)
+            subprocess.run([git, "-C", str(repo), "init", "-q"], check=True)
+            subprocess.run(
+                [git, "-C", str(repo), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(
+                [git, "-C", str(repo), "config", "user.name", "Recorder Test"],
+                check=True,
+            )
+            (repo / "tracked.txt").write_text("frozen\n", encoding="utf-8")
+            subprocess.run([git, "-C", str(repo), "add", "tracked.txt"], check=True)
+            subprocess.run(
+                [git, "-C", str(repo), "commit", "-q", "-m", "frozen"],
+                check=True,
+            )
+            frozen_commit = subprocess.run(
+                [git, "-C", str(repo), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                [git, "-C", str(repo), "branch", "frozen", frozen_commit],
+                check=True,
+            )
+            (repo / "tracked.txt").write_text("attacker\n", encoding="utf-8")
+            subprocess.run([git, "-C", str(repo), "add", "tracked.txt"], check=True)
+            subprocess.run(
+                [git, "-C", str(repo), "commit", "-q", "-m", "attacker"],
+                check=True,
+            )
+            attacker_commit = subprocess.run(
+                [git, "-C", str(repo), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                [git, "-C", str(repo), "checkout", "-q", "frozen"], check=True
+            )
+            subprocess.run(
+                [git, "-C", str(repo), "replace", frozen_commit, attacker_commit],
+                check=True,
+            )
+            replaced_payload = subprocess.run(
+                [git, "-C", str(repo), "show", f"{frozen_commit}:tracked.txt"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            self.assertEqual(replaced_payload, "attacker\n")
+
+            expected = {"branch": "frozen", "commit": frozen_commit}
+            state = MODULE.collect_repository_state("automation", repo, expected)
+            replace_runtime = root / "replace-runtime"
+            replace_runtime.mkdir(mode=0o700)
+            snapshots, evidence = MODULE.create_repository_snapshots(
+                [state], replace_runtime
+            )
+            MODULE.verify_repository_snapshots(snapshots, evidence)
+            self.assertEqual(
+                (snapshots["automation"] / "tracked.txt").read_text(), "frozen\n"
+            )
+            self.assertTrue(MODULE.remove_private_runtime_tree(replace_runtime))
+
+            subprocess.run(
+                [git, "-C", str(repo), "replace", "-d", frozen_commit],
+                check=True,
+                capture_output=True,
+            )
+            attributes = root / "host-attributes"
+            attributes.write_text("tracked.txt export-ignore\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    git,
+                    "-C",
+                    str(repo),
+                    "config",
+                    "core.attributesFile",
+                    str(attributes),
+                ],
+                check=True,
+            )
+            info_attributes = repo / ".git" / "info" / "attributes"
+            info_attributes.write_text("tracked.txt export-ignore\n", encoding="utf-8")
+
+            state = MODULE.collect_repository_state("automation", repo, expected)
+            attributes_runtime = root / "attributes-runtime"
+            attributes_runtime.mkdir(mode=0o700)
+            snapshots, evidence = MODULE.create_repository_snapshots(
+                [state], attributes_runtime
+            )
+            MODULE.verify_repository_snapshots(snapshots, evidence)
+            self.assertEqual(
+                (snapshots["automation"] / "tracked.txt").read_text(), "frozen\n"
+            )
+            self.assertTrue(MODULE.remove_private_runtime_tree(attributes_runtime))
 
     def test_signed_runtime_attestation_matches_effective_collection_tree_probe(self):
         policy = sample_policy()
