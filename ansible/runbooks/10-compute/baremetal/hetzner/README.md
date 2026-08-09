@@ -9,7 +9,9 @@ The main entrypoints are:
 - `07-robot-credentials.yml`: create or verify the encrypted Robot credential
   document.
 - `08-recovery-secrets.yml`: create or verify per-host encrypted-root recovery
-  secrets used during installation.
+  secrets used during installation. The external `onepassword_cli` option
+  supports an independent root-of-trust bootstrap without depending on a Vault
+  service hosted by the target being built.
 - `08-recovery-secrets-migrate.yml`: migrate bootstrap recovery documents to
   the declared HashiCorp Vault backend.
 - `08-robot-credentials-migrate.yml`: migrate the controller-local Robot
@@ -20,6 +22,13 @@ The main entrypoints are:
   workflow.
 - `09-robot-ops.yml`: perform one explicitly authorized Robot lifecycle
   operation.
+- `09-root-of-trust-g0-observe.yml`: observe one exactly selected root of
+  trust through read-only Robot server/firewall calls and a forced-check-mode
+  vSwitch probe. Unsafe drift is returned as findings; API or identity
+  ambiguity remains fatal.
+- `09-root-of-trust-g2-plan.yml`: validate the same exact target, complete
+  fleet/install order, root-first prerequisite/Tang/Vault placement, and the
+  exact bootstrap/hardened Robot firewall plans entirely on the controller.
 - `10-robot-firewall-hardened-tang.yml`: apply the separately authorized Robot
   firewall policy used by a Tang endpoint after its trust material is pinned.
 - `10-installimage.yml`: plan or execute an inventory-selected operating-system
@@ -41,11 +50,48 @@ must never be passed as extra vars, command-line arguments, or environment
 values. After HashiCorp Vault migration, normal provider operations use the
 scoped KV v2 document and TLS-validated controller transport.
 
+An independent root-of-trust target may instead select `onepassword_cli` for
+its LUKS recovery passphrase. Inventory must pin the exact account ID, sign-in
+address, vault ID, item title, item ID, built-in `password` field, CLI path and
+CLI version, and expected length. Creation and consumption are separate gates:
+`plan` performs only
+metadata inspection; `apply` uses 1Password-internal generation and returns the
+non-secret item ID; installation or unlock remains blocked until that ID is
+committed to the private inventory. The controller action rejects service
+account, Connect, and shell-session tokens so it can use only an already
+unlocked desktop CLI integration. Secret reads use a dedicated inherited pipe
+descriptor and never place the value in process arguments, environment
+variables, process stdout, logs, Git, or a plaintext file.
+
+The creation confirmation is
+`CREATE-ONEPASSWORD-SECRET:<inventory-hostname>`. The automation consumes only
+the collection FQCN `lit.foundational.onepassword_secret_item`; 1Password CLI
+implementation details remain owned by `lit.foundational`.
+
 Every destructive or availability-affecting runbook requires an exact
 `--limit`, operation selector, and fresh confirmation string. Rescue
 validation and extended SMART tests remain separate from `09-robot-ops.yml`,
 so a read-only validation run cannot implicitly authorize a reset, rescue
 activation, or firewall change.
+
+The two root-of-trust gates share this generic inventory selection shape:
+
+```yaml
+hetzner_baremetal_root_of_trust:
+  schema_version: 1
+  selection_scope: single_root_of_trust
+  inventory_hostname: root01.example.invalid
+  server_lifecycle:
+    status: ready
+    cancelled: false
+```
+
+Both gates require one exact `--limit` equal to `inventory_hostname`. G0
+requires Robot credentials because it reads provider state; G2 never resolves
+credentials and does not invoke provider, managed-host, secret-backend, or
+installimage/G3 operations. The Collection owns all observation and validation
+logic; these runbooks only map rendered inventory into the generic role
+entrypoints.
 
 ## Operating-system adapters
 

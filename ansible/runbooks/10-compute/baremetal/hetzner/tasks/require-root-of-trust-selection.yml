@@ -1,0 +1,55 @@
+---
+- name: Require the generic single root-of-trust selection contract
+  ansible.builtin.assert:
+    that:
+      - hetzner_baremetal_root_of_trust is defined
+      - hetzner_baremetal_root_of_trust is mapping
+      - >-
+        hetzner_baremetal_root_of_trust.keys() | list | sort
+        == ['inventory_hostname', 'schema_version', 'selection_scope',
+            'server_lifecycle']
+      - hetzner_baremetal_root_of_trust.schema_version is integer
+      - hetzner_baremetal_root_of_trust.schema_version == 1
+      - >-
+        hetzner_baremetal_root_of_trust.selection_scope
+        == 'single_root_of_trust'
+      - >-
+        hetzner_baremetal_root_of_trust.inventory_hostname
+        | trim | length > 0
+      - >-
+        hetzner_baremetal_root_of_trust.inventory_hostname
+        is not search('[\r\n]')
+      - >-
+        hetzner_baremetal_root_of_trust.server_lifecycle.keys() | list | sort
+        == ['cancelled', 'status']
+      - >-
+        hetzner_baremetal_root_of_trust.server_lifecycle.status
+        in ['ready', 'in process']
+      - >-
+        hetzner_baremetal_root_of_trust.server_lifecycle.cancelled is boolean
+      - ansible_limit is defined
+      - >-
+        ansible_limit | string | trim
+        == hetzner_baremetal_root_of_trust.inventory_hostname
+      - ansible_play_hosts_all | length == 1
+      - >-
+        ansible_play_hosts_all
+        == [hetzner_baremetal_root_of_trust.inventory_hostname]
+      - >-
+        inventory_hostname
+        == hetzner_baremetal_root_of_trust.inventory_hostname
+      - "'hetzner_baremetal' in groups"
+      - inventory_hostname in groups['hetzner_baremetal']
+      - hetzner_robot_server_number is defined
+      - hetzner_robot_server_number is integer
+      - hetzner_robot_server_number | int > 0
+      - ansible_host is string
+      - ansible_host | trim | length > 0
+      - ansible_host != '0.0.0.0/0'
+    fail_msg: >-
+      Pass one exact --limit equal to the inventory-declared root-of-trust
+      hostname. The generic selection scope must be single_root_of_trust and
+      the target must have positive numeric Robot and non-empty network identity.
+    quiet: true
+  changed_when: false
+  tags: always

@@ -1,0 +1,49 @@
+---
+# WBX-G2 is a controller-local rendered-inventory plan. It performs no Robot,
+# DNS, filesystem, managed-host, or secret-backend call and never invokes the
+# installimage/G3 path.
+- name: Validate one exact local infrastructure root-of-trust plan
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Enforce the generic single-root selection
+      ansible.builtin.import_tasks: tasks/require-root-of-trust-selection.yml
+      tags: [always]
+
+  tasks:
+    - name: Validate the complete local root-of-trust plan
+      ansible.builtin.include_role:
+        name: lit.foundational.root_of_trust_validate
+        tasks_from: g2_plan
+      vars:
+        root_of_trust_validate_selection_scope: >-
+          {{ hetzner_baremetal_root_of_trust.selection_scope }}
+        root_of_trust_validate_target:
+          inventory_hostname: "{{ inventory_hostname }}"
+          server_number: "{{ hetzner_robot_server_number }}"
+          public_ipv4: "{{ ansible_host }}"
+        root_of_trust_validate_selected_hosts: "{{ ansible_play_hosts_all }}"
+        root_of_trust_validate_expected_fleet: "{{ groups['hetzner_baremetal'] }}"
+        root_of_trust_validate_install_order: "{{ hetzner_baremetal_install_order }}"
+        root_of_trust_validate_prerequisite_hosts: >-
+          {{ hetzner_baremetal_install_prerequisite_hosts }}
+        root_of_trust_validate_root_host: >-
+          {{ hetzner_baremetal_root_of_trust.inventory_hostname }}
+        root_of_trust_validate_tang_host: "{{ hetzner_baremetal_tang_host }}"
+        root_of_trust_validate_vault_host: "{{ hetzner_baremetal_vault.host }}"
+        root_of_trust_validate_bootstrap_input_rules: >-
+          {{
+            hetzner_baremetal_robot_firewall_bootstrap_input_rules
+            + hetzner_baremetal_robot_firewall_hardened_input_rules
+          }}
+        root_of_trust_validate_hardened_input_rules: >-
+          {{
+            hetzner_baremetal_robot_firewall_hardened_input_rules
+            + hetzner_baremetal_robot_firewall_deferred_tang_input_rules
+          }}
+      tags: [always]
