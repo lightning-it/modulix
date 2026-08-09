@@ -50,23 +50,34 @@ must never be passed as extra vars, command-line arguments, or environment
 values. After HashiCorp Vault migration, normal provider operations use the
 scoped KV v2 document and TLS-validated controller transport.
 
-An independent root-of-trust target may instead select `onepassword_cli` for
-its LUKS recovery passphrase. Inventory must pin the exact account ID, sign-in
-address, vault ID, item title, item ID, built-in `password` field, CLI path and
-CLI version, and expected length. Creation and consumption are separate gates:
-`plan` performs only
-metadata inspection; `apply` uses 1Password-internal generation and returns the
-non-secret item ID; installation or unlock remains blocked until that ID is
-committed to the private inventory. The controller action rejects service
-account, Connect, and shell-session tokens so it can use only an already
-unlocked desktop CLI integration. Secret reads use a dedicated inherited pipe
-descriptor and never place the value in process arguments, environment
-variables, process stdout, logs, Git, or a plaintext file.
+An independent root-of-trust target selects `onepassword_cli` for two separate
+items in the explicitly selected external vault: a Password item for the LUKS
+recovery passphrase and an Ed25519 SSH Key item for Dropbear recovery access.
+The CLI creates both values inside 1Password. The private SSH key is never
+exported; only its public key is installed into the generated initramfs with the
+forced `/bin/cryptroot-unlock` command. Each item is immutable in automation:
+after initial discovery or creation, inventory must pin its exact item ID and
+positive item version, and the SSH item must additionally pin the locally
+recomputed SHA-256 public-key fingerprint.
 
-The creation confirmation is
-`CREATE-ONEPASSWORD-SECRET:<inventory-hostname>`. The automation consumes only
-the collection FQCN `lit.foundational.onepassword_secret_item`; 1Password CLI
-implementation details remain owned by `lit.foundational`.
+Password and SSH-key creation are separate gates with separate action selectors
+and confirmations. Metadata-only output deliberately exposes the non-sensitive
+IDs, versions, public key, and fingerprint so they can be reviewed and pinned;
+it never exposes a secret. Before installation and every unlock, the exact
+1Password Agent socket must both enumerate the pinned public key and complete a
+fresh `ssh-keygen -Y sign`/`verify` challenge. The controller rejects service
+account, Connect, and shell-session tokens, so only the already unlocked desktop
+integration is accepted.
+
+The dedicated unlock action revalidates both item versions, reads the Password
+value only through an inherited descriptor, executes an explicitly pinned
+non-TTY SSH session with `/bin/cryptroot-unlock`, sends the passphrase without a
+newline, and closes stdin to delimit it by EOF. The value never enters Ansible
+facts, registered task content, command arguments, environment variables,
+process output, logs, Git, or a plaintext file. Creation confirmations are
+`CREATE-ONEPASSWORD-SECRET:<inventory-hostname>` and
+`CREATE-ONEPASSWORD-SSH-KEY:<inventory-hostname>`; unlock uses
+`UNLOCK:<inventory-hostname>`.
 
 Every destructive or availability-affecting runbook requires an exact
 `--limit`, operation selector, and fresh confirmation string. Rescue

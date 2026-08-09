@@ -28,12 +28,80 @@
           - hetzner_installimage_post_install_script_path is string
           - hetzner_installimage_post_install_script_path is match('^/')
           - hetzner_installimage_post_install_script_ephemeral | default(false) | bool
+          - hetzner_baremetal_secret_backend == 'onepassword_cli'
+          - hetzner_baremetal_onepassword is mapping
+          - >-
+            hetzner_baremetal_onepassword.ssh_key_item.item_id
+            | default('') is match('^[a-z0-9]{26}$')
+          - >-
+            hetzner_baremetal_onepassword.ssh_key_item.item_version
+            | default(0) | int > 0
+          - >-
+            hetzner_baremetal_onepassword.ssh_key_item.expected_fingerprint
+            | default('') is match('^SHA256:[A-Za-z0-9+/]{43}$')
         fail_msg: >-
           Use --limit with one exact Hetzner bare-metal inventory FQDN and
           declare an absolute, explicitly ephemeral
-          hetzner_installimage_post_install_script_path.
+          hetzner_installimage_post_install_script_path, and pin the exact
+          1Password SSH Key item ID, version, and fingerprint.
         quiet: true
       tags: [always]
+
+    - name: Verify the pinned Dropbear public key and its Agent capability
+      lit.foundational.onepassword_ssh_key_item:
+        operation: verify_agent
+        cli_path: "{{ hetzner_baremetal_onepassword.cli_path }}"
+        cli_version: "{{ hetzner_baremetal_onepassword.cli_version }}"
+        account_id: "{{ hetzner_baremetal_onepassword.account_id }}"
+        account_sign_in_address: >-
+          {{ hetzner_baremetal_onepassword.account_sign_in_address }}
+        vault_id: "{{ hetzner_baremetal_onepassword.vault_id }}"
+        item_id: "{{ hetzner_baremetal_onepassword.ssh_key_item.item_id }}"
+        item_version: >-
+          {{ hetzner_baremetal_onepassword.ssh_key_item.item_version | int }}
+        item_title: >-
+          {{ hetzner_baremetal_onepassword.ssh_key_item.item_title }}
+        category: "{{ hetzner_baremetal_onepassword.ssh_key_item.category }}"
+        tags: "{{ hetzner_baremetal_onepassword.ssh_key_item.tags }}"
+        subject: "{{ inventory_hostname }}"
+        schema_version: >-
+          {{ hetzner_baremetal_onepassword.schema_version | int }}
+        key_type: "{{ hetzner_baremetal_onepassword.ssh_key_item.key_type }}"
+        expected_fingerprint: >-
+          {{
+            hetzner_baremetal_onepassword.ssh_key_item.expected_fingerprint
+          }}
+        allow_create: false
+        ssh_add_path: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_path }}
+        ssh_keygen_path: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_path }}
+        agent_socket_path: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.agent_socket_path }}
+      register: _luks_unlock_dropbear_public_identity
+
+    - name: Require the verified exact Dropbear public identity
+      ansible.builtin.assert:
+        that:
+          - _luks_unlock_dropbear_public_identity.agent_verified | bool
+          - >-
+            _luks_unlock_dropbear_public_identity.item_id
+            == hetzner_baremetal_onepassword.ssh_key_item.item_id
+          - >-
+            _luks_unlock_dropbear_public_identity.item_version | int
+            ==
+            hetzner_baremetal_onepassword.ssh_key_item.item_version | int
+          - >-
+            _luks_unlock_dropbear_public_identity.fingerprint
+            ==
+            hetzner_baremetal_onepassword.ssh_key_item.expected_fingerprint
+          - >-
+            _luks_unlock_dropbear_public_identity.public_key
+            is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( .*)?$')
+        fail_msg: >-
+          The exact pinned 1Password SSH Key item or its live Agent signing
+          capability could not be verified; no installimage hook was staged.
+        quiet: true
 
   tasks:
     - name: Stage the secret-free Ubuntu Dropbear hook
@@ -43,6 +111,8 @@
         luks_unlock_enabled: true
         luks_unlock_execution_mode: rescue_stage
         luks_unlock_method: dropbear
+        luks_unlock_dropbear_authorized_keys:
+          - "{{ _luks_unlock_dropbear_public_identity.public_key }}"
 
     - name: Require the staged path to equal the provider contract
       ansible.builtin.assert:

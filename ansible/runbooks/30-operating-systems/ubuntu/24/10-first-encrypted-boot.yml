@@ -1,7 +1,7 @@
 ---
 # Leave Rescue only after explicit approval, verify the generated Dropbear and
 # OpenSSH host keys against the fingerprints stored on the new /boot, and wait
-# while the operator performs the one-time interactive recovery unlock.
+# while the operator authorizes the one-time non-interactive recovery unlock.
 - name: Perform the first encrypted Ubuntu boot
   hosts: hetzner_baremetal
   gather_facts: false
@@ -44,7 +44,7 @@
             or hetzner_installimage_layout.software_raid.level | int == 1
           - >-
             hetzner_baremetal_secret_backend
-            in ['ansible_vault_bootstrap', 'hashicorp_vault']
+            in ['ansible_vault_bootstrap', 'hashicorp_vault', 'onepassword_cli']
           - >-
             hetzner_first_boot_confirmation | default('')
             == 'BOOT:' ~ inventory_hostname
@@ -340,9 +340,10 @@
         prompt: >-
           The generated Dropbear key is verified and pinned. In a second
           terminal run the dedicated 10-bootstrap-unlock.yml command
-          from the private operator guide for this exact host. It decrypts the
-          bootstrap escrow only in memory and supplies the passphrase through
-          SSH stdin under no_log. After it reports success, press Enter here.
+          for this exact host. Its controller action verifies both immutable
+          1Password item versions and the SSH Agent through a signing challenge,
+          then sends the passphrase only through the non-interactive SSH stdin
+          boundary. After it reports success, press Enter here.
 
     - name: Wait for installed OpenSSH
       ansible.builtin.wait_for:
