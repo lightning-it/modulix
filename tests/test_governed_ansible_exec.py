@@ -5,6 +5,7 @@ No test invokes Ansible, a provider, an inventory plugin, or a target host.
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import importlib.util
 import json
@@ -423,6 +424,36 @@ class GovernedRecorderTests(unittest.TestCase):
         }
         with self.assertRaises(MODULE.ContractError):
             MODULE.validate_policy(policy)
+
+    def test_payload_launcher_is_recorded_by_exact_path_and_digest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            automation = root / "automation"
+            inventory = root / "inventory"
+            wrapper = automation / "ansible" / "scripts" / "ansible-nav"
+            inventory_file = inventory / "inventories" / "pub" / "inventory.yml"
+            wrapper.parent.mkdir(parents=True)
+            inventory_file.parent.mkdir(parents=True)
+            wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            wrapper.chmod(0o500)
+            inventory_file.write_text("all: {}\n", encoding="utf-8")
+            command, metadata = MODULE.build_command(
+                {
+                    "mode": "inventory_projection",
+                    "tags": [],
+                    "skip_tags": [],
+                },
+                sample_manifest("f" * 64)["target"],
+                {
+                    "automation": automation.resolve(),
+                    "inventory": inventory.resolve(),
+                },
+                "WBX-EXE-100-A001",
+                None,
+            )
+            self.assertEqual(command[0], str(wrapper.resolve()))
+            self.assertEqual(metadata["launcher_path"], command[0])
+            self.assertEqual(metadata["launcher_sha256"], MODULE.sha256_file(wrapper))
 
     def test_manifest_requires_digest_pinned_images_and_exact_controller_32(self):
         policy = sample_policy()
@@ -1164,6 +1195,39 @@ class GovernedRecorderTests(unittest.TestCase):
         manifest = sample_manifest("f" * 64)
         target = manifest["target"]
         controller = manifest["controller"]
+        management_services = {
+            "bootstrap_ssh": {
+                "port": 22,
+                "modes": ["bootstrap"],
+                "sources_ipv4": [controller["source_cidr"]],
+                "sources_ipv6": [],
+            },
+            "openssh": {
+                "port": 1905,
+                "modes": ["bootstrap", "hardened"],
+                "sources_ipv4": [controller["source_cidr"]],
+                "sources_ipv6": [],
+            },
+            "dropbear": {
+                "port": 2222,
+                "modes": ["bootstrap", "hardened"],
+                "sources_ipv4": [controller["source_cidr"]],
+                "sources_ipv6": [],
+            },
+        }
+        tang_sources = ["192.0.2.30/32", "192.0.2.31/32", "192.0.2.32/32"]
+
+        def provider_rule(port, source, name):
+            return {
+                "ip_version": "ipv4",
+                "protocol": "tcp",
+                "src_ip": source,
+                "dst_ip": target["public_ipv4"],
+                "dst_port": str(port),
+                "name": name,
+                "action": "accept",
+            }
+
         document = {
             "ansible_host": target["public_ipv4"],
             "hostname_fqdn": target["fqdn"],
@@ -1176,7 +1240,35 @@ class GovernedRecorderTests(unittest.TestCase):
                     "fqdn": target["fqdn"],
                     "ipv4": target["public_ipv4"],
                 },
+                "controller_access": {
+                    "management_services": management_services,
+                },
             },
+            "host_firewall_management_access": management_services,
+            "host_firewall_controller_source_cidrs": [],
+            "host_firewall_recovery_source_cidrs": [],
+            "host_firewall_tang_access": {
+                "port": 80,
+                "sources_ipv4": tang_sources,
+                "sources_ipv6": [],
+            },
+            "hetzner_baremetal_robot_firewall_bootstrap_input_rules": [
+                provider_rule(22, controller["source_cidr"], "bootstrap SSH")
+            ],
+            "hetzner_baremetal_robot_firewall_hardened_input_rules": [
+                provider_rule(1905, controller["source_cidr"], "OpenSSH"),
+                provider_rule(2222, controller["source_cidr"], "Dropbear"),
+                {
+                    "ip_version": "ipv4",
+                    "protocol": "icmp",
+                    "name": "ICMP",
+                    "action": "accept",
+                },
+            ],
+            "hetzner_baremetal_robot_firewall_deferred_tang_input_rules": [
+                provider_rule(80, source, f"Tang {index}")
+                for index, source in enumerate(tang_sources, start=1)
+            ],
             "wunderbox_orchestration": {
                 "target": {
                     "id": target["target_id"],
@@ -1195,9 +1287,117 @@ class GovernedRecorderTests(unittest.TestCase):
             document, target, controller
         )
         self.assertEqual(projection["target"], target)
+        self.assertEqual(projection["schema_version"], 2)
+        self.assertEqual(
+            projection["effective_access"]["management_services"]["openssh"],
+            {
+                "protocol": "tcp",
+                "port": 1905,
+                "modes": ["bootstrap", "hardened"],
+                "sources_ipv4": [controller["source_cidr"]],
+                "sources_ipv6": [],
+            },
+        )
+        self.assertEqual(
+            projection["effective_access"]["tang"]["provider_sources_ipv4"],
+            tang_sources,
+        )
         document["wunderbox_orchestration"]["target"]["ipv4"] = "192.0.2.99"
         with self.assertRaisesRegex(MODULE.ContractError, "IPv4"):
             MODULE.validate_inventory_target_projection(document, target, controller)
+
+    def test_inventory_projection_rejects_cross_port_and_tang_policy_drift(self):
+        manifest = sample_manifest("f" * 64)
+        target = manifest["target"]
+        controller = manifest["controller"]
+        management = {
+            name: {
+                "port": port,
+                "modes": modes,
+                "sources_ipv4": [controller["source_cidr"]],
+                "sources_ipv6": [],
+            }
+            for name, port, modes in (
+                ("bootstrap_ssh", 22, ["bootstrap"]),
+                ("openssh", 1905, ["bootstrap", "hardened"]),
+                ("dropbear", 2222, ["bootstrap", "hardened"]),
+            )
+        }
+
+        def rule(port, source):
+            return {
+                "ip_version": "ipv4",
+                "protocol": "tcp",
+                "src_ip": source,
+                "dst_ip": target["public_ipv4"],
+                "dst_port": str(port),
+                "action": "accept",
+            }
+
+        tang_sources = ["192.0.2.30/32"]
+        document = {
+            "wunderbox_inventory_contract": {
+                "controller_access": {"management_services": management}
+            },
+            "host_firewall_management_access": copy.deepcopy(management),
+            "host_firewall_controller_source_cidrs": [],
+            "host_firewall_recovery_source_cidrs": [],
+            "host_firewall_tang_access": {
+                "port": 80,
+                "sources_ipv4": tang_sources,
+                "sources_ipv6": [],
+            },
+            "hetzner_baremetal_robot_firewall_bootstrap_input_rules": [
+                rule(22, controller["source_cidr"])
+            ],
+            "hetzner_baremetal_robot_firewall_hardened_input_rules": [
+                rule(1905, controller["source_cidr"]),
+                rule(2222, controller["source_cidr"]),
+            ],
+            "hetzner_baremetal_robot_firewall_deferred_tang_input_rules": [
+                rule(80, tang_sources[0])
+            ],
+        }
+        MODULE.validate_effective_inventory_access(
+            document,
+            controller_source_cidr=controller["source_cidr"],
+            target_ipv4=target["public_ipv4"],
+        )
+
+        document["host_firewall_management_access"]["openssh"]["sources_ipv4"] = [
+            "192.0.2.99/32"
+        ]
+        with self.assertRaisesRegex(MODULE.ContractError, "do not equal"):
+            MODULE.validate_effective_inventory_access(
+                document,
+                controller_source_cidr=controller["source_cidr"],
+                target_ipv4=target["public_ipv4"],
+            )
+        document["host_firewall_management_access"] = copy.deepcopy(management)
+        document["hetzner_baremetal_robot_firewall_hardened_input_rules"].append(
+            {
+                "ip_version": "ipv4",
+                "protocol": "tcp",
+                "dst_ip": target["public_ipv4"],
+                "action": "accept",
+            }
+        )
+        with self.assertRaisesRegex(MODULE.ContractError, "unprojected inbound TCP"):
+            MODULE.validate_effective_inventory_access(
+                document,
+                controller_source_cidr=controller["source_cidr"],
+                target_ipv4=target["public_ipv4"],
+            )
+        document["hetzner_baremetal_robot_firewall_hardened_input_rules"].pop()
+        document["hetzner_baremetal_robot_firewall_deferred_tang_input_rules"][0][
+            "src_ip"
+        ] = "192.0.2.98/32"
+        with self.assertRaisesRegex(MODULE.ContractError, "do not match"):
+            MODULE.validate_effective_inventory_access(
+                document,
+                controller_source_cidr=controller["source_cidr"],
+                target_ipv4=target["public_ipv4"],
+            )
 
     def test_typed_artifact_rejects_extra_fields_and_target_mismatch(self):
         target = sample_manifest("f" * 64)["target"]

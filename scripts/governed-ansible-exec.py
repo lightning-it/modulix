@@ -196,6 +196,25 @@ EXPECTED_RUNTIME_LOADER = {
     ],
     "scan_sys_path": False,
 }
+INVENTORY_PROJECTION_PATHS = [
+    "hostname_fqdn",
+    "hostname_etc_hosts_ip",
+    "hetzner_robot_server_number",
+    "hetzner_baremetal_root_of_trust.schema_version",
+    "hetzner_baremetal_root_of_trust.selection_scope",
+    "hetzner_baremetal_root_of_trust.inventory_hostname",
+    "hetzner_baremetal_root_of_trust.controller_ipv4_cidr",
+    "hetzner_baremetal_root_of_trust.server_lifecycle.status",
+    "hetzner_baremetal_root_of_trust.server_lifecycle.cancelled",
+    "wunderbox_inventory_contract.controller_access.management_services",
+    "host_firewall_management_access",
+    "host_firewall_tang_access",
+    "host_firewall_controller_source_cidrs",
+    "host_firewall_recovery_source_cidrs",
+    "hetzner_baremetal_robot_firewall_bootstrap_input_rules",
+    "hetzner_baremetal_robot_firewall_hardened_input_rules",
+    "hetzner_baremetal_robot_firewall_deferred_tang_input_rules",
+]
 COLLECTION_PROVENANCE_KEYS = {
     "fqcn",
     "version",
@@ -1291,6 +1310,13 @@ def validate_policy(policy: dict[str, Any]) -> None:
             "playbook",
         }:
             raise ContractError(f"action {action_id} has an invalid mode")
+        if (
+            action.get("mode") == "inventory_projection"
+            and action.get("projection_paths") != INVENTORY_PROJECTION_PATHS
+        ):
+            raise ContractError(
+                f"action {action_id} must pin the complete effective-access projection"
+            )
         for transport_flag in ("requires_ssh_private_key", "requires_ssh_agent"):
             if transport_flag in action and not isinstance(
                 action[transport_flag], bool
@@ -2594,7 +2620,7 @@ def build_command(
     inventory_repo = repos["inventory"]
     wrapper = (automation / "ansible" / "scripts" / "ansible-nav").resolve()
     expected_wrapper = (automation / "ansible" / "scripts" / "ansible-nav").resolve()
-    if wrapper != expected_wrapper or not wrapper.is_file():
+    if wrapper != expected_wrapper or not wrapper.is_file() or wrapper.is_symlink():
         raise ContractError("canonical ansible-nav wrapper is missing")
     inventory_relative = str(action.get("inventory", "inventories/pub/inventory.yml"))
     inventory_path = (inventory_repo / inventory_relative).resolve()
@@ -2662,6 +2688,8 @@ def build_command(
             runtime_extra = "/runner/governed-input/extra-vars.json"
             command.extend(["--extra-vars", f"@{runtime_extra}"])
     return command, {
+        "launcher_path": str(wrapper),
+        "launcher_sha256": sha256_file(wrapper),
         "inventory_path": str(inventory_path),
         "inventory_relative_path": inventory_relative,
         "playbook": playbook or "ansible-inventory",
@@ -3567,6 +3595,264 @@ def validate_typed_artifact(
     }
 
 
+def canonical_ipv4_host_cidr(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ContractError(f"{label} must be one canonical IPv4 /32")
+    try:
+        network = ipaddress.ip_network(value, strict=True)
+    except ValueError as exc:
+        raise ContractError(f"{label} must be one canonical IPv4 /32") from exc
+    if network.version != 4 or network.prefixlen != 32 or str(network) != value:
+        raise ContractError(f"{label} must be one canonical IPv4 /32")
+    return value
+
+
+def validate_effective_inventory_access(
+    document: dict[str, Any], *, controller_source_cidr: str, target_ipv4: str
+) -> dict[str, Any]:
+    """Project the complete resolved, secret-free access semantics.
+
+    This deliberately validates the independently rendered host variables,
+    rather than trusting a single declarative source object.  The management
+    contract, host-firewall consumption and provider rules must agree exactly.
+    """
+    approved_controller = canonical_ipv4_host_cidr(
+        controller_source_cidr, "approved controller source"
+    )
+    inventory_contract = require_mapping(
+        document.get("wunderbox_inventory_contract"), "inventory target contract"
+    )
+    controller_access = require_mapping(
+        inventory_contract.get("controller_access"),
+        "inventory controller access contract",
+    )
+    management = require_mapping(
+        controller_access.get("management_services"),
+        "inventory management-services contract",
+    )
+    host_management = require_mapping(
+        document.get("host_firewall_management_access"),
+        "resolved host-firewall management access",
+    )
+    service_specs = {
+        "bootstrap_ssh": {"port": 22, "modes": ["bootstrap"]},
+        "openssh": {"port": 1905, "modes": ["bootstrap", "hardened"]},
+        "dropbear": {"port": 2222, "modes": ["bootstrap", "hardened"]},
+    }
+    if set(management) != set(service_specs) or host_management != management:
+        raise ContractError(
+            "resolved host-firewall management services do not equal the canonical contract"
+        )
+    normalized_management: dict[str, Any] = {}
+    for name, spec in service_specs.items():
+        service = require_mapping(management[name], f"management service {name}")
+        require_exact_keys(
+            service,
+            {"port", "modes", "sources_ipv4", "sources_ipv6"},
+            f"management service {name}",
+        )
+        sources_ipv4 = require_sequence(
+            service["sources_ipv4"], f"management service {name} IPv4 sources"
+        )
+        sources_ipv6 = require_sequence(
+            service["sources_ipv6"], f"management service {name} IPv6 sources"
+        )
+        if (
+            service["port"] != spec["port"]
+            or service["modes"] != spec["modes"]
+            or sources_ipv4 != [approved_controller]
+            or sources_ipv6 != []
+        ):
+            raise ContractError(
+                f"management service {name} is not port-, mode- and source-exact"
+            )
+        canonical_ipv4_host_cidr(sources_ipv4[0], f"management service {name} source")
+        normalized_management[name] = {
+            "protocol": "tcp",
+            "port": spec["port"],
+            "modes": list(spec["modes"]),
+            "sources_ipv4": list(sources_ipv4),
+            "sources_ipv6": [],
+        }
+
+    bootstrap_rules = require_sequence(
+        document.get("hetzner_baremetal_robot_firewall_bootstrap_input_rules"),
+        "provider bootstrap firewall rules",
+    )
+    hardened_rules = require_sequence(
+        document.get("hetzner_baremetal_robot_firewall_hardened_input_rules"),
+        "provider hardened firewall rules",
+    )
+    phase_rules = {"bootstrap": bootstrap_rules, "hardened": hardened_rules}
+    provider_rule_phases = {
+        "bootstrap_ssh": "bootstrap",
+        "openssh": "hardened",
+        "dropbear": "hardened",
+    }
+    management_ports = {spec["port"] for spec in service_specs.values()}
+    all_management_rules: list[tuple[str, dict[str, Any]]] = []
+    for phase, raw_rules in phase_rules.items():
+        for index, raw_rule in enumerate(raw_rules, start=1):
+            rule = require_mapping(raw_rule, f"provider {phase} rule {index}")
+            try:
+                port = int(str(rule.get("dst_port", "")))
+            except ValueError:
+                continue
+            if port in management_ports:
+                all_management_rules.append((phase, rule))
+    normalized_provider: dict[str, Any] = {}
+    for name, phase in provider_rule_phases.items():
+        port = service_specs[name]["port"]
+        matches = [
+            rule
+            for observed_phase, rule in all_management_rules
+            if observed_phase == phase and int(str(rule.get("dst_port"))) == port
+        ]
+        if len(matches) != 1:
+            raise ContractError(
+                f"provider management rule {name} is missing or ambiguous"
+            )
+        rule = matches[0]
+        source = canonical_ipv4_host_cidr(
+            rule.get("src_ip"), f"provider management rule {name} source"
+        )
+        if (
+            rule.get("ip_version") != "ipv4"
+            or rule.get("protocol") != "tcp"
+            or rule.get("action") != "accept"
+            or str(rule.get("dst_port")) != str(port)
+            or source != approved_controller
+            or str(rule.get("dst_ip")) != target_ipv4
+        ):
+            raise ContractError(
+                f"provider management rule {name} is not target- and source-exact"
+            )
+        normalized_provider[name] = {
+            "protocol": "tcp",
+            "port": port,
+            "sources_ipv4": [source],
+            "sources_ipv6": [],
+        }
+    if len(all_management_rules) != len(provider_rule_phases):
+        raise ContractError("provider firewall contains extra management-port rules")
+    for phase, raw_rules in phase_rules.items():
+        for index, raw_rule in enumerate(raw_rules, start=1):
+            rule = require_mapping(raw_rule, f"provider {phase} rule {index}")
+            try:
+                port = int(str(rule.get("dst_port", "")))
+            except ValueError:
+                port = None
+            if port in management_ports:
+                continue
+            if (
+                rule.get("ip_version") != "ipv4"
+                or rule.get("action") != "accept"
+                or str(rule.get("dst_ip", target_ipv4)) != target_ipv4
+            ):
+                raise ContractError(
+                    f"provider {phase} residual rule {index} is not target-bound"
+                )
+            protocol = rule.get("protocol")
+            if protocol == "tcp":
+                if (
+                    str(rule.get("tcp_flags", "")).lower() != "ack"
+                    or str(rule.get("dst_port")) != "32768-65535"
+                    or rule.get("src_ip") is not None
+                ):
+                    raise ContractError(
+                        "provider firewall contains an unprojected inbound TCP rule"
+                    )
+            elif protocol == "udp":
+                if (
+                    str(rule.get("src_port")) not in {"53", "123"}
+                    or str(rule.get("dst_port")) != "32768-65535"
+                ):
+                    raise ContractError(
+                        "provider firewall contains an unapproved UDP response rule"
+                    )
+            elif protocol != "icmp":
+                raise ContractError(
+                    "provider firewall contains an unapproved residual protocol"
+                )
+
+    host_tang = require_mapping(
+        document.get("host_firewall_tang_access"), "resolved host-firewall Tang access"
+    )
+    require_exact_keys(
+        host_tang,
+        {"port", "sources_ipv4", "sources_ipv6"},
+        "resolved host-firewall Tang access",
+    )
+    host_tang_sources = require_sequence(
+        host_tang["sources_ipv4"], "host-firewall Tang IPv4 sources"
+    )
+    if host_tang["port"] != 80 or host_tang.get("sources_ipv6") != []:
+        raise ContractError("host-firewall Tang access is not TCP/80 IPv4-only")
+    canonical_host_tang_sources = [
+        canonical_ipv4_host_cidr(source, "host-firewall Tang source")
+        for source in host_tang_sources
+    ]
+    if len(canonical_host_tang_sources) != len(set(canonical_host_tang_sources)):
+        raise ContractError("host-firewall Tang sources are not unique")
+
+    provider_tang_rules = require_sequence(
+        document.get("hetzner_baremetal_robot_firewall_deferred_tang_input_rules"),
+        "provider deferred Tang rules",
+    )
+    provider_tang_sources: list[str] = []
+    for index, raw_rule in enumerate(provider_tang_rules, start=1):
+        rule = require_mapping(raw_rule, f"provider Tang rule {index}")
+        source = canonical_ipv4_host_cidr(
+            rule.get("src_ip"), f"provider Tang rule {index} source"
+        )
+        if (
+            rule.get("ip_version") != "ipv4"
+            or rule.get("protocol") != "tcp"
+            or rule.get("action") != "accept"
+            or str(rule.get("dst_port")) != "80"
+            or str(rule.get("dst_ip")) != target_ipv4
+        ):
+            raise ContractError(f"provider Tang rule {index} is not target-exact")
+        provider_tang_sources.append(source)
+    if provider_tang_sources != canonical_host_tang_sources or len(
+        provider_tang_sources
+    ) != len(set(provider_tang_sources)):
+        raise ContractError(
+            "provider and host-firewall Tang source contracts do not match"
+        )
+
+    legacy_controller = require_sequence(
+        document.get("host_firewall_controller_source_cidrs"),
+        "legacy controller aggregate sources",
+    )
+    legacy_recovery = require_sequence(
+        document.get("host_firewall_recovery_source_cidrs"),
+        "legacy recovery aggregate sources",
+    )
+    if legacy_controller != [] or legacy_recovery != []:
+        raise ContractError("legacy cross-port aggregate sources must remain empty")
+
+    projection = {
+        "schema_version": 1,
+        "management_services": normalized_management,
+        "provider_management_rules": normalized_provider,
+        "host_firewall_management_services": normalized_management,
+        "tang": {
+            "protocol": "tcp",
+            "port": 80,
+            "provider_sources_ipv4": provider_tang_sources,
+            "host_sources_ipv4": canonical_host_tang_sources,
+            "sources_ipv6": [],
+        },
+        "legacy_aggregate_sources": {
+            "controller": [],
+            "recovery": [],
+        },
+    }
+    recursively_reject_secret_fields(projection, "effective_access")
+    return projection
+
+
 def validate_inventory_target_projection(
     document: dict[str, Any],
     target: dict[str, Any],
@@ -3662,11 +3948,17 @@ def validate_inventory_target_projection(
         or observed["root_of_trust"]["cancelled"] is not False
     ):
         raise ContractError("inventory projection lifecycle is not ready")
+    effective_access = validate_effective_inventory_access(
+        document,
+        controller_source_cidr=str(controller["source_cidr"]),
+        target_ipv4=str(target["public_ipv4"]),
+    )
     projection = {
-        "schema_version": 1,
+        "schema_version": 2,
         "target": dict(target),
         "controller": {"source_cidr": controller["source_cidr"]},
         "observed": observed,
+        "effective_access": effective_access,
     }
     recursively_reject_secret_fields(projection, "inventory_projection")
     return projection
