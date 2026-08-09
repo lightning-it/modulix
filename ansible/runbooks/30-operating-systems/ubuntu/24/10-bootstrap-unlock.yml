@@ -11,7 +11,7 @@
   serial: 1
 
   pre_tasks:
-    - name: Require one exact host, immutable 1Password pins, and confirmation
+    - name: Require one exact host and recorder-bound 1Password transport
       ansible.builtin.assert:
         that:
           - ansible_limit is defined
@@ -20,6 +20,49 @@
           - hetzner_baremetal_secret_backend == 'onepassword_cli'
           - hetzner_baremetal_onepassword is mapping
           - hetzner_baremetal_onepassword.schema_version | int == 1
+          - >-
+            hetzner_baremetal_onepassword.cli_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - hetzner_baremetal_onepassword.authorized_user_uuids is sequence
+          - hetzner_baremetal_onepassword.authorized_user_uuids is not string
+          - hetzner_baremetal_onepassword.authorized_user_uuids | length > 0
+          - hetzner_baremetal_onepassword.approval_authority is mapping
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.keys()
+            | list | sort == [
+              'allowed_signers_path',
+              'allowed_signers_sha256',
+              'fingerprint',
+              'identity',
+              'namespace',
+              'schema_version',
+              'ssh_keygen_path',
+              'ssh_keygen_sha256'
+            ] | sort
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.schema_version
+            | int == 1
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.namespace
+            == 'lit-onepassword-approval-v1'
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.identity
+            | default('') is match('^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$')
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.fingerprint
+            | default('') is match('^SHA256:[A-Za-z0-9+/]{43}$')
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.allowed_signers_path
+            | default('') is match('^/')
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.allowed_signers_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.ssh_keygen_path
+            | default('') is match('^/')
+          - >-
+            hetzner_baremetal_onepassword.approval_authority.ssh_keygen_sha256
+            | default('') is match('^[0-9a-f]{64}$')
           - >-
             hetzner_baremetal_onepassword.account_id
             | default('') is match('^[a-z0-9]{26}$')
@@ -83,19 +126,37 @@
             hetzner_baremetal_onepassword.ssh_agent.agent_socket_path
             | default('') is match('^/')
           - >-
-            hetzner_bootstrap_unlock_confirmation | default('')
-            == 'UNLOCK:' ~ inventory_hostname
+            hetzner_baremetal_onepassword.ssh_agent.ssh_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            hetzner_baremetal_onepassword.ssh_agent.ssh_add_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            hetzner_bootstrap_unlock_dropbear_fingerprint
+            | default('') is match('^SHA256:[A-Za-z0-9+/]{43}$')
+          - >-
+            hetzner_bootstrap_unlock_known_hosts_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            luks_unlock_dropbear_known_hosts_path
+            | default('') is match('^/')
+          - hetzner_bootstrap_unlock_approval is mapping
         fail_msg: >-
           Use --limit with one exact inventory FQDN, select onepassword_cli,
           pin both exact item IDs and positive item versions plus the SSH
-          fingerprint and controller dependency paths, and pass
-          hetzner_bootstrap_unlock_confirmation=UNLOCK:<inventory-hostname>.
+          and Dropbear host fingerprints and every controller executable
+          digest, and pass only the recorder-validated approval mapping from
+          the signed gate manifest.
         quiet: true
       tags: [always]
 
     - name: Check the pinned known-hosts file
       ansible.builtin.stat:
-        path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+        path: "{{ luks_unlock_dropbear_known_hosts_path }}"
+        checksum_algorithm: sha256
       register: _hetzner_bootstrap_unlock_known_hosts
       changed_when: false
 
@@ -104,6 +165,9 @@
         that:
           - _hetzner_bootstrap_unlock_known_hosts.stat.exists | default(false)
           - _hetzner_bootstrap_unlock_known_hosts.stat.isreg | default(false)
+          - >-
+            _hetzner_bootstrap_unlock_known_hosts.stat.checksum
+            | default('') == hetzner_bootstrap_unlock_known_hosts_sha256
         fail_msg: >-
           The pinned Dropbear known-hosts file is missing. Keep the first-boot
           runbook paused after it verifies and pins the generated host key.
@@ -113,11 +177,14 @@
     - name: Submit the exact pinned 1Password recovery item through pinned SSH
       lit.foundational.onepassword_ssh_secret_stdin:
         cli_path: "{{ hetzner_baremetal_onepassword.cli_path }}"
+        cli_sha256: "{{ hetzner_baremetal_onepassword.cli_sha256 }}"
         cli_version: "{{ hetzner_baremetal_onepassword.cli_version }}"
         account_id: "{{ hetzner_baremetal_onepassword.account_id }}"
         account_sign_in_address: >-
           {{ hetzner_baremetal_onepassword.account_sign_in_address }}
         vault_id: "{{ hetzner_baremetal_onepassword.vault_id }}"
+        authorized_user_uuids: >-
+          {{ hetzner_baremetal_onepassword.authorized_user_uuids }}
         password_item_id: >-
           {{ hetzner_baremetal_onepassword.password_item.item_id }}
         password_item_version: >-
@@ -149,20 +216,32 @@
         schema_version: >-
           {{ hetzner_baremetal_onepassword.schema_version | int }}
         ssh_path: "{{ hetzner_baremetal_onepassword.ssh_agent.ssh_path }}"
+        ssh_sha256: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_sha256 }}
         ssh_add_path: >-
           {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_path }}
+        ssh_add_sha256: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_sha256 }}
         ssh_keygen_path: >-
           {{ hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_path }}
+        ssh_keygen_sha256: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_sha256 }}
         agent_socket_path: >-
           {{ hetzner_baremetal_onepassword.ssh_agent.agent_socket_path }}
         known_hosts_path: >-
-          {{ hetzner_baremetal_rescue_known_hosts_path }}
+          {{ luks_unlock_dropbear_known_hosts_path }}
+        known_hosts_sha256: >-
+          {{ hetzner_bootstrap_unlock_known_hosts_sha256 }}
         destination_host: "{{ inventory_hostname }}"
         destination_user: root
         destination_port: "{{ luks_unlock_dropbear_port | int }}"
+        destination_host_fingerprint: >-
+          {{ hetzner_bootstrap_unlock_dropbear_fingerprint }}
         remote_command: /bin/cryptroot-unlock
-        confirmation: >-
-          {{ hetzner_bootstrap_unlock_confirmation }}
+        approval: >-
+          {{ hetzner_bootstrap_unlock_approval }}
+        approval_authority: >-
+          {{ hetzner_baremetal_onepassword.approval_authority }}
       no_log: true
 
     - name: Report successful no-output encrypted-root unlock

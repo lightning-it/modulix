@@ -278,12 +278,12 @@
             fail_msg: >-
               The installimage role did not return a valid plan hash.
 
-        - name: Show the secret-free installation approval hash
+        - name: Show the secret-free installation approval plan
           ansible.builtin.debug:
-            msg: >-
-              HETZNER_INSTALLIMAGE_PLAN_SHA256={{
-                hetzner_installimage_plan_sha256
-              }}
+            msg:
+              target: "{{ inventory_hostname }}"
+              action: "{{ hetzner_installimage_action | default('plan') }}"
+              plan_sha256: "{{ hetzner_installimage_plan_sha256 }}"
       always:
         - name: Close any controller Vault transport opened for installation
           ansible.builtin.include_tasks: >-

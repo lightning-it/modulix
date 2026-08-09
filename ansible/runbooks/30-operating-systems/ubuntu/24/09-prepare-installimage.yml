@@ -31,6 +31,12 @@
           - hetzner_baremetal_secret_backend == 'onepassword_cli'
           - hetzner_baremetal_onepassword is mapping
           - >-
+            hetzner_baremetal_onepassword.cli_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - hetzner_baremetal_onepassword.authorized_user_uuids is sequence
+          - hetzner_baremetal_onepassword.authorized_user_uuids is not string
+          - hetzner_baremetal_onepassword.authorized_user_uuids | length > 0
+          - >-
             hetzner_baremetal_onepassword.ssh_key_item.item_id
             | default('') is match('^[a-z0-9]{26}$')
           - >-
@@ -39,6 +45,12 @@
           - >-
             hetzner_baremetal_onepassword.ssh_key_item.expected_fingerprint
             | default('') is match('^SHA256:[A-Za-z0-9+/]{43}$')
+          - >-
+            hetzner_baremetal_onepassword.ssh_agent.ssh_add_sha256
+            | default('') is match('^[0-9a-f]{64}$')
+          - >-
+            hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_sha256
+            | default('') is match('^[0-9a-f]{64}$')
         fail_msg: >-
           Use --limit with one exact Hetzner bare-metal inventory FQDN and
           declare an absolute, explicitly ephemeral
@@ -51,11 +63,14 @@
       lit.foundational.onepassword_ssh_key_item:
         operation: verify_agent
         cli_path: "{{ hetzner_baremetal_onepassword.cli_path }}"
+        cli_sha256: "{{ hetzner_baremetal_onepassword.cli_sha256 }}"
         cli_version: "{{ hetzner_baremetal_onepassword.cli_version }}"
         account_id: "{{ hetzner_baremetal_onepassword.account_id }}"
         account_sign_in_address: >-
           {{ hetzner_baremetal_onepassword.account_sign_in_address }}
         vault_id: "{{ hetzner_baremetal_onepassword.vault_id }}"
+        authorized_user_uuids: >-
+          {{ hetzner_baremetal_onepassword.authorized_user_uuids }}
         item_id: "{{ hetzner_baremetal_onepassword.ssh_key_item.item_id }}"
         item_version: >-
           {{ hetzner_baremetal_onepassword.ssh_key_item.item_version | int }}
@@ -74,11 +89,16 @@
         allow_create: false
         ssh_add_path: >-
           {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_path }}
+        ssh_add_sha256: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_sha256 }}
         ssh_keygen_path: >-
           {{ hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_path }}
+        ssh_keygen_sha256: >-
+          {{ hetzner_baremetal_onepassword.ssh_agent.ssh_keygen_sha256 }}
         agent_socket_path: >-
           {{ hetzner_baremetal_onepassword.ssh_agent.agent_socket_path }}
       register: _luks_unlock_dropbear_public_identity
+      no_log: true
 
     - name: Require the verified exact Dropbear public identity
       ansible.builtin.assert:

@@ -631,6 +631,12 @@ add_env_if_set VAULT_ADDR
 add_env_if_set VAULT_SKIP_VERIFY
 add_env_if_set VAULT_TOKEN
 add_env_if_set RH_AUTOMATION_HUB_TOKEN
+add_env_if_set ANSIBLE_NOCOLOR
+add_env_if_set ANSIBLE_DISPLAY_ARGS_TO_STDOUT
+add_env_if_set ANSIBLE_STDOUT_CALLBACK
+add_env_if_set ANSIBLE_CALLBACK_PLUGINS
+add_env_if_set LIT_GOVERNED_ACTION_ID
+add_env_if_set LIT_GOVERNED_SAFE_TASKS
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   if [[ "${engine}" != "podman" ]]; then

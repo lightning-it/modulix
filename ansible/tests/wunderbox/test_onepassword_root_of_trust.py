@@ -26,6 +26,28 @@ def load_yaml(path: Path):
         return yaml.safe_load(stream)
 
 
+def walk_tasks(tasks):
+    """Yield tasks recursively through Ansible block/rescue/always sections."""
+    for task in tasks:
+        yield task
+        for section in ("block", "rescue", "always"):
+            yield from walk_tasks(task.get(section, []))
+
+
+def named_task(plays, name: str):
+    """Find one exact task name across every play and nested task section."""
+    matches = []
+    for play in plays:
+        for section in ("pre_tasks", "tasks", "post_tasks"):
+            matches.extend(
+                task for task in walk_tasks(play.get(section, []))
+                if task.get("name") == name
+            )
+    if len(matches) != 1:
+        raise AssertionError(f"expected one task named {name!r}, got {len(matches)}")
+    return matches[0]
+
+
 class OnePasswordRootOfTrustTests(unittest.TestCase):
     """Keep secret creation, public-key staging, and consumption fail closed."""
 
@@ -39,8 +61,71 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("ssh_key_item.item_version", content)
         self.assertIn("ssh_key_item.expected_fingerprint", content)
         self.assertIn("ssh_keygen_path", content)
+        self.assertIn("cli_sha256", content)
+        self.assertIn("authorized_user_uuids", content)
+        self.assertIn("ssh_add_sha256", content)
+        self.assertIn("ssh_keygen_sha256", content)
+        self.assertIn("approval_authority", content)
         self.assertIn("Report safe 1Password identity metadata", content)
         self.assertNotIn("onepassword_read_secret", content)
+        self.assertNotIn("create_confirmation", content)
+
+    def test_every_onepassword_generation_or_transport_task_is_no_log(self):
+        sensitive_modules = {
+            "lit.foundational.onepassword_secret_item",
+            "lit.foundational.onepassword_ssh_key_item",
+            "lit.foundational.onepassword_ssh_secret_stdin",
+        }
+        paths = (
+            HETZNER_DIRECTORY / "08-recovery-secrets.yml",
+            UBUNTU_DIRECTORY / "09-prepare-installimage.yml",
+            UBUNTU_DIRECTORY / "10-bootstrap-unlock.yml",
+        )
+        sensitive_tasks = []
+        for path in paths:
+            for play in load_yaml(path):
+                for section in ("pre_tasks", "tasks", "post_tasks"):
+                    for task in walk_tasks(play.get(section, [])):
+                        if sensitive_modules.intersection(task):
+                            sensitive_tasks.append((path.name, task))
+
+        self.assertEqual(len(sensitive_tasks), 4)
+        for filename, task in sensitive_tasks:
+            with self.subTest(file=filename, task=task.get("name")):
+                self.assertIs(task.get("no_log"), True)
+
+    def test_backend_orchestration_preserves_fail_closed_day2_contracts(self):
+        creation = (HETZNER_DIRECTORY / "08-recovery-secrets.yml").read_text(
+            encoding="utf-8"
+        )
+        resolver = (
+            REPOSITORY_ROOT
+            / "ansible"
+            / "runbooks"
+            / "00-common"
+            / "tasks"
+            / "resolve-recovery-secret.yml"
+        ).read_text(encoding="utf-8")
+        prepare = (UBUNTU_DIRECTORY / "09-prepare-installimage.yml").read_text(
+            encoding="utf-8"
+        )
+        bootstrap_unlock = (
+            UBUNTU_DIRECTORY / "10-bootstrap-unlock.yml"
+        ).read_text(encoding="utf-8")
+        day2_unlock = (UBUNTU_DIRECTORY / "11-luks-unlock.yml").read_text(
+            encoding="utf-8"
+        )
+        day2_header = (UBUNTU_DIRECTORY / "13-luks-header-backup.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("'onepassword_cli'", creation)
+        self.assertIn("== 'onepassword_cli'", prepare)
+        self.assertIn("== 'onepassword_cli'", bootstrap_unlock)
+        self.assertNotIn("'onepassword_cli'", resolver)
+        for content in (day2_unlock, day2_header):
+            self.assertIn("== 'hashicorp_vault'", content)
+            self.assertNotIn("'onepassword_cli'", content)
 
     def test_dropbear_hook_uses_only_the_verified_public_key(self):
         plays = load_yaml(UBUNTU_DIRECTORY / "09-prepare-installimage.yml")
@@ -55,6 +140,16 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
             verify_task["lit.foundational.onepassword_ssh_key_item"]["operation"],
             "verify_agent",
         )
+        verify_arguments = verify_task[
+            "lit.foundational.onepassword_ssh_key_item"
+        ]
+        for required in (
+            "cli_sha256",
+            "authorized_user_uuids",
+            "ssh_add_sha256",
+            "ssh_keygen_sha256",
+        ):
+            self.assertIn(required, verify_arguments)
         role_task = next(
             task
             for task in play["tasks"]
@@ -82,7 +177,17 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("password_item_version", arguments)
         self.assertIn("ssh_item_version", arguments)
         self.assertIn("ssh_expected_fingerprint", arguments)
+        self.assertIn("cli_sha256", arguments)
+        self.assertIn("authorized_user_uuids", arguments)
+        self.assertIn("ssh_sha256", arguments)
+        self.assertIn("ssh_add_sha256", arguments)
         self.assertIn("ssh_keygen_path", arguments)
+        self.assertIn("ssh_keygen_sha256", arguments)
+        self.assertIn("destination_host_fingerprint", arguments)
+        self.assertIn("known_hosts_sha256", arguments)
+        self.assertIn("approval", arguments)
+        self.assertIn("approval_authority", arguments)
+        self.assertNotIn("confirmation", arguments)
         self.assertNotIn("register", unlock_task)
         self.assertNotIn("resolve-recovery-secret.yml", content)
         self.assertNotIn("_hetzner_baremetal_recovery_passphrase", content)
@@ -94,8 +199,28 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("'onepassword_cli'", content)
-        self.assertIn("non-interactive SSH stdin", content)
+        self.assertIn("independently recorded unlock", content)
         self.assertNotIn("under no_log", content)
+
+    def test_boot_unlock_and_reconnect_are_noninteractive_phases(self):
+        boot = (UBUNTU_DIRECTORY / "10-first-encrypted-boot.yml").read_text(
+            encoding="utf-8"
+        )
+        unlock = (UBUNTU_DIRECTORY / "10-bootstrap-unlock.yml").read_text(
+            encoding="utf-8"
+        )
+        reconnect = (UBUNTU_DIRECTORY / "11-first-boot-reconnect.yml").read_text(
+            encoding="utf-8"
+        )
+
+        for content in (boot, unlock, reconnect):
+            self.assertNotIn("ansible.builtin.pause", content)
+        self.assertIn("End the boot phase before", boot)
+        self.assertIn("luks_unlock_dropbear_known_hosts_path", boot)
+        self.assertIn("known_hosts_sha256", boot)
+        self.assertIn("connection: local", reconnect)
+        self.assertIn("hetzner_first_boot_openssh_fingerprint", reconnect)
+        self.assertIn("RECONNECT:", reconnect)
 
 
 if __name__ == "__main__":

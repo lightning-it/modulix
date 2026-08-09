@@ -1,0 +1,168 @@
+---
+# Complete the first-boot trust transition after the separately recorded
+# cryptroot unlock.  This controller-local phase never waits for operator input
+# and accepts the generated OpenSSH fingerprint only through the signed
+# execution authorization and its policy-bound extra-vars file.
+- name: Verify and pin installed OpenSSH after first-boot unlock
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require one exact host, fingerprint, and reconnect confirmation
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - >-
+            hetzner_first_boot_openssh_fingerprint | default('')
+            is match('^SHA256:[A-Za-z0-9+/]{43}$')
+          - >-
+            hetzner_first_boot_reconnect_confirmation | default('')
+            == 'RECONNECT:' ~ inventory_hostname
+        fail_msg: >-
+          Use one exact inventory FQDN and the signed, evidence-derived
+          OpenSSH fingerprint plus RECONNECT:<inventory-hostname>.
+        quiet: true
+      tags: [always]
+
+  tasks:
+    - name: Wait for installed OpenSSH
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        state: started
+        connect_timeout: 5
+        timeout: 900
+      delegate_to: localhost
+      become: false
+
+    - name: Scan the generated OpenSSH host key
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - -q
+          - -T
+          - "10"
+          - -t
+          - ed25519
+          - "{{ ansible_host }}"
+      delegate_to: localhost
+      become: false
+      register: _first_boot_openssh_keyscan
+      changed_when: false
+
+    - name: Require exactly one valid generated OpenSSH key line
+      ansible.builtin.assert:
+        that:
+          - _first_boot_openssh_keyscan.rc == 0
+          - _first_boot_openssh_keyscan.stdout_lines | length == 1
+          - _first_boot_openssh_keyscan.stdout_lines[0].split() | length == 3
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[0]
+            == ansible_host
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _first_boot_openssh_keyscan.stdout_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          OpenSSH keyscan did not return exactly one valid Ed25519 host key;
+          no installed key was pinned.
+
+    - name: Create a temporary OpenSSH key file
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .pub
+      delegate_to: localhost
+      become: false
+      register: _first_boot_openssh_key_file
+      changed_when: false
+
+    - name: Validate and pin the generated OpenSSH key
+      block:
+        - name: Store the scanned OpenSSH key
+          ansible.builtin.copy:
+            content: "{{ _first_boot_openssh_keyscan.stdout | trim }}\n"
+            dest: "{{ _first_boot_openssh_key_file.path }}"
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Calculate the OpenSSH fingerprint
+          ansible.builtin.command:
+            argv:
+              - ssh-keygen
+              - -E
+              - sha256
+              - -lf
+              - "{{ _first_boot_openssh_key_file.path }}"
+          delegate_to: localhost
+          become: false
+          register: _first_boot_openssh_fingerprint_actual
+          changed_when: false
+
+        - name: Require the approved generated OpenSSH fingerprint
+          ansible.builtin.assert:
+            that:
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout_lines
+                | length == 1
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()
+                | length >= 2
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()[1]
+                is match('^SHA256:[A-Za-z0-9+/]{43}$')
+              - >-
+                _first_boot_openssh_fingerprint_actual.stdout.split()[1]
+                == hetzner_first_boot_openssh_fingerprint
+            fail_msg: "The installed OpenSSH host key is not the approved key."
+
+        - name: Remove the previous Rescue hostname key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Remove the previous Rescue address key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ ansible_host }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Pin the generated installed OpenSSH host key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ inventory_hostname }}"
+            key: >-
+              {{ inventory_hostname }},{{ ansible_host }}
+              {{ _first_boot_openssh_keyscan.stdout.split(' ', 1)[1] }}
+            state: present
+          delegate_to: localhost
+          become: false
+      always:
+        - name: Remove the temporary OpenSSH key file
+          ansible.builtin.file:
+            path: "{{ _first_boot_openssh_key_file.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+    - name: Report the verified installed OpenSSH handoff
+      ansible.builtin.debug:
+        msg:
+          target: "{{ inventory_hostname }}"
+          openssh_fingerprint: "{{ hetzner_first_boot_openssh_fingerprint }}"
+          state: installed_openssh_pinned
