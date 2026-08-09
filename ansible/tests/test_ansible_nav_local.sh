@@ -13,28 +13,46 @@ mkdir -p "${fake_bin}" "${home}/.ssh"
 cat > "${fake_bin}/ansible-navigator" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
+portable_mode() {
+  if stat -c '%a' -- "$1" >/dev/null 2>&1; then
+    stat -c '%a' -- "$1"
+  else
+    stat -f '%Lp' -- "$1"
+  fi
+}
+
+list_stage_files() {
+  local staged_dir="$1"
+  local file
+  for file in "${staged_dir}"/*; do
+    [[ -f "${file}" ]] && basename -- "${file}"
+  done | sort | paste -sd, -
+}
+
 {
   printf 'COLLECTIONS=%s\n' "${ANSIBLE_COLLECTIONS_PATH:-}"
+  printf 'COLLECTIONS_SCAN_SYS_PATH=%s\n' "${ANSIBLE_COLLECTIONS_SCAN_SYS_PATH:-}"
   printf 'ROLES=%s\n' "${ANSIBLE_ROLES_PATH:-}"
   printf 'VAULT_PASSWORD_FILE=%s\n' "${ANSIBLE_VAULT_PASSWORD_FILE:-}"
   printf 'ARG=%s\n' "$@"
   for argument in "$@"; do
     if [[ "${argument}" == *:/runner/.ssh:ro ]]; then
       staged_dir="${argument%:/runner/.ssh:ro}"
-      printf 'SSH_STAGE_FILES=%s\n' "$(find "${staged_dir}" -maxdepth 1 -type f -printf '%f\n' | sort | paste -sd, -)"
+      printf 'SSH_STAGE_FILES=%s\n' "$(list_stage_files "${staged_dir}")"
       printf 'SSH_STAGE_MODES=%s\n' "$(
-        stat -c '%a' \
-          "${staged_dir}/config" \
-          "${staged_dir}/id_selected" \
-          "${staged_dir}/known_hosts" \
-          | paste -sd, -
+        {
+          portable_mode "${staged_dir}/config"
+          portable_mode "${staged_dir}/id_selected"
+          portable_mode "${staged_dir}/known_hosts"
+        } | paste -sd, -
       )"
       printf 'SSH_CONFIG=%s\n' "$(tr '\n' ';' < "${staged_dir}/config")"
     fi
     if [[ "${argument}" == *:/runner/.ansible-secrets:ro ]]; then
       staged_dir="${argument%:/runner/.ansible-secrets:ro}"
-      printf 'VAULT_STAGE_FILES=%s\n' "$(find "${staged_dir}" -maxdepth 1 -type f -printf '%f\n' | sort | paste -sd, -)"
-      printf 'VAULT_STAGE_MODE=%s\n' "$(stat -c '%a' "${staged_dir}/ansible-vault-pass.txt")"
+      printf 'VAULT_STAGE_FILES=%s\n' "$(list_stage_files "${staged_dir}")"
+      printf 'VAULT_STAGE_MODE=%s\n' "$(portable_mode "${staged_dir}/ansible-vault-pass.txt")"
     fi
   done
 } > "${FAKE_NAV_OUTPUT}"
@@ -60,6 +78,8 @@ env \
 grep -Fxq \
   'COLLECTIONS=/usr/share/ansible/collections:/usr/share/automation-controller/collections' \
   "${ee_only_output}"
+grep -Fxq 'COLLECTIONS_SCAN_SYS_PATH=False' "${ee_only_output}"
+grep -Fxq 'ARG=ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=False' "${ee_only_output}"
 if grep -Fq '/tmp/untrusted-overlay' "${ee_only_output}"; then
   echo "EE-only mode retained an inherited collection overlay." >&2
   exit 1
@@ -120,6 +140,13 @@ printf '%s\n' 'fixture-private-key' > "${key}"
 printf '%s\n' 'fixture.example ssh-ed25519 AAAAfixture' > "${known_hosts}"
 chmod 0600 "${key}"
 chmod 0644 "${known_hosts}"
+if command -v sha256sum >/dev/null 2>&1; then
+  key_sha256="$(sha256sum "${key}" | awk '{print $1}')"
+  known_hosts_sha256="$(sha256sum "${known_hosts}" | awk '{print $1}')"
+else
+  key_sha256="$(shasum -a 256 "${key}" | awk '{print $1}')"
+  known_hosts_sha256="$(shasum -a 256 "${known_hosts}" | awk '{print $1}')"
+fi
 
 ssh_output="${test_root}/ssh.out"
 env \
@@ -130,6 +157,8 @@ env \
   "ANSIBLE_SSH_ARGS=-o ControlPersist=120" \
   "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=${key}" \
   "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=${known_hosts}" \
+  "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=${key_sha256}" \
+  "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256=${known_hosts_sha256}" \
   "${script}" run example.yml
 
 grep -Fxq 'ARG=ANSIBLE_PRIVATE_KEY_FILE=/runner/.ssh/id_selected' "${ssh_output}"
@@ -145,6 +174,20 @@ grep -Fq 'IdentityFile /runner/.ssh/id_selected' "${ssh_output}"
 grep -Fq 'IdentitiesOnly yes' "${ssh_output}"
 if grep -Fq "${home}/.ssh" "${ssh_output}"; then
   echo "The complete SSH directory was mounted into the execution environment." >&2
+  exit 1
+fi
+
+if env \
+  "${common_env[@]}" \
+  "FAKE_NAV_OUTPUT=${test_root}/wrong-key-digest.out" \
+  "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true" \
+  "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman" \
+  "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=${key}" \
+  "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=${known_hosts}" \
+  "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=$(printf '0%.0s' {1..64})" \
+  "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256=${known_hosts_sha256}" \
+  "${script}" run example.yml >/dev/null 2>&1; then
+  echo "Explicit SSH key use accepted a mismatched digest." >&2
   exit 1
 fi
 
@@ -190,6 +233,8 @@ for unsafe_ssh_args in "-F /tmp/untrusted-ssh-config" "-F/tmp/untrusted-ssh-conf
     "ANSIBLE_SSH_ARGS=${unsafe_ssh_args}" \
     "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=${key}" \
     "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=${known_hosts}" \
+    "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=${key_sha256}" \
+    "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256=${known_hosts_sha256}" \
     "${script}" run example.yml >/dev/null 2>"${unsafe_ssh_stderr}"; then
     echo "ANSIBLE_SSH_ARGS accepted an overriding SSH configuration file." >&2
     exit 1

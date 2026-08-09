@@ -1,8 +1,8 @@
 ---
 ansible-navigator:
   ansible-runner:
-    artifact-dir: /runner/project/.ansible-runner
-    rotate-artifacts-count: 10
+    artifact-dir: /tmp/.ansible-runner
+    rotate-artifacts-count: 1
   execution-environment:
     enabled: true
     container-engine: podman
@@ -23,7 +23,9 @@ ansible-navigator:
         - ANSIBLE_DISPLAY_ARGS_TO_STDOUT
         - ANSIBLE_STDOUT_CALLBACK
         - ANSIBLE_CALLBACK_PLUGINS
+        - ANSIBLE_COLLECTIONS_SCAN_SYS_PATH
         - LIT_GOVERNED_ACTION_ID
+        - LIT_GOVERNED_EXECUTION_ID
         - LIT_GOVERNED_SAFE_TASKS
         - VAULT_ADDR
         - VAULT_SKIP_VERIFY
@@ -31,7 +33,8 @@ ansible-navigator:
       set:
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp/.ansible/tmp
-        ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/opt/modulix/ansible/collections:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+        ANSIBLE_COLLECTIONS_PATH: "/usr/share/ansible/collections:/usr/share/automation-controller/collections"
+        ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "False"
   mode: stdout
   playbook-artifact:
     enable: false

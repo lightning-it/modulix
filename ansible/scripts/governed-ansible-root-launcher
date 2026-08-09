@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+readonly launcher_path="/Library/Application Support/Lightning IT/Governed Ansible/bin/governed-ansible-exec"
+readonly recorder_path="/Library/Application Support/Lightning IT/Governed Ansible/libexec/governed-ansible-exec.py"
+readonly interpreter_path="/usr/bin/python3"
+
+if [[ "$0" != "${launcher_path}" ]]; then
+  echo "The governed recorder must run from its root-owned installed launcher." >&2
+  exit 126
+fi
+
+unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP PYTHONINSPECT
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+export LIT_GOVERNED_LAUNCHER_PATH="${launcher_path}"
+exec "${interpreter_path}" -I "${recorder_path}" "$@"

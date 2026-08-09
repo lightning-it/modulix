@@ -30,6 +30,7 @@ class CallbackModule(CallbackBase):
     def __init__(self) -> None:
         super().__init__()
         self._action_id = os.environ.get("LIT_GOVERNED_ACTION_ID", "")
+        self._execution_id = os.environ.get("LIT_GOVERNED_EXECUTION_ID", "")
         raw_tasks = os.environ.get("LIT_GOVERNED_SAFE_TASKS", "[]")
         try:
             tasks = json.loads(raw_tasks)
@@ -64,6 +65,7 @@ class CallbackModule(CallbackBase):
             {
                 "schema_version": 1,
                 "action_id": self._action_id,
+                "execution_id": self._execution_id,
             }
         )
         self._display.display(
