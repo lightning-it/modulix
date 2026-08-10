@@ -25,8 +25,24 @@
     test "${keys_size}" -gt 0
     test "${keys_size}" -le "${LIT_ROBOT_KEYS_MAX_BYTES}"
 
-    normalized_robot_keys="$(awk 'NF {$1=$1; print}' "${robot_keys}")"
-    test "${normalized_robot_keys}" = "${LIT_EXPECTED_DEPLOY_KEYS}"
+    normalize_public_keys() {
+      awk 'NF {
+        for (field = 1; field <= NF; field++) {
+          if ($field ~ /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-)/ && field < NF) {
+            print $field " " $(field + 1)
+            break
+          }
+        }
+      }'
+    }
+
+    normalized_robot_keys="$(normalize_public_keys < "${robot_keys}")"
+    normalized_expected_keys="$({
+      printf '%s\n' "${LIT_EXPECTED_DEPLOY_KEYS}"
+    } | normalize_public_keys)"
+    test -n "${normalized_robot_keys}"
+    test -n "${normalized_expected_keys}"
+    test "${normalized_robot_keys}" = "${normalized_expected_keys}"
   args:
     executable: /bin/bash
   delegate_to: "{{ hetzner_installimage_order_host }}"

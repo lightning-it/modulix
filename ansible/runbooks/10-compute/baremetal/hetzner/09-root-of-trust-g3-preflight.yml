@@ -57,6 +57,15 @@
       tags: [always]
 
   tasks:
+    - name: Ensure the exact private controller trust directory exists
+      ansible.builtin.file:
+        path: "{{ hetzner_baremetal_rescue_known_hosts_path | dirname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      tags: [always]
+
     - name: Validate controller trust identities and authoritative DNS
       ansible.builtin.include_role:
         name: lit.foundational.hetzner_rescue_validate

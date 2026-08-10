@@ -1,0 +1,194 @@
+---
+- name: Plan, apply, or roll back retirement of exact legacy Robot SSH keys
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _wbx_goal04_expected_host: wunderbox01.prd.edge.pub.l-it.io
+    _wbx_goal04_expected_server: 3035773
+    _wbx_goal04_expected_ipv4: 136.243.38.174
+    _wbx_goal04_snapshot_dir: "{{ playbook_dir }}/../../../../evidence/goal04"
+    _wbx_goal04_snapshot_path: >-
+      {{ _wbx_goal04_snapshot_dir }}/robot-legacy-ssh-keys-before-retirement.json
+    _wbx_goal04_legacy_key_identities:
+      - name: RSA (4096)
+        fingerprint: 08:54:19:9c:d0:33:b4:27:3f:20:ad:61:dc:3c:45:93
+      - name: ro@l-it.io
+        fingerprint: 28:9e:eb:38:4d:b2:cf:32:36:8c:8b:05:3f:de:20:f3
+      - name: svc_ansible@lit-codex-20260712
+        fingerprint: 93:9a:cf:14:3a:c1:76:82:ff:85:bf:89:03:e5:97:05
+    _wbx_goal04_confirmation_expected: >-
+      {{
+        (wbx_goal04_legacy_key_action | default('plan') | upper)
+        ~ '-WBX-G04-LEGACY-KEYS:' ~ _wbx_goal04_expected_host
+        ~ ':' ~ (_wbx_goal04_expected_server | string)
+        ~ ':' ~ _wbx_goal04_expected_ipv4
+      }}
+
+  pre_tasks:
+    - name: Require the exact frozen Goal 04 target and action
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == _wbx_goal04_expected_host
+          - inventory_hostname == _wbx_goal04_expected_host
+          - hetzner_robot_server_number | int == _wbx_goal04_expected_server
+          - ansible_host == _wbx_goal04_expected_ipv4
+          - hostname_fqdn == _wbx_goal04_expected_host
+          - >-
+            wbx_goal04_legacy_key_action | default('plan')
+            in ['plan', 'apply', 'rollback']
+          - >-
+            wbx_goal04_legacy_key_action | default('plan') == 'plan'
+            or wbx_goal04_legacy_key_confirmation | default('')
+               == _wbx_goal04_confirmation_expected
+        fail_msg: >-
+          Legacy-key retirement requires the exact frozen target, supported
+          action, and target-bound confirmation.
+        quiet: true
+
+    - name: Resolve Robot API credentials from the selected external backend
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+
+  tasks:
+    - name: Read the current account-wide Robot SSH-key inventory
+      community.hrobot.ssh_key_info:
+        hetzner_user: "{{ _hetzner_robot_user }}"
+        hetzner_password: "{{ _hetzner_robot_password }}"
+      register: _wbx_goal04_robot_ssh_keys
+      delegate_to: localhost
+      become: false
+      no_log: true
+      when: wbx_goal04_legacy_key_action | default('plan') != 'rollback'
+
+    - name: Select the exact new and legacy keys from current state
+      ansible.builtin.set_fact:
+        _wbx_goal04_new_keys: >-
+          {{
+            _wbx_goal04_robot_ssh_keys.ssh_keys
+            | selectattr(
+                'data',
+                'equalto',
+                wunderbox_controller_approval_authority_bootstrap.public_key
+              )
+            | list
+          }}
+        _wbx_goal04_legacy_keys: >-
+          {{
+            _wbx_goal04_robot_ssh_keys.ssh_keys
+            | selectattr(
+                'fingerprint',
+                'in',
+                _wbx_goal04_legacy_key_identities
+                | map(attribute='fingerprint') | list
+              )
+            | list
+          }}
+      changed_when: false
+      no_log: true
+      when: wbx_goal04_legacy_key_action | default('plan') != 'rollback'
+
+    - name: Refuse retirement unless the exact expected state is present
+      ansible.builtin.assert:
+        that:
+          - _wbx_goal04_new_keys | length == 1
+          - _wbx_goal04_new_keys[0].name == 'id_ed25519_lit_bootstrap'
+          - _wbx_goal04_legacy_keys | length == 3
+          - >-
+            _wbx_goal04_legacy_keys
+            | map(attribute='fingerprint') | sort
+            == _wbx_goal04_legacy_key_identities
+               | map(attribute='fingerprint') | sort
+          - >-
+            _wbx_goal04_legacy_keys
+            | map(attribute='name') | sort
+            == _wbx_goal04_legacy_key_identities
+               | map(attribute='name') | sort
+          - _wbx_goal04_robot_ssh_keys.ssh_keys | length == 4
+        fail_msg: >-
+          Robot SSH-key state differs from the frozen four-key rotation plan;
+          refusing any retirement.
+        quiet: true
+      when: wbx_goal04_legacy_key_action | default('plan') != 'rollback'
+
+    - name: Publish the exact secret-free retirement plan
+      ansible.builtin.debug:
+        msg:
+          action: "{{ wbx_goal04_legacy_key_action | default('plan') }}"
+          protected_new_key: id_ed25519_lit_bootstrap
+          legacy_keys: "{{ _wbx_goal04_legacy_key_identities }}"
+          rollback_snapshot: "{{ _wbx_goal04_snapshot_path }}"
+      when: wbx_goal04_legacy_key_action | default('plan') == 'plan'
+
+    - name: Create the controller evidence directory before retirement
+      ansible.builtin.file:
+        path: "{{ _wbx_goal04_snapshot_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      when:
+        - wbx_goal04_legacy_key_action | default('plan') == 'apply'
+        - not ansible_check_mode
+
+    - name: Save exact restorable public-key state before retirement
+      ansible.builtin.copy:
+        content: "{{ _wbx_goal04_legacy_keys | to_nice_json }}\n"
+        dest: "{{ _wbx_goal04_snapshot_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      when:
+        - wbx_goal04_legacy_key_action | default('plan') == 'apply'
+        - not ansible_check_mode
+
+    - name: Retire only the three exact frozen legacy keys
+      community.hrobot.ssh_key:
+        hetzner_user: "{{ _hetzner_robot_user }}"
+        hetzner_password: "{{ _hetzner_robot_password }}"
+        fingerprint: "{{ item.fingerprint }}"
+        state: absent
+      loop: "{{ _wbx_goal04_legacy_key_identities }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+      when: wbx_goal04_legacy_key_action | default('plan') == 'apply'
+
+    - name: Read the restorable legacy-key snapshot for rollback
+      ansible.builtin.slurp:
+        src: "{{ _wbx_goal04_snapshot_path }}"
+      register: _wbx_goal04_legacy_snapshot_raw
+      delegate_to: localhost
+      become: false
+      when: wbx_goal04_legacy_key_action | default('plan') == 'rollback'
+
+    - name: Decode the restorable legacy-key snapshot
+      ansible.builtin.set_fact:
+        _wbx_goal04_legacy_snapshot: >-
+          {{ _wbx_goal04_legacy_snapshot_raw.content | b64decode | from_json }}
+      changed_when: false
+      no_log: true
+      when: wbx_goal04_legacy_key_action | default('plan') == 'rollback'
+
+    - name: Restore the three exact legacy keys during rollback
+      community.hrobot.ssh_key:
+        hetzner_user: "{{ _hetzner_robot_user }}"
+        hetzner_password: "{{ _hetzner_robot_password }}"
+        name: "{{ item.name }}"
+        public_key: "{{ item.data }}"
+        state: present
+      loop: "{{ _wbx_goal04_legacy_snapshot }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+      when: wbx_goal04_legacy_key_action | default('plan') == 'rollback'

@@ -1,0 +1,26 @@
+[
+    {
+        "created_at": "2019-10-22T15:36:37.000Z",
+        "data": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDBO4UWRzO9MF9h0zAIzAHsA9EhmctgHL9+dVWDQVGjrtQFIlt+klV3PdZPH4siTDjqc4YsGOArgIrpKqyc24Run14z1IUZDcNDfgvCSK1/SsJaFprRC5ff4LGIHuUNhEpYcRSwAtKAME3WLDO3HngpTkAPJkt0+aJIxzPQbWSWNeqaahMZEvKeI0qUNlkc31fwUTDInydEZpghHh5Nthzt6mzuWNBcHGHAvoRN8VWsSqvOUO8Hy9f+j30/vp5gtRrniGQXIqg7BLv7jQ4JeEJ+1KzT0BGPtOSRtuV61PDh2/MW+eC5+9QDmpKux44vjd1KxRmqoJlRBNGkvsgCpWAAtDbgaCPKvH57b9pvI8V27x+IkMXE48ifrZ6PnU268WiL4pi9szgJNv6v8+1fhYDWvMkrxK/7BPb/G9vRBwkQ9+9B2RkzFotWYBWcCLvYsfTI2ZvoNB2q34MSenWMLiCZuNl8orM4uG317TWOKDiciehJedCtFOD2MatPRo56PsAnrF270K5fkaJ5WlYwk/5XEUQQ4jsYisQgVI5hGsofIESEPlxVX1P6fMhqKA2E0H3BpuCQXk5xzPMlNA3nTz5Xpb0hnOQlq4ZuK9bde7kBnqoTX/IwFVr6Q00+PPzhKcAQ0JXnfyxSG5xUtG/mk5FRxBz0G66DdkEipAaM3KqP4w==",
+        "fingerprint": "08:54:19:9c:d0:33:b4:27:3f:20:ad:61:dc:3c:45:93",
+        "name": "RSA (4096)",
+        "size": 4096,
+        "type": "RSA"
+    },
+    {
+        "created_at": "2026-07-12T04:22:47.000Z",
+        "data": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIlru1j13wIZWwh0wFwG+fSXmOoOStO1Sds6KM3LISAb ro@l-it.io",
+        "fingerprint": "28:9e:eb:38:4d:b2:cf:32:36:8c:8b:05:3f:de:20:f3",
+        "name": "ro@l-it.io",
+        "size": 256,
+        "type": "ED25519"
+    },
+    {
+        "created_at": "2026-07-12T18:12:30.000Z",
+        "data": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINfoUAjU/Lydcy8nFRqP2SQqzkop1IGY0WxUGxtzESkO svc_ansible@lit-codex-20260712",
+        "fingerprint": "93:9a:cf:14:3a:c1:76:82:ff:85:bf:89:03:e5:97:05",
+        "name": "svc_ansible@lit-codex-20260712",
+        "size": 256,
+        "type": "ED25519"
+    }
+]
