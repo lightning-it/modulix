@@ -149,7 +149,9 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertEqual(plays[0]["hosts"], "localhost")
         self.assertIn("onepassword_controller_ssh_agent_policy", content)
         self.assertIn("[[ssh-keys]]", content)
-        self.assertIn('item = "{{ _agent_policy.item_id }}"', content)
+        self.assertIn("for ssh_key in _agent_policy['items']", content)
+        self.assertIn('item = "{{ ssh_key.item_id }}"', content)
+        self.assertIn("_agent_policy['items'] | length == 2", content)
         self.assertNotIn('vault = "{{ _agent_policy.vault_id }}"', content)
         self.assertNotIn('account = "{{ _agent_policy.account_id }}"', content)
         self.assertIn("IdentityAgent", content)
@@ -221,7 +223,9 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("'onepassword_cli'", creation)
         self.assertIn("== 'onepassword_cli'", prepare)
         self.assertIn("== 'onepassword_cli'", bootstrap_unlock)
-        self.assertNotIn("'onepassword_cli'", resolver)
+        self.assertIn("'onepassword_cli'", resolver)
+        self.assertIn("secret_resolver_provider: onepassword", resolver)
+        self.assertIn("Normalize the independent 1Password recovery document", resolver)
         for content in (day2_unlock, day2_header):
             self.assertIn("== 'hashicorp_vault'", content)
             self.assertNotIn("'onepassword_cli'", content)
@@ -287,10 +291,13 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("approval", arguments)
         self.assertIn("approval_authority", arguments)
         self.assertNotIn("confirmation", arguments)
-        self.assertNotIn("register", unlock_task)
+        self.assertEqual(
+            unlock_task["register"], "_hetzner_bootstrap_unlock_transport"
+        )
+        self.assertIs(unlock_task["failed_when"], False)
+        self.assertIn("safe_failure_stage", content)
         self.assertNotIn("resolve-recovery-secret.yml", content)
         self.assertNotIn("_hetzner_baremetal_recovery_passphrase", content)
-        self.assertNotIn("ansible.builtin.set_fact", content)
         self.assertNotIn("ansible.builtin.command", content)
 
     def test_first_boot_explicitly_accepts_the_external_backend(self):
@@ -320,6 +327,15 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("connection: local", reconnect)
         self.assertIn("hetzner_first_boot_openssh_fingerprint", reconnect)
         self.assertIn("RECONNECT:", reconnect)
+
+    def test_openssh_transition_is_rerunnable_over_the_managed_port(self):
+        content = (UBUNTU_DIRECTORY / "02-openssh-transition.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("ansible_port | default(openssh_server_transition_bootstrap_port)", content)
+        self.assertIn("| int in openssh_server_ports | map('int') | list", content)
+        self.assertNotIn("ansible_port | default(22) | int == 22", content)
 
 
 if __name__ == "__main__":

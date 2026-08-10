@@ -3,8 +3,10 @@
 # Ubuntu 24 - exact-host OpenSSH hardening and safe port transition
 #
 # The first pass intentionally keeps the inventory-declared bootstrap listener
-# while enabling and proving the hardened listener. Robot TCP 22 removal and a
-# single-port final state are separate reviewed phases.
+# while enabling and proving the hardened listener. Repeated passes enter over
+# either declared listener so the transition remains idempotently runnable.
+# Robot TCP 22 removal and a single-port final state are separate reviewed
+# phases.
 # -----------------------------------------------------------------------------
 
 - name: PreCheck (require one exact Hetzner Ubuntu host)
@@ -31,10 +33,12 @@
           - openssh_server_primary_port | int == 1905
           - openssh_server_transition_bootstrap_port | int == 22
           - openssh_server_ports | map('int') | list | sort == [22, 1905]
-          - ansible_port | default(22) | int == 22
+          - >-
+            ansible_port | default(openssh_server_transition_bootstrap_port)
+            | int in openssh_server_ports | map('int') | list
         fail_msg: >-
-          The first OpenSSH transition pass must retain TCP 22, add TCP 1905,
-          and connect through the still-declared bootstrap port.
+          The OpenSSH transition must retain TCP 22 and TCP 1905, and connect
+          through one of those exact inventory-declared listeners.
         quiet: true
       tags: [always]
 
