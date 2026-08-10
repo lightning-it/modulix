@@ -252,7 +252,7 @@
           {{ hetzner_bootstrap_unlock_approval }}
         approval_authority: >-
           {{ hetzner_baremetal_onepassword.approval_authority }}
-      no_log: true
+      no_log: "{{ not (hetzner_bootstrap_unlock_safe_diagnostics | default(false) | bool) }}"
 
     - name: Report successful no-output encrypted-root unlock
       ansible.builtin.debug:
