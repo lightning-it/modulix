@@ -149,10 +149,25 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertEqual(plays[0]["hosts"], "localhost")
         self.assertIn("onepassword_controller_ssh_agent_policy", content)
         self.assertIn("[[ssh-keys]]", content)
+        self.assertIn('item = "{{ _agent_policy.item_id }}"', content)
+        self.assertNotIn('vault = "{{ _agent_policy.vault_id }}"', content)
+        self.assertNotIn('account = "{{ _agent_policy.account_id }}"', content)
         self.assertIn("IdentityAgent", content)
         self.assertIn("- -G", content)
         self.assertNotIn("ansible.builtin.shell", content)
         self.assertNotIn("ansible.builtin.uri", content)
+
+    def test_ssh_key_capability_diagnostic_is_read_only_and_pinned(self):
+        path = CONTROLLER_DIRECTORY / "15-onepassword-ssh-key-capability-diagnostic.yml"
+        content = path.read_text(encoding="utf-8")
+        plays = load_yaml(path)
+
+        self.assertEqual(plays[0]["hosts"], "hetzner_baremetal")
+        self.assertIn("hetzner_baremetal_onepassword.cli_sha256", content)
+        self.assertIn("item", content)
+        self.assertIn("create", content)
+        self.assertIn("--help", content)
+        self.assertNotIn("ansible.builtin.shell", content)
 
     def test_every_onepassword_generation_or_transport_task_is_no_log(self):
         sensitive_modules = {
