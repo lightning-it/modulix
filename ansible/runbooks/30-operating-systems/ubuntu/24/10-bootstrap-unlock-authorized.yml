@@ -11,6 +11,8 @@
     - name: Read the pinned Dropbear host-key line
       ansible.builtin.slurp:
         path: "{{ luks_unlock_dropbear_known_hosts_path }}"
+      delegate_to: localhost
+      become: false
       register: _unlock_known_hosts
       no_log: true
 
