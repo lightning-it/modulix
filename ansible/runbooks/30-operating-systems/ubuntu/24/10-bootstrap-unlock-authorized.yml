@@ -117,10 +117,7 @@
             port: "{{ luks_unlock_dropbear_port | int }}"
             host_fingerprint: "{{ hetzner_bootstrap_unlock_dropbear_fingerprint }}"
             remote_command: /bin/cryptroot-unlock
-        commit_shas:
-          modulix_automation: 5fadcfa8cbdf1c601aa9e49e8f97e5c73027cb0c
-          foundational: ce769d6ae1ca4f60c2db187f36519e03e054fe34
-          inventory: 5b650f3c93d480ffd762e006b0fafe3cc4c28cd9
+        commit_shas: "{{ onepassword_unlock_commit_shas }}"
         execution_id_prefix: WBX-LUKS-UNLOCK
         operation: unlock-luks-over-ssh-stdin
         signing_agent_socket_path: >-
