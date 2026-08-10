@@ -165,6 +165,8 @@
       ansible.builtin.stat:
         path: "{{ luks_unlock_dropbear_known_hosts_path }}"
         checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
       register: _hetzner_bootstrap_unlock_known_hosts
       changed_when: false
 
