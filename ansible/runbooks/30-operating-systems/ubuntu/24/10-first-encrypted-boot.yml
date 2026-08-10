@@ -311,13 +311,12 @@
 
         - name: Pin exactly one generated Dropbear host key
           ansible.builtin.copy:
-            content: >-
+            content: |
               {{
                 '[' ~ inventory_hostname ~ ']:'
                 ~ (luks_unlock_dropbear_port | string)
                 ~ ' '
                 ~ _first_boot_dropbear_keyscan.stdout.split(' ', 1)[1]
-                ~ '\n'
               }}
             dest: "{{ luks_unlock_dropbear_known_hosts_path }}"
             mode: "0600"
