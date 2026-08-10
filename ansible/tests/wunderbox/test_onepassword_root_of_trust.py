@@ -141,6 +141,19 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertEqual(len(import_tasks), 1)
         self.assertIs(import_tasks[0].get("no_log"), True)
 
+    def test_controller_agent_policy_is_inventory_bound_and_network_free(self):
+        path = CONTROLLER_DIRECTORY / "11-onepassword-ssh-agent-policy.yml"
+        content = path.read_text(encoding="utf-8")
+        plays = load_yaml(path)
+
+        self.assertEqual(plays[0]["hosts"], "localhost")
+        self.assertIn("onepassword_controller_ssh_agent_policy", content)
+        self.assertIn("[[ssh-keys]]", content)
+        self.assertIn("IdentityAgent", content)
+        self.assertIn("- -G", content)
+        self.assertNotIn("ansible.builtin.shell", content)
+        self.assertNotIn("ansible.builtin.uri", content)
+
     def test_every_onepassword_generation_or_transport_task_is_no_log(self):
         sensitive_modules = {
             "lit.foundational.onepassword_secret_item",
