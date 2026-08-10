@@ -30,7 +30,6 @@
         hetzner_password: "{{ _hetzner_robot_password }}"
         server_number: "{{ hetzner_robot_server_number | int }}"
       register: _goal05_robot_server
-      no_log: true
 
     - name: Require the exact live Robot server identity
       ansible.builtin.assert:
