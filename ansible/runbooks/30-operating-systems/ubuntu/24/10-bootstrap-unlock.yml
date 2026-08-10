@@ -151,7 +151,8 @@
           - >-
             luks_unlock_dropbear_known_hosts_path
             | default('') is match('^/')
-          - hetzner_bootstrap_unlock_approval is mapping
+          - onepassword_unlock_commit_shas is mapping
+          - onepassword_unlock_commit_shas | length > 0
         fail_msg: >-
           Use --limit with one exact inventory FQDN, select onepassword_cli,
           pin both exact item IDs and positive item versions plus the SSH
@@ -249,7 +250,17 @@
           {{ hetzner_bootstrap_unlock_dropbear_fingerprint }}
         remote_command: /bin/cryptroot-unlock
         approval: >-
-          {{ hetzner_bootstrap_unlock_approval }}
+          {{ hetzner_bootstrap_unlock_approval | default({}) }}
+        approval_signing:
+          commit_shas: "{{ onepassword_unlock_commit_shas }}"
+          execution_id_prefix: WBX-LUKS-UNLOCK
+          signing_agent_socket_path: >-
+            {{ hetzner_baremetal_onepassword.ssh_agent.agent_socket_path }}
+          signing_ssh_add_path: >-
+            {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_path }}
+          signing_ssh_add_sha256: >-
+            {{ hetzner_baremetal_onepassword.ssh_agent.ssh_add_sha256 }}
+          validity_seconds: 600
         approval_authority: >-
           {{ hetzner_baremetal_onepassword.approval_authority }}
       no_log: true
