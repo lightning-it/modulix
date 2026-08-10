@@ -128,6 +128,10 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("lit.foundational.onepassword_ssh_key_import:", content)
         self.assertIn("private_key_path:", content)
         self.assertIn("expected_fingerprint:", content)
+        self.assertIn("agent_verified:", content)
+        self.assertIn("source_public_key_matches:", content)
+        self.assertIn("metadata_repair_required:", content)
+        self.assertIn("metadata_repaired:", content)
         self.assertNotIn("ansible.builtin.shell", content)
         import_tasks = [
             task
