@@ -1,0 +1,142 @@
+---
+- name: Resolve the exact Goal 05 provider target immediately before approval
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Require the exact Wunderbox target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == 'wunderbox01.prd.edge.pub.l-it.io'
+          - hetzner_robot_server_number | int == 3035773
+          - ansible_host == '136.243.38.174'
+          - hostname_fqdn == inventory_hostname
+        quiet: true
+
+    - name: Resolve Robot API credentials from the external backend
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+
+  tasks:
+    - name: Read the exact server from Hetzner Robot
+      community.hrobot.server_info:
+        hetzner_user: "{{ _hetzner_robot_user }}"
+        hetzner_password: "{{ _hetzner_robot_password }}"
+        server_number: "{{ hetzner_robot_server_number | int }}"
+      register: _goal05_robot_server
+      no_log: true
+
+    - name: Require the exact live Robot server identity
+      ansible.builtin.assert:
+        that:
+          - _goal05_robot_server.servers | length == 1
+          - >-
+            _goal05_robot_server.servers[0].server_number | int
+            == hetzner_robot_server_number | int
+          - _goal05_robot_server.servers[0].server_ip == ansible_host
+          - _goal05_robot_server.servers[0].status == 'ready'
+          - not (_goal05_robot_server.servers[0].cancelled | bool)
+        quiet: true
+
+    - name: Resolve the exact public FQDN through the approved resolver
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/dig
+          - +short
+          - A
+          - "{{ inventory_hostname }}"
+          - "@{{ hetzner_baremetal_dns_resolver }}"
+      register: _goal05_dns_a
+      changed_when: false
+
+    - name: Require the FQDN to resolve only to the exact live IPv4
+      ansible.builtin.assert:
+        that:
+          - _goal05_dns_a.stdout_lines | reject('equalto', '') | list == [ansible_host]
+        quiet: true
+
+    - name: Publish the safe provider target readback
+      ansible.builtin.set_fact:
+        goal05_provider_target_readback:
+          fqdn: "{{ inventory_hostname }}"
+          server_number: "{{ _goal05_robot_server.servers[0].server_number | int }}"
+          public_ipv4: "{{ _goal05_robot_server.servers[0].server_ip }}"
+          datacenter: "{{ _goal05_robot_server.servers[0].dc }}"
+      no_log: true
+
+- name: Resolve the exact Goal 05 physical disks immediately before approval
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  vars:
+    ansible_user: root
+    ansible_become: false
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+
+  tasks:
+    - name: Read the live physical block-device inventory
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/lsblk
+          - --bytes
+          - --json
+          - --nodeps
+          - --output
+          - NAME,MODEL,SERIAL,SIZE,ROTA,TYPE
+      register: _goal05_lsblk
+      changed_when: false
+
+    - name: Normalize live physical disks
+      ansible.builtin.set_fact:
+        _goal05_live_disks: >-
+          {{
+            (_goal05_lsblk.stdout | from_json).blockdevices
+            | selectattr('type', 'equalto', 'disk')
+            | list
+          }}
+      changed_when: false
+
+    - name: Require the exact frozen physical disk identities
+      ansible.builtin.assert:
+        that:
+          - _goal05_live_disks | length == hetzner_installimage_expected_disks | length
+          - >-
+            _goal05_live_disks | map(attribute='serial') | sort
+            == hetzner_installimage_expected_disks | map(attribute='serial') | sort
+          - >-
+            _goal05_live_disks | map(attribute='size') | map('int') | sort
+            == hetzner_installimage_expected_disks
+               | map(attribute='size_bytes') | map('int') | sort
+          - _goal05_live_disks | selectattr('rota', 'equalto', true) | list | length == 0
+        quiet: true
+
+    - name: Show the exact secret-free destructive target
+      ansible.builtin.debug:
+        msg:
+          fqdn: "{{ hostvars[inventory_hostname].goal05_provider_target_readback.fqdn }}"
+          server_number: >-
+            {{ hostvars[inventory_hostname].goal05_provider_target_readback.server_number }}
+          public_ipv4: >-
+            {{ hostvars[inventory_hostname].goal05_provider_target_readback.public_ipv4 }}
+          datacenter: >-
+            {{ hostvars[inventory_hostname].goal05_provider_target_readback.datacenter }}
+          disks: "{{ _goal05_live_disks }}"
