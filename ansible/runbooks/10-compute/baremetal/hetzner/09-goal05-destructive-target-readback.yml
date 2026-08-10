@@ -6,6 +6,9 @@
   become: false
   any_errors_fatal: true
 
+  vars:
+    ansible_become: false
+
   pre_tasks:
     - name: Require the exact Wunderbox target
       ansible.builtin.assert:
