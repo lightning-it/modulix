@@ -270,24 +270,10 @@
     - name: Classify a protected unlock failure without exposing its message
       ansible.builtin.set_fact:
         _hetzner_bootstrap_unlock_failure_stage: >-
-          {%- set message = _hetzner_bootstrap_unlock_transport.msg | default('') -%}
-          {%- if '1Password secret transport' in message or 'recovery-secret length' in message -%}
-          onepassword_secret_transport
-          {%- elif 'SSH recovery consumer' in message -%}
-          ssh_consumer_start
-          {%- elif 'rejected the protected input' in message -%}
-          ssh_consumer_rejected_input
-          {%- elif 'consumer timed out' in message -%}
-          ssh_consumer_timeout
-          {%- elif 'consumer failed closed' in message -%}
-          ssh_consumer_exit
-          {%- elif 'SSH Agent' in message or 'SSH Key item' in message -%}
-          ssh_agent_or_item
-          {%- elif _hetzner_bootstrap_unlock_transport.failed | default(false) -%}
-          protected_preflight
-          {%- else -%}
-          none
-          {%- endif -%}
+          {{
+            _hetzner_bootstrap_unlock_transport.safe_failure_stage
+            | default('none')
+          }}
       no_log: true
 
     - name: Require the protected unlock transport to succeed
