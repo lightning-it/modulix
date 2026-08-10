@@ -16,6 +16,9 @@ The main entrypoints are:
   independent, short-lived approvals for initial external Password and
   Dropbear SSH-key creation. It requires one exact target, six frozen Git
   commits and an explicit target-bound creation confirmation.
+- `07-onepassword-ssh-agent-import.yml`: import one existing, exact local
+  Ed25519 key into the declared 1Password vault without exposing its private
+  value, then verify the same fingerprint through the pinned SSH Agent.
 - `08-recovery-secrets-migrate.yml`: migrate bootstrap recovery documents to
   the declared HashiCorp Vault backend.
 - `08-robot-credentials-migrate.yml`: migrate the controller-local Robot

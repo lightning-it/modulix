@@ -119,6 +119,24 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("ansible.builtin.import_playbook: 08-recovery-secrets.yml", content)
         self.assertNotIn("ansible.builtin.shell", content)
 
+    def test_approval_authority_import_is_exact_and_never_logs_private_key(self):
+        path = HETZNER_DIRECTORY / "07-onepassword-ssh-agent-import.yml"
+        content = path.read_text(encoding="utf-8")
+        plays = load_yaml(path)
+
+        self.assertEqual(plays[0]["hosts"], "hetzner_baremetal")
+        self.assertIn("lit.foundational.onepassword_ssh_key_import:", content)
+        self.assertIn("private_key_path:", content)
+        self.assertIn("expected_fingerprint:", content)
+        self.assertNotIn("ansible.builtin.shell", content)
+        import_tasks = [
+            task
+            for task in plays[0]["tasks"]
+            if "lit.foundational.onepassword_ssh_key_import" in task
+        ]
+        self.assertEqual(len(import_tasks), 1)
+        self.assertIs(import_tasks[0].get("no_log"), True)
+
     def test_every_onepassword_generation_or_transport_task_is_no_log(self):
         sensitive_modules = {
             "lit.foundational.onepassword_secret_item",
