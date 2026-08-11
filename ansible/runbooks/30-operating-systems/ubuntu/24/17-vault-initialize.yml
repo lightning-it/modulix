@@ -119,9 +119,124 @@
             quiet: true
           tags: [always]
 
+        - name: Require external 1Password custody before Vault initialization
+          ansible.builtin.assert:
+            that:
+              - hetzner_baremetal_vault.seal.custody.authoritative_custodian == 'onepassword_cli'
+              - hetzner_baremetal_vault.seal.custody.onepassword is mapping
+              - hetzner_baremetal_vault.seal.custody.onepassword.item_id | length == 0
+              - hetzner_baremetal_vault.seal.custody.onepassword.item_version | int == 0
+            fail_msg: >-
+              Initial Vault creation requires one absent, unpinned 1Password
+              custody item; existing items must use a separate recovery path.
+            quiet: true
+          tags: [always]
+
+        - name: Prove the absent external 1Password custody target
+          lit.foundational.onepassword_vault_init_import:
+            action: plan
+            allow_import: false
+            confirmation: ""
+            vault_init_payload: {}
+            cli_path: "{{ hetzner_baremetal_onepassword.cli_path }}"
+            cli_sha256: "{{ hetzner_baremetal_onepassword.cli_sha256 }}"
+            cli_version: "{{ hetzner_baremetal_onepassword.cli_version }}"
+            account_id: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.account_id }}
+            account_sign_in_address: >-
+              {{
+                hetzner_baremetal_vault.seal.custody.onepassword
+                .account_sign_in_address
+              }}
+            authorized_user_uuids: >-
+              {{
+                hetzner_baremetal_vault.seal.custody.onepassword
+                .authorized_user_uuids
+              }}
+            vault_id: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.vault_id }}
+            item_id: ""
+            item_version: 0
+            item_title: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.item_title }}
+            tags: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.tags }}
+            subject: "{{ inventory_hostname }}"
+            schema_version: >-
+              {{
+                hetzner_baremetal_vault.seal.custody.onepassword
+                .schema_version | int
+              }}
+            key_shares: "{{ hetzner_baremetal_vault.seal.key_shares | int }}"
+            key_threshold: >-
+              {{ hetzner_baremetal_vault.seal.key_threshold | int }}
+          delegate_to: localhost
+          become: false
+          no_log: true
+
         - name: Initialize, escrow, and unseal Vault under the Shamir contract
           ansible.builtin.include_role:
             name: lit.supplementary.vault_bootstrap
+          no_log: true
+
+        - name: Import Vault initialization material into external 1Password custody
+          lit.foundational.onepassword_vault_init_import:
+            action: apply
+            allow_import: true
+            confirmation: >-
+              IMPORT-VAULT-INIT:{{ inventory_hostname }}:{{
+                hetzner_baremetal_vault.seal.custody.onepassword.vault_id
+              }}
+            vault_init_payload: "{{ vault_bootstrap_init_payload }}"
+            cli_path: "{{ hetzner_baremetal_onepassword.cli_path }}"
+            cli_sha256: "{{ hetzner_baremetal_onepassword.cli_sha256 }}"
+            cli_version: "{{ hetzner_baremetal_onepassword.cli_version }}"
+            account_id: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.account_id }}
+            account_sign_in_address: >-
+              {{
+                hetzner_baremetal_vault.seal.custody.onepassword
+                .account_sign_in_address
+              }}
+            authorized_user_uuids: >-
+              {{
+                hetzner_baremetal_vault.seal.custody.onepassword
+                .authorized_user_uuids
+              }}
+            vault_id: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.vault_id }}
+            item_id: ""
+            item_version: 0
+            item_title: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.item_title }}
+            tags: >-
+              {{ hetzner_baremetal_vault.seal.custody.onepassword.tags }}
+            subject: "{{ inventory_hostname }}"
+            schema_version: >-
+              {{
+                hetzner_baremetal_vault.seal.custody.onepassword
+                .schema_version | int
+              }}
+            key_shares: "{{ hetzner_baremetal_vault.seal.key_shares | int }}"
+            key_threshold: >-
+              {{ hetzner_baremetal_vault.seal.key_threshold | int }}
+          register: _vault_initialize_onepassword_custody
+          delegate_to: localhost
+          become: false
+          no_log: true
+
+        - name: Require successful external 1Password custody before scoping Vault
+          ansible.builtin.assert:
+            that:
+              - _vault_initialize_onepassword_custody.created | default(false) | bool
+              - _vault_initialize_onepassword_custody.exists | default(false) | bool
+              - _vault_initialize_onepassword_custody.item_id | default('') | length == 26
+              - _vault_initialize_onepassword_custody.item_version | default(0) | int > 0
+            fail_msg: >-
+              Vault was initialized, but the external 1Password custody import
+              did not return one immutable object identity. Encrypted secondary
+              escrows remain available; do not continue to token revocation.
+            quiet: true
           no_log: true
 
         - name: Configure and escrow the scoped controller Vault AppRole
