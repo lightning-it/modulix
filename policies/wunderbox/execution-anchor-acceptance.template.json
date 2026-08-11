@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "NOT_ACCEPTED",
+  "launcher_sha256": "REPLACE_WITH_64_HEX",
+  "interpreter_sha256": "REPLACE_WITH_64_HEX",
+  "recorder_sha256": "REPLACE_WITH_64_HEX",
+  "replay_broker_sha256": "REPLACE_WITH_64_HEX",
+  "process_supervisor_sha256": "REPLACE_WITH_64_HEX",
+  "container_engine_sha256": "REPLACE_WITH_64_HEX",
+  "negative_replay_test": false,
+  "controller_readback_test": false,
+  "escaped_descendant_test": false,
+  "bounded_output_test": false
+}

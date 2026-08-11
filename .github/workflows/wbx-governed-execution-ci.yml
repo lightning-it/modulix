@@ -1,0 +1,82 @@
+# yamllint disable rule:truthy
+---
+name: Wunderbox governed execution CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  governed-execution-contract:
+    name: Governed execution contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container:
+      image: >-
+        quay.io/l-it/ee-wunder-devtools-ubi9@sha256:9713613aebfa04f3ea7a18748ee0b74de696038621419644e154c7e2b0815aec
+      options: --user 0:0
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned
+        with:
+          persist-credentials: false
+
+      - name: Validate executable syntax and format
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            ansible/callback_plugins/lit_governed_evidence.py \
+            ansible/scripts/runtime-collection-provenance.py \
+            scripts/governed-ansible-exec.py \
+            scripts/render-wbx-gate-manifest-template.py \
+            scripts/wbx-governed-exec.py \
+            tests/test_governed_ansible_exec.py \
+            tests/test_governed_runtime_support.py \
+            tests/test_wbx_governed_execution_ci.py \
+            tests/test_wbx_governed_execution_policy.py
+          bash -n \
+            ansible/scripts/ansible-nav \
+            ansible/scripts/ansible-nav-local \
+            ansible/scripts/governed-ansible-root-launcher \
+            ansible/tests/test_ansible_nav.sh \
+            ansible/tests/test_ansible_nav_local.sh
+          black --check \
+            tests/test_governed_runtime_support.py \
+            tests/test_wbx_governed_execution_ci.py
+          shellcheck \
+            ansible/scripts/ansible-nav \
+            ansible/scripts/ansible-nav-local \
+            ansible/scripts/governed-ansible-root-launcher \
+            ansible/tests/test_ansible_nav.sh \
+            ansible/tests/test_ansible_nav_local.sh
+          yamllint .github/workflows/wbx-governed-execution-ci.yml
+
+      - name: Run governed recorder and policy contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          private_tmp="$(mktemp -d /root/governed-tests.XXXXXX)"
+          export TMPDIR="$private_tmp"
+          /usr/bin/python3.11 tests/test_governed_ansible_exec.py
+          python3 tests/test_governed_runtime_support.py
+          /usr/bin/python3.11 tests/test_wbx_governed_execution_policy.py
+          python3 tests/test_wbx_governed_execution_ci.py
+
+      - name: Run execution wrapper contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ansible/tests/test_ansible_nav.sh
+          ansible/tests/test_ansible_nav_local.sh

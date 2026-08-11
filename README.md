@@ -73,7 +73,7 @@ Release-coupled packaging documentation in this repo:
 ```bash
 cd ansible
 ./scripts/ansible-nav run runbooks/50-applications/wunderbox/10-deploy.yml \
-  -i /path/to/private/inventory.yml --limit wunderbox01.prd.dmz.example.invalid
+  -i /path/to/private/inventory.yml --limit root-of-trust-host.example.test
 ```
 
 This is a generic example only. This public repository provides reusable

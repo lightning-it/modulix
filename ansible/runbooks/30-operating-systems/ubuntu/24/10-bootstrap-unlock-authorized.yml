@@ -1,0 +1,5 @@
+---
+# Compatibility entry point. The secret consumer now signs the exact binding
+# produced by its own normalization path immediately before one-time use.
+- name: Run the self-bound signed bootstrap unlock
+  ansible.builtin.import_playbook: 10-bootstrap-unlock.yml

@@ -4,7 +4,10 @@
   become: true
   gather_facts: true
   any_errors_fatal: true
+  serial: 1
   vars:
+    _wunderbox_orchestration_phase: preflight
+    _wunderbox_orchestration_mutating: false
     _wunderbox_services_cfg: >-
       {{
         (
@@ -33,6 +36,11 @@
         ) in _enabled_values
       }}
 
+  pre_tasks:
+    - name: Enforce the Wunderbox orchestration boundary
+      ansible.builtin.import_tasks: tasks/orchestration-guard.yml
+      tags: [always]
+
   tasks:
     - name: Validate Wunderbox service map
       ansible.builtin.assert:
@@ -42,7 +50,7 @@
           Wunderbox inventory must provide services.wunderbox or
           wunderbox_services as a mapping.
         quiet: true
-      tags: [wunderbox, wunderbox_preflight]
+      tags: [always, wunderbox, wunderbox_preflight]
 
     - name: Require DHCP production validation before enabling DHCP
       ansible.builtin.assert:
@@ -67,7 +75,7 @@
           no-rogue-DHCP evidence.
         quiet: true
       when: _wunderbox_dhcp_requested | bool
-      tags: [wunderbox, wunderbox_preflight, dhcp, dhcp_deploy]
+      tags: [always, wunderbox, wunderbox_preflight, dhcp, dhcp_deploy]
 
     - name: Verify required runtime commands are available
       ansible.builtin.command:
@@ -77,4 +85,4 @@
       changed_when: false
       loop:
         - podman
-      tags: [wunderbox, wunderbox_preflight]
+      tags: [always, wunderbox, wunderbox_preflight]

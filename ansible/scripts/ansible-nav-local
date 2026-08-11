@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -12,8 +13,11 @@ nav_pull_policy="${ANSIBLE_TOOLBOX_NAV_PULL_POLICY:-}"
 nav_skip_auth="${ANSIBLE_TOOLBOX_NAV_SKIP_AUTH:-false}"
 nav_skip_cert_check="${ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK:-false}"
 ee_only_collections="${ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS:-false}"
+runner_artifact_dir="${ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_DIR:-}"
 ssh_private_key_file="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE:-}"
 ssh_known_hosts_file="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE:-}"
+ssh_private_key_sha256="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256:-}"
+ssh_known_hosts_sha256="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256:-}"
 ssh_agent_forwarding="${ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING:-false}"
 nav_ee_container_options="${ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS:-}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
@@ -71,8 +75,11 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_SKIP_AUTH=true|false         (default: false)
   ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true|false   (default: false)
   ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true|false   (default: false; ignore project collection trees)
+  ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_DIR=/runner/raw-artifacts (governed owner-only ephemeral storage)
   ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only file> (optional; requires known_hosts)
   ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<trusted file> (required for key or agent use)
+  ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=<expected lowercase SHA-256>
+  ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256=<expected lowercase SHA-256>
   ANSIBLE_TOOLBOX_SSH_AGENT_FORWARDING=true|false (default: false; forwards only SSH_AUTH_SOCK)
   ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
@@ -130,6 +137,24 @@ add_ee_volume_if_present() {
   cmd+=(--eev "${source}:${target}:${options}")
 }
 
+stat_mode() {
+  local path="$1"
+  if stat -c '%a' -- "${path}" >/dev/null 2>&1; then
+    stat -c '%a' -- "${path}"
+  else
+    stat -f '%Lp' -- "${path}"
+  fi
+}
+
+stat_owner() {
+  local path="$1"
+  if stat -c '%u' -- "${path}" >/dev/null 2>&1; then
+    stat -c '%u' -- "${path}"
+  else
+    stat -f '%u' -- "${path}"
+  fi
+}
+
 validate_owner_only_secret_file() {
   local path="$1"
   local label="$2"
@@ -141,8 +166,8 @@ validate_owner_only_secret_file() {
     return 1
   fi
 
-  mode="$(stat -c '%a' -- "${path}")"
-  owner="$(stat -c '%u' -- "${path}")"
+  mode="$(stat_mode "${path}")"
+  owner="$(stat_owner "${path}")"
   case "${mode}" in
     400|600) ;;
     *)
@@ -168,8 +193,8 @@ validate_trusted_ssh_file() {
     return 1
   fi
 
-  mode="$(stat -c '%a' -- "${path}")"
-  owner="$(stat -c '%u' -- "${path}")"
+  mode="$(stat_mode "${path}")"
+  owner="$(stat_owner "${path}")"
   if (( (8#${mode} & 0022) != 0 )); then
     echo "${label} must not be group- or world-writable (found ${mode})." >&2
     return 1
@@ -254,6 +279,10 @@ configure_ssh_transport() {
     echo "Explicit SSH transport requires ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE." >&2
     exit 1
   fi
+  if [[ -n "${ssh_private_key_file}" && ( ! "${ssh_private_key_sha256}" =~ ^[0-9a-f]{64}$ || ! "${ssh_known_hosts_sha256}" =~ ^[0-9a-f]{64}$ ) ]]; then
+    echo "Explicit SSH key transport requires both lowercase SHA-256 bindings." >&2
+    exit 1
+  fi
 
   validate_trusted_ssh_file \
     "${ssh_known_hosts_file}" \
@@ -262,12 +291,20 @@ configure_ssh_transport() {
     validate_owner_only_secret_file \
       "${ssh_private_key_file}" \
       "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE"
+    if [[ "$(hash_file "${ssh_private_key_file}")" != "${ssh_private_key_sha256}" ]]; then
+      echo "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE does not match its SHA-256 binding." >&2
+      exit 1
+    fi
+    if [[ "$(hash_file "${ssh_known_hosts_file}")" != "${ssh_known_hosts_sha256}" ]]; then
+      echo "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE does not match its SHA-256 binding." >&2
+      exit 1
+    fi
   else
     if [[ -z "${SSH_AUTH_SOCK:-}" || -L "${SSH_AUTH_SOCK}" || ! -S "${SSH_AUTH_SOCK}" ]]; then
       echo "SSH agent forwarding requires SSH_AUTH_SOCK to be a real Unix socket." >&2
       exit 1
     fi
-    if [[ "$(stat -c '%u' -- "${SSH_AUTH_SOCK}")" != "$(id -u)" ]]; then
+    if [[ "$(stat_owner "${SSH_AUTH_SOCK}")" != "$(id -u)" ]]; then
       echo "SSH_AUTH_SOCK must be owned by the effective user." >&2
       exit 1
     fi
@@ -293,6 +330,10 @@ configure_ssh_transport() {
   chmod 0700 "${staged_dir}"
   staged_known_hosts="${staged_dir}/known_hosts"
   install -m 0400 "${ssh_known_hosts_file}" "${staged_known_hosts}"
+  if [[ -n "${ssh_private_key_file}" && "$(hash_file "${staged_known_hosts}")" != "${ssh_known_hosts_sha256}" ]]; then
+    echo "staged SSH known_hosts does not match its SHA-256 binding." >&2
+    exit 1
+  fi
   cat > "${staged_dir}/config" <<'EOF'
 Host *
     UserKnownHostsFile /runner/.ssh/known_hosts
@@ -303,6 +344,10 @@ EOF
     staged_key="${staged_dir}/id_selected"
     install -m 0400 "${ssh_private_key_file}" "${staged_key}"
     validate_owner_only_secret_file "${staged_key}" "staged SSH private key"
+    if [[ "$(hash_file "${staged_key}")" != "${ssh_private_key_sha256}" || "$(hash_file "${ssh_private_key_file}")" != "${ssh_private_key_sha256}" || "$(hash_file "${ssh_known_hosts_file}")" != "${ssh_known_hosts_sha256}" ]]; then
+      echo "SSH inputs changed while they were staged for the execution environment." >&2
+      exit 1
+    fi
     cat >> "${staged_dir}/config" <<'EOF'
     IdentityFile /runner/.ssh/id_selected
     IdentitiesOnly yes
@@ -513,10 +558,24 @@ roles_path_without_overlays="${REPO_ROOT}/roles:/runner/project/ansible/roles:/r
 if [[ "${ee_only_collections}" == "true" ]]; then
   collections_path_without_overlays="/usr/share/ansible/collections:/usr/share/automation-controller/collections"
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
+  export ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=False
 elif [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" ]]; then
   export ANSIBLE_COLLECTIONS_PATH="${collections_path_without_overlays}"
 else
   export ANSIBLE_COLLECTIONS_PATH
+fi
+
+if [[ -n "${runner_artifact_dir}" ]]; then
+  if [[ "${runner_artifact_dir}" != "/runner/raw-artifacts" || -L "${runner_artifact_dir}" || ! -d "${runner_artifact_dir}" ]]; then
+    echo "ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_DIR must be the governed /runner/raw-artifacts directory." >&2
+    exit 1
+  fi
+  runner_artifact_mode="$(stat_mode "${runner_artifact_dir}")"
+  runner_artifact_owner="$(stat_owner "${runner_artifact_dir}")"
+  if [[ "${runner_artifact_mode}" != "700" || "${runner_artifact_owner}" != "$(id -u)" ]]; then
+    echo "Governed Runner artifacts require an owner-only 0700 directory." >&2
+    exit 1
+  fi
 fi
 if [[ -z "${ANSIBLE_ROLES_PATH:-}" ]]; then
   export ANSIBLE_ROLES_PATH="${roles_path_without_overlays}"
@@ -572,8 +631,15 @@ case "${subcommand}" in
       fi
     fi
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
+    if [[ -n "${runner_artifact_dir}" ]]; then
+      cmd+=(--ansible-runner-artifact-dir "${runner_artifact_dir}")
+      cmd+=(--ansible-runner-rotate-artifacts-count 1)
+    fi
     cmd+=(--ce "${nav_container_engine}")
     cmd+=(--senv "ANSIBLE_COLLECTIONS_PATH=${ANSIBLE_COLLECTIONS_PATH}")
+    if [[ "${ee_only_collections}" == "true" ]]; then
+      cmd+=(--senv "ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=False")
+    fi
     cmd+=(--senv "ANSIBLE_ROLES_PATH=${ANSIBLE_ROLES_PATH}")
     # In RPM/runtime mode, runbooks live under /opt/modulix. Mirror that path
     # into the nested EE so imported runbooks resolve correctly.
@@ -583,6 +649,7 @@ case "${subcommand}" in
     stage_secret_file_for_ee ANSIBLE_VAULT_PASSWORD_FILE
     configure_ssh_transport
     add_ee_volume_if_present "/runner/project/inventories" "/runner/project/inventories" dir
+    add_ee_volume_if_present "/runner/governed-input" "/runner/governed-input" dir "ro,Z"
     # Self-signed/customer TLS assets are controller-side inputs to copy
     # actions. Make the conventional persistent project directory visible in
     # the nested execution environment without requiring operator flags.

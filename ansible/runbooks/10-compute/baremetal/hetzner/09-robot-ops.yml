@@ -18,9 +18,13 @@
           - ansible_play_hosts_all | length == 1
           - ansible_limit | string | trim == inventory_hostname
           - inventory_hostname in groups['hetzner_baremetal']
+          - hetzner_robot_server_number is defined
+          - hetzner_robot_server_number is integer
+          - hetzner_robot_server_number | int > 0
         fail_msg: >-
           Use --limit with one exact bare-metal inventory FQDN. Robot boot and
-          reset operations never accept a fleet target.
+          reset operations never accept a fleet target and require its
+          inventory-pinned positive numeric Robot server identity.
         quiet: true
       tags: [always]
 
@@ -33,4 +37,5 @@
     - role: lit.foundational.hetzner_robot_ops
       hetzner_robot_ops_hetzner_user: "{{ _hetzner_robot_user }}"
       hetzner_robot_ops_hetzner_password: "{{ _hetzner_robot_password }}"
+      hetzner_robot_ops_server_number: "{{ hetzner_robot_server_number }}"
       hetzner_robot_ops_server_ip: "{{ ansible_host }}"

@@ -7,6 +7,8 @@
   serial: 1
 
   vars:
+    _vault_raft_snapshot_controller_python: >-
+      {{ lookup('ansible.builtin.env', 'PWD') }}/.venv-vault-py314/bin/python
     _vault_raft_snapshot_manifest_field_names:
       - "{{ hetzner_baremetal_vault.luks_header_format_field }}"
       - "{{ hetzner_baremetal_vault.luks_header_chunk_path_prefix_field }}"
@@ -27,10 +29,34 @@
           - ansible_limit | string | trim == inventory_hostname
           - inventory_hostname == hetzner_baremetal_vault.host
           - vault_raft_snapshot_operation in ['backup', 'restore_drill']
-          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+          - hetzner_baremetal_vault.backup.backend == 'raft_snapshot'
+          - hetzner_baremetal_vault.backup.verification_canary is mapping
+          - >-
+            hetzner_baremetal_vault.backup.verification_canary.keys()
+            | list | sort
+            == ['mount_point', 'path', 'schema_version', 'subject'] | sort
+          - >-
+            hetzner_baremetal_vault.backup.verification_canary.schema_version
+            | int == 1
+          - >-
+            hetzner_baremetal_vault.backup.verification_kv_paths
+            | selectattr(
+                'path',
+                'equalto',
+                hetzner_baremetal_vault.backup.verification_canary.path
+              ) | list | length == 1
+          - >-
+            hetzner_baremetal_vault.backup.optional_verification_kv_paths
+            is sequence
+          - hetzner_baremetal_vault.controller_auth.auth_method == 'approle'
+          - >-
+            hetzner_baremetal_vault.controller_auth.capability_probes
+            | selectattr('path', 'equalto', 'sys/storage/raft/snapshot')
+            | selectattr('capabilities', 'equalto', ['read'])
+            | list | length == 1
         fail_msg: >-
           Use --limit with the exact Vault host, select backup or restore_drill,
-          and run only after the verified HashiCorp Vault backend transition.
+          and require the exact Raft-snapshot AppRole contract.
         quiet: true
       tags: [always]
 
@@ -253,12 +279,144 @@
           ansible.builtin.set_fact:
             _vault_raft_snapshot_root_kv_paths: >-
               {{
-                hetzner_baremetal_vault.backup.verification_kv_paths
+                hetzner_baremetal_vault.backup.optional_verification_kv_paths
                 | selectattr('path', 'match', '^.*/root$') | list
               }}
             _vault_raft_snapshot_verification_kv_paths_resolved: >-
               {{ hetzner_baremetal_vault.backup.verification_kv_paths }}
           changed_when: false
+          no_log: true
+
+        - name: Read the immutable Raft backup verification canary
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: >-
+              {{ hetzner_baremetal_vault.backup.verification_canary.mount_point }}
+            path: "{{ hetzner_baremetal_vault.backup.verification_canary.path }}"
+          register: _vault_raft_snapshot_canary_before
+          failed_when: false
+          delegate_to: localhost
+          become: false
+          vars:
+            ansible_python_interpreter: "{{ _vault_raft_snapshot_controller_python }}"
+          no_log: true
+
+        - name: Generate one non-secret immutable canary identifier
+          ansible.builtin.set_fact:
+            _vault_raft_snapshot_canary_id: >-
+              {{
+                lookup(
+                  'ansible.builtin.password',
+                  '/dev/null',
+                  length=32,
+                  chars=['ascii_lowercase', 'digits']
+                )
+              }}
+          when: _vault_raft_snapshot_canary_before.secret is not defined
+          no_log: true
+
+        - name: Create the absent Raft backup verification canary with CAS
+          community.hashi_vault.vault_kv2_write:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: >-
+              {{ hetzner_baremetal_vault.backup.verification_canary.mount_point }}
+            path: "{{ hetzner_baremetal_vault.backup.verification_canary.path }}"
+            cas: 0
+            data:
+              schema_version: 1
+              subject: >-
+                {{ hetzner_baremetal_vault.backup.verification_canary.subject }}
+              canary_id: "{{ _vault_raft_snapshot_canary_id }}"
+          when: _vault_raft_snapshot_canary_before.secret is not defined
+          register: _vault_raft_snapshot_canary_write
+          failed_when: false
+          delegate_to: localhost
+          become: false
+          vars:
+            ansible_python_interpreter: "{{ _vault_raft_snapshot_controller_python }}"
+          no_log: true
+
+        - name: Require successful protected canary creation
+          ansible.builtin.assert:
+            that:
+              - not (_vault_raft_snapshot_canary_write.failed | default(false))
+              - _vault_raft_snapshot_canary_write.msg is not defined
+            fail_msg: >-
+              Vault canary creation failed:
+              {{ _vault_raft_snapshot_canary_write.msg | default('no safe message') }}
+            quiet: true
+          when: _vault_raft_snapshot_canary_before.secret is not defined
+
+        - name: Read back the exact Raft backup verification canary
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            namespace: >-
+              {{
+                _hetzner_hashicorp_vault_auth.namespace
+                if (_hetzner_hashicorp_vault_auth.namespace | length > 0)
+                else omit
+              }}
+            validate_certs: "{{ _hetzner_hashicorp_vault_auth.validate_certs }}"
+            ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+            retries: "{{ _hetzner_hashicorp_vault_auth.retries }}"
+            auth_method: "{{ _hetzner_hashicorp_vault_auth.auth_method }}"
+            mount_point: "{{ _hetzner_hashicorp_vault_auth.auth_mount_point }}"
+            role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            engine_mount_point: >-
+              {{ hetzner_baremetal_vault.backup.verification_canary.mount_point }}
+            path: "{{ hetzner_baremetal_vault.backup.verification_canary.path }}"
+          register: _vault_raft_snapshot_canary
+          delegate_to: localhost
+          become: false
+          vars:
+            ansible_python_interpreter: "{{ _vault_raft_snapshot_controller_python }}"
+          no_log: true
+
+        - name: Require the exact closed canary document
+          ansible.builtin.assert:
+            that:
+              - _vault_raft_snapshot_canary.secret is mapping
+              - >-
+                _vault_raft_snapshot_canary.secret.keys() | list | sort
+                == ['canary_id', 'schema_version', 'subject'] | sort
+              - _vault_raft_snapshot_canary.secret.schema_version | int == 1
+              - >-
+                _vault_raft_snapshot_canary.secret.subject
+                == hetzner_baremetal_vault.backup.verification_canary.subject
+              - >-
+                _vault_raft_snapshot_canary.secret.canary_id
+                is match('^[a-z0-9]{32}$')
+            quiet: true
           no_log: true
 
         - name: Read selected Vault root documents for Raft verification
@@ -286,8 +444,27 @@
           loop_control:
             label: "vault-root-document"
           register: _vault_raft_snapshot_root_documents
+          failed_when: false
           delegate_to: localhost
           become: false
+          vars:
+            ansible_python_interpreter: "{{ _vault_raft_snapshot_controller_python }}"
+          no_log: true
+
+        - name: Add every present optional root document to Raft verification
+          ansible.builtin.set_fact:
+            _vault_raft_snapshot_verification_kv_paths_resolved: >-
+              {{
+                _vault_raft_snapshot_verification_kv_paths_resolved
+                + [_vault_raft_snapshot_root_document.item]
+              }}
+          loop: "{{ _vault_raft_snapshot_root_documents.results }}"
+          loop_control:
+            loop_var: _vault_raft_snapshot_root_document
+            label: vault-root-document
+          when:
+            - not (_vault_raft_snapshot_root_document is failed)
+            - _vault_raft_snapshot_root_document.secret is defined
           no_log: true
 
         - name: Extend Raft verification from every complete header manifest
@@ -297,6 +474,9 @@
           loop_control:
             loop_var: _vault_raft_snapshot_root_document
             label: "vault-root-document"
+          when:
+            - not (_vault_raft_snapshot_root_document is failed)
+            - _vault_raft_snapshot_root_document.secret is defined
           no_log: true
 
         - name: Require unique expanded Raft verification paths
@@ -314,6 +494,14 @@
             quiet: true
           no_log: true
 
+        - name: Bind the verified Python runtime to delegated controller tasks
+          ansible.builtin.add_host:
+            name: localhost
+            ansible_python_interpreter: >-
+              {{ _vault_raft_snapshot_controller_python }}
+          changed_when: false
+          no_log: true
+
         - name: Run encrypted Raft snapshot lifecycle role
           ansible.builtin.include_role:
             name: lit.supplementary.vault_raft_snapshot
@@ -329,7 +517,6 @@
               {{ hetzner_baremetal_vault.ca_cert_path }}
             vault_raft_snapshot_target_ca_cert_path: >-
               {{ hetzner_baremetal_vault.tls.target_ca_cert_path }}
-            vault_raft_snapshot_timeout: "{{ hetzner_baremetal_vault.timeout }}"
             vault_raft_snapshot_auth_mount_point: >-
               {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
             vault_raft_snapshot_role_id: >-
@@ -349,8 +536,6 @@
             vault_raft_snapshot_document_schema_version: 1
             vault_raft_snapshot_document_subject: >-
               {{ hetzner_baremetal_vault.endpoint_fqdn }}
-            vault_raft_snapshot_max_raw_bytes: >-
-              {{ hetzner_baremetal_vault.backup.max_raw_bytes }}
             vault_raft_snapshot_verification_kv_paths: >-
               {{ _vault_raft_snapshot_verification_kv_paths_resolved }}
             vault_raft_snapshot_image: >-
@@ -372,12 +557,6 @@
                 _vault_raft_snapshot_init_document.vault_init.unseal_keys_b64
                 if vault_raft_snapshot_operation == 'restore_drill'
                 else []
-              }}
-            vault_raft_snapshot_restore_key_threshold: >-
-              {{
-                hetzner_baremetal_vault.seal.key_threshold
-                if vault_raft_snapshot_operation == 'restore_drill'
-                else 0
               }}
           no_log: true
 

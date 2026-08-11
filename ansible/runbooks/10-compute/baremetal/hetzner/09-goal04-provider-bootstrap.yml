@@ -1,0 +1,103 @@
+---
+- name: Plan or apply the exact Goal 04 provider bootstrap state
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _wbx_goal04_expected_host: wunderbox01.prd.edge.pub.l-it.io
+    _wbx_goal04_expected_server: 3035773
+    _wbx_goal04_expected_ipv4: 136.243.38.174
+    _wbx_goal04_confirmation_expected: >-
+      {{
+        'APPLY-WBX-G04:' ~ _wbx_goal04_expected_host
+        ~ ':' ~ (_wbx_goal04_expected_server | string)
+        ~ ':' ~ _wbx_goal04_expected_ipv4
+      }}
+
+  pre_tasks:
+    - name: Require the exact Goal 04 target and action
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == _wbx_goal04_expected_host
+          - inventory_hostname == _wbx_goal04_expected_host
+          - hetzner_robot_server_number | int == _wbx_goal04_expected_server
+          - ansible_host == _wbx_goal04_expected_ipv4
+          - hostname_fqdn == _wbx_goal04_expected_host
+          - hetzner_baremetal_robot_firewall_phase == 'bootstrap'
+          - wbx_goal04_action | default('plan') in ['plan', 'apply']
+          - >-
+            wbx_goal04_action | default('plan') == 'plan'
+            or wbx_goal04_confirmation | default('')
+               == _wbx_goal04_confirmation_expected
+        fail_msg: >-
+          Goal 04 requires the exact frozen host, server number, IPv4,
+          bootstrap firewall phase, action, and target-bound apply confirmation.
+        quiet: true
+      tags: [always]
+
+    - name: Resolve Robot API credentials from the selected external backend
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+    - name: Build the exact Goal 04 provider declaration
+      ansible.builtin.set_fact:
+        _wbx_goal04_firewalls:
+          - server_number: "{{ hetzner_robot_server_number }}"
+            port: "{{ hetzner_baremetal_robot_firewall.port }}"
+            filter_ipv6: "{{ hetzner_baremetal_robot_firewall.filter_ipv6 }}"
+            allowlist_hos: "{{ hetzner_baremetal_robot_firewall.allowlist_hos }}"
+            rules:
+              input: >-
+                {{
+                  hetzner_baremetal_robot_firewall.common_input_rules
+                  + hetzner_baremetal_robot_firewall_extra_input_rules
+                }}
+              output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
+            state: present
+        _wbx_goal04_vswitches:
+          - name: "{{ mgmt_transport.name }}"
+            vlan: "{{ mgmt_transport.vlan_id }}"
+            servers: >-
+              {{
+                groups['hetzner_baremetal']
+                | map('extract', hostvars, 'ansible_host')
+                | map('string') | list
+              }}
+            state: present
+        _wbx_goal04_reverse_dns:
+          - ip: "{{ ansible_host }}"
+            value: "{{ hostname_fqdn }}"
+            state: present
+      changed_when: false
+      no_log: true
+
+  tasks:
+    - name: Validate the Goal 04 provider declaration without API calls
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+      vars:
+        hetzner_robot_cac_validate_only: true
+        hetzner_robot_cac_user: ""
+        hetzner_robot_cac_password: ""
+        hetzner_robot_cac_firewalls: "{{ _wbx_goal04_firewalls }}"
+        hetzner_robot_cac_vswitches: "{{ _wbx_goal04_vswitches }}"
+        hetzner_robot_cac_reverse_dns: "{{ _wbx_goal04_reverse_dns }}"
+      when: wbx_goal04_action | default('plan') == 'plan'
+
+    - name: Reconcile the exact Goal 04 provider declaration
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+      vars:
+        hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+        hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+        hetzner_robot_cac_firewalls: "{{ _wbx_goal04_firewalls }}"
+        hetzner_robot_cac_vswitches: "{{ _wbx_goal04_vswitches }}"
+        hetzner_robot_cac_reverse_dns: "{{ _wbx_goal04_reverse_dns }}"
+      when: wbx_goal04_action | default('plan') == 'apply'

@@ -29,13 +29,16 @@
           LUKS2 header must be proved before any keyslot mutation.
       tags: [always]
 
-    - name: Require the HashiCorp Vault secret backend
+    - name: Require the HashiCorp Vault secret backend for Tang binding
       ansible.builtin.assert:
         that:
-          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+          - >-
+            luks_unlock_method != 'clevis_tang'
+            or hetzner_baremetal_secret_backend == 'hashicorp_vault'
         fail_msg: >-
-          Encrypted-root keyslot management requires the hashicorp_vault
-          backend after verified bootstrap-secret migration.
+          Clevis/Tang keyslot management requires the hashicorp_vault backend
+          after verified bootstrap-secret migration. Independent Dropbear
+          recovery does not depend on the host's own future Vault service.
         quiet: true
       tags: [always]
 
