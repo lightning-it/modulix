@@ -494,11 +494,18 @@
             quiet: true
           no_log: true
 
+        - name: Bind the verified Python runtime to delegated controller tasks
+          ansible.builtin.add_host:
+            name: localhost
+            ansible_python_interpreter: >-
+              {{ _vault_raft_snapshot_controller_python }}
+          changed_when: false
+          no_log: true
+
         - name: Run encrypted Raft snapshot lifecycle role
           ansible.builtin.include_role:
             name: lit.supplementary.vault_raft_snapshot
           vars:
-            ansible_python_interpreter: "{{ _vault_raft_snapshot_controller_python }}"
             vault_raft_snapshot_action: "{{ vault_raft_snapshot_operation }}"
             vault_raft_snapshot_api_url: >-
               {{ hetzner_baremetal_vault.network.controller_api_addr }}
