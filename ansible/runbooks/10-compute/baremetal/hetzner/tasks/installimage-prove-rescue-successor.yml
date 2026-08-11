@@ -74,7 +74,7 @@
       }}
     LIT_EXPECTED_DEPLOY_KEYS: >-
       {{
-        hostvars[hetzner_installimage_order_host].deploy_ssh_public_keys
+        hostvars[hetzner_installimage_order_host].hetzner_rescue_ssh_public_keys
         | map('trim')
         | map('regex_replace', '\\s+', ' ')
         | join('\n')

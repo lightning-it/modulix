@@ -105,7 +105,7 @@
       hetzner_rescue_validate_expected_disks: >-
         {{ hetzner_installimage_expected_disks }}
       hetzner_rescue_validate_deploy_ssh_public_keys: >-
-        {{ deploy_ssh_public_keys }}
+        {{ hetzner_rescue_ssh_public_keys }}
       hetzner_rescue_validate_robot_user_keys_max_bytes: >-
         {{ hetzner_baremetal_rescue_robot_user_keys_max_bytes }}
       hetzner_rescue_validate_rescue_marker_path: >-
