@@ -27,10 +27,16 @@
           - ansible_limit | string | trim == inventory_hostname
           - inventory_hostname == hetzner_baremetal_vault.host
           - vault_raft_snapshot_operation in ['backup', 'restore_drill']
-          - hetzner_baremetal_secret_backend == 'hashicorp_vault'
+          - hetzner_baremetal_vault.backup.backend == 'raft_snapshot'
+          - hetzner_baremetal_vault.controller_auth.auth_method == 'approle'
+          - >-
+            hetzner_baremetal_vault.controller_auth.capability_probes
+            | selectattr('path', 'equalto', 'sys/storage/raft/snapshot')
+            | selectattr('capabilities', 'equalto', ['read'])
+            | list | length == 1
         fail_msg: >-
           Use --limit with the exact Vault host, select backup or restore_drill,
-          and run only after the verified HashiCorp Vault backend transition.
+          and require the exact Raft-snapshot AppRole contract.
         quiet: true
       tags: [always]
 
