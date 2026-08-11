@@ -1,0 +1,116 @@
+---
+- name: Accept one Wunderbox management-service target
+  hosts: wunderboxes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    _wunderbox_management_acceptance_targets:
+      - keycloak
+      - netbox
+      - guacamole
+      - nginx
+      - alloy
+      - all
+    _wunderbox_management_acceptance_selected: >-
+      {{ wunderbox_management_target | default('all') }}
+
+  pre_tasks:
+    - name: Require one exact host and an approved acceptance target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - >-
+            _wunderbox_management_acceptance_selected
+            in _wunderbox_management_acceptance_targets
+          - >-
+            _wunderbox_management_acceptance_selected == 'alloy' or
+            wunderbox_goal07_management_services.external_prerequisites.dns_records_present
+            is sameas true
+          - >-
+            _wunderbox_management_acceptance_selected == 'alloy' or
+            wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
+            is sameas true
+          - >-
+            _wunderbox_management_acceptance_selected != 'all' or
+            wunderbox_goal07_management_services.external_prerequisites.atlas_loki_mtls_material_present_in_vault
+            is sameas true
+        fail_msg: >-
+          Use --limit with the exact FQDN, select one declared management
+          target or all, and complete the inventory-declared prerequisites for
+          every public or telemetry probe in scope.
+        quiet: true
+
+  tasks:
+    - name: Probe internal management-service readiness
+      ansible.builtin.uri:
+        url: "{{ item.url }}"
+        method: GET
+        status_code: "{{ item.status_code }}"
+        follow_redirects: none
+        validate_certs: true
+        return_content: false
+      loop: "{{ wunderbox_management_acceptance.internal_probes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: >-
+        _wunderbox_management_acceptance_selected == 'all' or
+        _wunderbox_management_acceptance_selected == item.service
+      register: _wunderbox_management_internal_acceptance
+      changed_when: false
+
+    - name: Probe public HTTPS policy from the controller
+      delegate_to: localhost
+      become: false
+      ansible.builtin.uri:
+        url: "{{ item.url }}"
+        method: GET
+        status_code: "{{ item.status_code }}"
+        follow_redirects: none
+        validate_certs: true
+        return_content: false
+      loop: "{{ wunderbox_management_acceptance.public_probes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: >-
+        _wunderbox_management_acceptance_selected in ['all', 'nginx'] or
+        _wunderbox_management_acceptance_selected == item.service
+      register: _wunderbox_management_public_acceptance
+      changed_when: false
+
+    - name: Read back listener isolation
+      ansible.builtin.command:
+        argv: [ss, -H, -lntp]
+      register: _wunderbox_management_listeners
+      changed_when: false
+
+    - name: Require loopback-only application listeners and public HTTPS gateway
+      ansible.builtin.assert:
+        that:
+          - "'127.0.0.1:8080' in _wunderbox_management_listeners.stdout"
+          - "'127.0.0.1:8081' in _wunderbox_management_listeners.stdout"
+          - "'127.0.0.1:8082' in _wunderbox_management_listeners.stdout"
+          - >-
+            (wunderbox_goal07_management_services.public_gateway.bind_ipv4 ~ ':443')
+            in _wunderbox_management_listeners.stdout
+          - "'0.0.0.0:4822' not in _wunderbox_management_listeners.stdout"
+          - "'0.0.0.0:5432' not in _wunderbox_management_listeners.stdout"
+        fail_msg: "Management-service listener isolation differs from the Goal 07 contract."
+        quiet: true
+
+    - name: Publish sanitized management-service acceptance facts
+      ansible.builtin.set_fact:
+        wunderbox_management_acceptance_result:
+          schema_version: 1
+          host: "{{ inventory_hostname }}"
+          selected_target: "{{ _wunderbox_management_acceptance_selected }}"
+          internal_probe_count: >-
+            {{ _wunderbox_management_internal_acceptance.results | default([]) | length }}
+          public_probe_count: >-
+            {{ _wunderbox_management_public_acceptance.results | default([]) | length }}
+          listener_isolation: passed
+          checked_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      changed_when: false
