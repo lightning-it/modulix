@@ -68,6 +68,29 @@ not a simulated change report from the composed roles.
 - `10-deploy.yml`: always import `07-preflight.yml` before the guarded deploy
   play; apply requires the deploy approval.
 - `20-ops.yml`: inspect Wunderbox runtime status without changing it.
+- `30-management-services.yml`: deploy Keycloak, NetBox, Guacamole, the public
+  NGINX gateway, or Alloy independently on one exact host. Application secrets
+  are read-before-generate in HC Vault and never written to local fallback files.
+  NGINX certificate material is resolved only through Vault KV or issued
+  through Vault PKI and then persisted to KV; local certificate fallback is
+  prohibited by the orchestration guard. Productive NGINX and Alloy applies
+  fail closed until their inventory-declared DNS/TLS and mTLS prerequisites
+  are complete.
+- `31-management-backup.yml`: create one service database dump, encrypt it
+  client-side with the controller's Ansible Vault custody, upload only the
+  ciphertext to the protected S3 bucket, and remove the transient plaintext.
+  Backup apply is blocked until Vault-backed S3 credentials and controller
+  encryption custody are explicitly attested in inventory.
+- `32-management-restore-drill.yml`: require a ciphertext-bound confirmation,
+  restore into a disposable database, verify its catalog, and always remove the
+  disposable database and plaintext staging files.
+- `33-management-acceptance.yml`: read back internal health, public HTTPS, and
+  listener isolation for one management target or the complete Goal 07 stack.
+  NGINX acceptance additionally checks Vault-only custody, certificate
+  validity/SAN coverage, private-key mode `0600`, and certificate/key matching.
+  Alloy acceptance verifies the Vault-backed CA/client-certificate/key bundle,
+  client-certificate validity and CA trust, private-key mode `0600`, and
+  certificate/key matching before mTLS is accepted.
 
 Semaphore retirement is disabled unless all of these conditions hold:
 
@@ -98,6 +121,8 @@ services:
     alloy_deploy: enabled
     grafana_deploy: enabled
     checkmk_deploy: enabled
+    netbox_deploy: enabled
+    guacamole_deploy: enabled
 ```
 
 Per-service overrides may also use `wunderbox_service_<service>: enabled` or
@@ -119,6 +144,8 @@ hostnames and credentials must come from inventory, HC Vault, or Ansible Vault.
 | Nessus | `https://nessus.example.invalid` | Nessus admin credentials from Vault-backed vars |
 | Forgejo | `https://forgejo.example.invalid` | Forgejo admin/user credentials from Vault-backed vars |
 | Keycloak | `https://keycloak.example.invalid` | Realm user or admin credentials from Vault-backed vars |
+| NetBox | `https://netbox.example.invalid` | Keycloak OIDC or local break-glass account from Vault |
+| Guacamole | `https://guacamole.example.invalid/guacamole/` | Keycloak OIDC or local break-glass account from Vault |
 | Grafana | `https://grafana.example.invalid` | Grafana admin credentials from Vault-backed vars |
 | Checkmk | `https://checkmk.example.invalid` | Checkmk admin credentials from Vault-backed vars |
 | PostgreSQL | `postgresql://postgres.example.invalid:5432` | Database credentials from Vault-backed vars |

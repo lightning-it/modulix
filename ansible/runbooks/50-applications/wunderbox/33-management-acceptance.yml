@@ -1,0 +1,325 @@
+---
+- name: Accept one Wunderbox management-service target
+  hosts: wunderboxes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    _wunderbox_management_acceptance_targets:
+      - keycloak
+      - netbox
+      - guacamole
+      - nginx
+      - alloy
+      - all
+    _wunderbox_management_acceptance_selected: >-
+      {{ wunderbox_management_target | default('all') }}
+    _wunderbox_goal07_management_contract: >-
+      {{ wunderbox_goal07_management_services | default({}) }}
+    _wunderbox_management_external_prerequisites: >-
+      {{
+        _wunderbox_goal07_management_contract.get(
+          'external_prerequisites',
+          {}
+        )
+        if _wunderbox_goal07_management_contract is mapping
+        else {}
+      }}
+
+  pre_tasks:
+    - name: Require one exact host and an approved acceptance target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - >-
+            _wunderbox_management_acceptance_selected
+            in _wunderbox_management_acceptance_targets
+          - _wunderbox_goal07_management_contract is mapping
+          - _wunderbox_management_external_prerequisites is mapping
+          - >-
+            _wunderbox_management_acceptance_selected == 'alloy' or
+            _wunderbox_management_external_prerequisites.get(
+              'dns_records_present',
+              false
+            )
+            is sameas true
+          - >-
+            _wunderbox_management_acceptance_selected == 'alloy' or
+            _wunderbox_management_external_prerequisites.get(
+              'public_tls_material_present_in_vault',
+              false
+            )
+            is sameas true
+          - >-
+            _wunderbox_management_acceptance_selected != 'all' or
+            _wunderbox_management_external_prerequisites.get(
+              'atlas_loki_mtls_material_present_in_vault',
+              false
+            )
+            is sameas true
+        fail_msg: >-
+          Use --limit with the exact FQDN, select one declared management
+          target or all, and complete the inventory-declared prerequisites for
+          every public or telemetry probe in scope.
+        quiet: true
+
+  tasks:
+    - name: Probe internal management-service readiness
+      ansible.builtin.uri:
+        url: "{{ item.url }}"
+        method: GET
+        status_code: "{{ item.status_code }}"
+        follow_redirects: none
+        validate_certs: true
+        return_content: false
+      loop: "{{ wunderbox_management_acceptance.internal_probes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: >-
+        _wunderbox_management_acceptance_selected == 'all' or
+        _wunderbox_management_acceptance_selected == item.service
+      register: _wunderbox_management_internal_acceptance
+      changed_when: false
+
+    - name: Probe public HTTPS policy from the controller
+      delegate_to: localhost
+      become: false
+      ansible.builtin.uri:
+        url: "{{ item.url }}"
+        method: GET
+        status_code: "{{ item.status_code }}"
+        follow_redirects: none
+        validate_certs: true
+        return_content: false
+      loop: "{{ wunderbox_management_acceptance.public_probes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: >-
+        _wunderbox_management_acceptance_selected == 'all' or
+        _wunderbox_management_acceptance_selected == item.service
+      register: _wunderbox_management_public_acceptance
+      changed_when: false
+
+    - name: Read back NGINX certificate and private-key file controls
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ nginx_config_tls_certificate_host_path }}"
+        - "{{ nginx_config_tls_certificate_key_host_path }}"
+      register: _wunderbox_management_nginx_tls_files
+      changed_when: false
+      when: _wunderbox_management_acceptance_selected in ['nginx', 'all']
+
+    - name: Require NGINX certificate files and private-key mode
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_management_nginx_tls_files.results[0].stat.isreg | default(false)
+          - _wunderbox_management_nginx_tls_files.results[1].stat.isreg | default(false)
+          - _wunderbox_management_nginx_tls_files.results[1].stat.mode == '0600'
+          - nginx_config_tls_source == 'vault'
+          - not (nginx_config_vault_allow_local_fallback | bool)
+        fail_msg: >-
+          NGINX TLS files or Vault-only private-key custody differ from the
+          Goal 07 security contract.
+        quiet: true
+      when: _wunderbox_management_acceptance_selected in ['nginx', 'all']
+
+    - name: Verify NGINX certificate validity window
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ nginx_config_tls_certificate_host_path }}"
+          - -noout
+          - -checkend
+          - "86400"
+      register: _wunderbox_management_nginx_certificate_validity
+      changed_when: false
+      when: _wunderbox_management_acceptance_selected in ['nginx', 'all']
+
+    - name: Verify every public vhost identity in the NGINX certificate
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ nginx_config_tls_certificate_host_path }}"
+          - -noout
+          - -checkhost
+          - "{{ item.server_name }}"
+      loop: "{{ nginx_config_vhosts }}"
+      loop_control:
+        label: "{{ item.server_name }}"
+      register: _wunderbox_management_nginx_certificate_identities
+      changed_when: false
+      when: _wunderbox_management_acceptance_selected in ['nginx', 'all']
+
+    - name: Verify NGINX certificate and private key match
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cert_hash="$(
+          openssl x509 -in "${CERTIFICATE_PATH}" -pubkey -noout |
+          openssl pkey -pubin -outform DER |
+          sha256sum | cut -d ' ' -f 1
+        )"
+        key_hash="$(
+          openssl pkey -in "${PRIVATE_KEY_PATH}" -pubout -outform DER |
+          sha256sum | cut -d ' ' -f 1
+        )"
+        test -n "${cert_hash}"
+        test "${cert_hash}" = "${key_hash}"
+      args:
+        executable: /bin/bash
+      environment:
+        CERTIFICATE_PATH: "{{ nginx_config_tls_certificate_host_path }}"
+        PRIVATE_KEY_PATH: "{{ nginx_config_tls_certificate_key_host_path }}"
+      register: _wunderbox_management_nginx_key_match
+      changed_when: false
+      no_log: true
+      when: _wunderbox_management_acceptance_selected in ['nginx', 'all']
+
+    - name: Read back Alloy mTLS file controls
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_ca_file | basename }}"
+        - "{{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_cert_file | basename }}"
+        - "{{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_key_file | basename }}"
+      register: _wunderbox_management_alloy_mtls_files
+      changed_when: false
+      when: _wunderbox_management_acceptance_selected in ['alloy', 'all']
+
+    - name: Require Vault-backed Alloy mTLS files and private-key mode
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_management_alloy_mtls_files.results[0].stat.isreg | default(false)
+          - _wunderbox_management_alloy_mtls_files.results[1].stat.isreg | default(false)
+          - _wunderbox_management_alloy_mtls_files.results[2].stat.isreg | default(false)
+          - _wunderbox_management_alloy_mtls_files.results[2].stat.mode == '0600'
+          - alloy_deploy_loki_tls_enabled | bool
+          - not (alloy_deploy_loki_tls_insecure_skip_verify | bool)
+          - >-
+            _wunderbox_management_external_prerequisites.get(
+              'atlas_loki_mtls_material_present_in_vault',
+              false
+            )
+            is sameas true
+        fail_msg: >-
+          Alloy mTLS files, private-key mode, or Vault custody differ from the
+          Goal 07 security contract.
+        quiet: true
+      when: _wunderbox_management_acceptance_selected in ['alloy', 'all']
+
+    - name: Verify Alloy client-certificate validity window
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_cert_file | basename }}"
+          - -noout
+          - -checkend
+          - "86400"
+      register: _wunderbox_management_alloy_certificate_validity
+      changed_when: false
+      when: _wunderbox_management_acceptance_selected in ['alloy', 'all']
+
+    - name: Verify Alloy client certificate against its Vault CA bundle
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - verify
+          - -CAfile
+          - "{{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_ca_file | basename }}"
+          - "{{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_cert_file | basename }}"
+      register: _wunderbox_management_alloy_certificate_trust
+      changed_when: false
+      when: _wunderbox_management_acceptance_selected in ['alloy', 'all']
+
+    - name: Verify Alloy client certificate and private key match
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cert_hash="$(
+          openssl x509 -in "${CERTIFICATE_PATH}" -pubkey -noout |
+          openssl pkey -pubin -outform DER |
+          sha256sum | cut -d ' ' -f 1
+        )"
+        key_hash="$(
+          openssl pkey -in "${PRIVATE_KEY_PATH}" -pubout -outform DER |
+          sha256sum | cut -d ' ' -f 1
+        )"
+        test -n "${cert_hash}"
+        test "${cert_hash}" = "${key_hash}"
+      args:
+        executable: /bin/bash
+      environment:
+        CERTIFICATE_PATH: >-
+          {{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_cert_file | basename }}
+        PRIVATE_KEY_PATH: >-
+          {{ alloy_deploy_tls_dir }}/{{ alloy_deploy_loki_tls_key_file | basename }}
+      register: _wunderbox_management_alloy_key_match
+      changed_when: false
+      no_log: true
+      when: _wunderbox_management_acceptance_selected in ['alloy', 'all']
+
+    - name: Read back listener isolation
+      ansible.builtin.command:
+        argv: [ss, -H, -lntp]
+      register: _wunderbox_management_listeners
+      changed_when: false
+
+    - name: Require loopback-only application listeners and public HTTPS gateway
+      ansible.builtin.assert:
+        that:
+          - >-
+            _wunderbox_management_acceptance_selected not in ['keycloak', 'all'] or
+            '127.0.0.1:8080' in _wunderbox_management_listeners.stdout
+          - >-
+            _wunderbox_management_acceptance_selected not in ['netbox', 'all'] or
+            '127.0.0.1:8081' in _wunderbox_management_listeners.stdout
+          - >-
+            _wunderbox_management_acceptance_selected not in ['guacamole', 'all'] or
+            '127.0.0.1:8082' in _wunderbox_management_listeners.stdout
+          - >-
+            _wunderbox_management_acceptance_selected not in ['nginx', 'all'] or
+            (wunderbox_goal07_management_services.public_gateway.bind_ipv4 ~ ':443')
+            in _wunderbox_management_listeners.stdout
+          - >-
+            _wunderbox_management_acceptance_selected not in ['guacamole', 'all'] or
+            '0.0.0.0:4822' not in _wunderbox_management_listeners.stdout
+          - >-
+            _wunderbox_management_acceptance_selected not in
+            ['keycloak', 'netbox', 'guacamole', 'all'] or
+            '0.0.0.0:5432' not in _wunderbox_management_listeners.stdout
+        fail_msg: "Management-service listener isolation differs from the Goal 07 contract."
+        quiet: true
+
+    - name: Publish sanitized management-service acceptance facts
+      ansible.builtin.set_fact:
+        wunderbox_management_acceptance_result:
+          schema_version: 1
+          host: "{{ inventory_hostname }}"
+          selected_target: "{{ _wunderbox_management_acceptance_selected }}"
+          internal_probe_count: >-
+            {{ _wunderbox_management_internal_acceptance.results | default([]) | length }}
+          public_probe_count: >-
+            {{ _wunderbox_management_public_acceptance.results | default([]) | length }}
+          vault_tls_custody: >-
+            {{
+              'passed'
+              if _wunderbox_management_acceptance_selected in ['nginx', 'all']
+              else 'not-selected'
+            }}
+          vault_mtls_custody: >-
+            {{
+              'passed'
+              if _wunderbox_management_acceptance_selected in ['alloy', 'all']
+              else 'not-selected'
+            }}
+          listener_isolation: passed
+          checked_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      changed_when: false

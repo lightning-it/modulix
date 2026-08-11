@@ -1,0 +1,334 @@
+---
+- name: Enforce Wunderbox preflight before management-service deployment
+  ansible.builtin.import_playbook: 07-preflight.yml
+
+- name: Deploy one Wunderbox management-service target
+  hosts: wunderboxes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    _wunderbox_orchestration_phase: deploy
+    _wunderbox_orchestration_mutating: true
+    _wunderbox_management_targets:
+      - keycloak
+      - netbox
+      - guacamole
+      - nginx
+      - alloy
+      - all
+    _wunderbox_management_selected: >-
+      {{ wunderbox_management_target | default('all') }}
+    _wunderbox_goal07_management_contract: >-
+      {{ wunderbox_goal07_management_services | default({}) }}
+    _wunderbox_management_external_prerequisites: >-
+      {{
+        _wunderbox_goal07_management_contract.get(
+          'external_prerequisites',
+          {}
+        )
+        if _wunderbox_goal07_management_contract is mapping
+        else {}
+      }}
+    _wunderbox_management_vault_role_vars: &vault_role_vars
+      vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
+      vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
+      vault_secret_bundle_validate_certs: true
+      vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+      vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
+      vault_secret_bundle_auth_mount_point: >-
+        {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+      vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+      vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+
+  pre_tasks:
+    - name: Enforce the Wunderbox orchestration boundary
+      ansible.builtin.import_tasks: tasks/orchestration-guard.yml
+      tags: [always]
+
+    - name: Validate the selected management-service target
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_management_selected in _wunderbox_management_targets
+        fail_msg: >-
+          wunderbox_management_target must select keycloak, netbox,
+          guacamole, nginx, alloy, or all.
+        quiet: true
+      tags: [always]
+
+    - name: Enforce Vault-only public certificate custody
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_goal07_management_contract is mapping
+          - _wunderbox_management_external_prerequisites is mapping
+          - nginx_config_tls_source | default('', true) == 'vault'
+          - >-
+            not (
+              nginx_config_vault_allow_local_fallback
+              | default(true)
+              | bool
+            )
+          - nginx_config_vault_kv_mount | default('', true) | trim | length > 0
+          - nginx_config_vault_kv_path | default('', true) | trim | length > 0
+          - >-
+            _wunderbox_management_external_prerequisites.get(
+              'public_tls_material_present_in_vault',
+              false
+            )
+            is sameas true or (
+              nginx_config_vault_issue_missing | default(false) | bool and
+              nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
+              nginx_config_vault_pki_role | default('', true) | trim | length > 0
+            )
+        fail_msg: >-
+          Public TLS must be resolved through Vault KV or Vault PKI. Local
+          certificate files and self-signed host generation are prohibited.
+        quiet: true
+      when: _wunderbox_management_selected in ['nginx', 'all']
+      tags: [always]
+
+    - name: Require completed external prerequisites for gateway and telemetry apply
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_goal07_management_contract is mapping
+          - _wunderbox_management_external_prerequisites is mapping
+          - >-
+            _wunderbox_management_selected not in ['nginx', 'all'] or
+            _wunderbox_management_external_prerequisites.get(
+              'dns_records_present',
+              false
+            )
+            is sameas true
+          - >-
+            _wunderbox_management_selected not in ['nginx', 'all'] or
+            (
+              _wunderbox_management_external_prerequisites.get(
+                'public_tls_material_present_in_vault',
+                false
+              )
+              is sameas true
+              or (
+                nginx_config_tls_source | default('', true) == 'vault' and
+                nginx_config_vault_issue_missing | default(false) | bool and
+                nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
+                nginx_config_vault_pki_role | default('', true) | trim | length > 0
+              )
+            )
+          - >-
+            _wunderbox_management_selected not in ['alloy', 'all'] or
+            _wunderbox_management_external_prerequisites.get(
+              'atlas_loki_mtls_material_present_in_vault',
+              false
+            )
+            is sameas true
+        fail_msg: >-
+          Productive gateway or telemetry apply is blocked until its
+          inventory-declared DNS, public TLS, and Atlas Loki mTLS prerequisites
+          are complete.
+        quiet: true
+      when: >-
+        not ansible_check_mode and
+        wunderbox_orchestration_action | default('plan') == 'apply'
+      tags: [always]
+
+    - name: End after the read-only management-service plan
+      ansible.builtin.meta: end_play
+      when: >-
+        ansible_check_mode or
+        wunderbox_orchestration_action | default('plan') == 'plan'
+      tags: [always]
+
+    - name: Resolve scoped controller HashiCorp Vault authentication
+      ansible.builtin.include_tasks: >-
+        ../../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+      no_log: true
+      tags: [always]
+
+  tasks:
+    - name: Resolve Keycloak runtime secrets from Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_secret_bundle
+      vars:
+        <<: *vault_role_vars
+        vault_secret_bundle_kv_path: >-
+          {{ wunderbox_management_vault_paths.keycloak }}
+        vault_secret_bundle_items:
+          - {name: db_password, length: 48}
+          - {name: admin_password, length: 48}
+      when: _wunderbox_management_selected in ['keycloak', 'all']
+      no_log: true
+      tags: [keycloak]
+
+    - name: Capture the Keycloak runtime secret bundle
+      ansible.builtin.set_fact:
+        wunderbox_keycloak_secrets: "{{ vault_secret_bundle_result }}"
+      when: _wunderbox_management_selected in ['keycloak', 'all']
+      no_log: true
+      tags: [keycloak]
+
+    - name: Resolve SSO client secrets from Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_secret_bundle
+      vars:
+        <<: *vault_role_vars
+        vault_secret_bundle_kv_path: "{{ wunderbox_management_vault_paths.sso }}"
+        vault_secret_bundle_items:
+          - {name: netbox_client_secret, length: 48}
+      when: _wunderbox_management_selected in ['keycloak', 'netbox', 'all']
+      no_log: true
+      tags: [keycloak, netbox, sso]
+
+    - name: Capture the SSO client secret bundle
+      ansible.builtin.set_fact:
+        wunderbox_sso_secrets: "{{ vault_secret_bundle_result }}"
+      when: _wunderbox_management_selected in ['keycloak', 'netbox', 'all']
+      no_log: true
+      tags: [keycloak, netbox, sso]
+
+    - name: Deploy the Keycloak identity target
+      ansible.builtin.include_role:
+        name: lit.supplementary.keycloak_deploy
+      vars:
+        keycloak_deploy_manage_postgres: true
+        keycloak_deploy_db_password: "{{ wunderbox_keycloak_secrets.db_password }}"
+        keycloak_deploy_admin_password: "{{ wunderbox_keycloak_secrets.admin_password }}"
+        keycloak_deploy_generate_secrets: false
+        keycloak_deploy_store_generated_secrets: false
+        keycloak_deploy_allow_local_secret_files: false
+      when: _wunderbox_management_selected in ['keycloak', 'all']
+      no_log: true
+      tags: [keycloak]
+
+    - name: Reconcile the management realm and OIDC clients
+      ansible.builtin.include_role:
+        name: lit.supplementary.keycloak_cac
+      vars:
+        keycloak_cac_skip_apply: false
+        keycloak_cac_admin_password: "{{ wunderbox_keycloak_secrets.admin_password }}"
+      when: _wunderbox_management_selected in ['keycloak', 'all']
+      no_log: true
+      tags: [keycloak, sso]
+
+    - name: Resolve NetBox runtime secrets from Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_secret_bundle
+      vars:
+        <<: *vault_role_vars
+        vault_secret_bundle_kv_path: "{{ wunderbox_management_vault_paths.netbox }}"
+        vault_secret_bundle_static_data:
+          oidc_client_secret: "{{ wunderbox_sso_secrets.netbox_client_secret }}"
+        vault_secret_bundle_items:
+          - {name: db_password, length: 48}
+          - {name: redis_password, length: 48}
+          - {name: redis_cache_password, length: 48}
+          - {name: secret_key, length: 64}
+          - {name: superuser_password, length: 48}
+          - {name: superuser_api_token, length: 40, chars: hexdigits}
+      when: _wunderbox_management_selected in ['netbox', 'all']
+      no_log: true
+      tags: [netbox]
+
+    - name: Capture the NetBox runtime secret bundle
+      ansible.builtin.set_fact:
+        wunderbox_netbox_secrets_runtime: "{{ vault_secret_bundle_result }}"
+      when: _wunderbox_management_selected in ['netbox', 'all']
+      no_log: true
+      tags: [netbox]
+
+    - name: Deploy the NetBox source-of-truth target
+      ansible.builtin.include_role:
+        name: lit.supplementary.netbox_deploy
+      vars:
+        netbox_deploy_secrets: "{{ wunderbox_netbox_secrets_runtime }}"
+      when: _wunderbox_management_selected in ['netbox', 'all']
+      no_log: true
+      tags: [netbox]
+
+    - name: Resolve Guacamole runtime secrets from Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_secret_bundle
+      vars:
+        <<: *vault_role_vars
+        vault_secret_bundle_kv_path: >-
+          {{ wunderbox_management_vault_paths.guacamole }}
+        vault_secret_bundle_items:
+          - {name: db_password, length: 48}
+          - {name: breakglass_password, length: 48}
+          - name: breakglass_salt
+            length: 32
+            chars: ascii_letters,digits
+      when: _wunderbox_management_selected in ['guacamole', 'all']
+      no_log: true
+      tags: [guacamole]
+
+    - name: Capture the Guacamole runtime secret bundle
+      ansible.builtin.set_fact:
+        wunderbox_guacamole_secrets_runtime: "{{ vault_secret_bundle_result }}"
+      when: _wunderbox_management_selected in ['guacamole', 'all']
+      no_log: true
+      tags: [guacamole]
+
+    - name: Deploy the Guacamole remote-access target
+      ansible.builtin.include_role:
+        name: lit.supplementary.guacamole_deploy
+      vars:
+        guacamole_deploy_secrets: "{{ wunderbox_guacamole_secrets_runtime }}"
+      when: _wunderbox_management_selected in ['guacamole', 'all']
+      no_log: true
+      tags: [guacamole]
+
+    - name: Resolve Atlas Loki mTLS material from Vault
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_secret_bundle
+      vars:
+        <<: *vault_role_vars
+        vault_secret_bundle_kv_path: >-
+          {{ wunderbox_management_vault_paths.alloy_mtls }}
+        vault_secret_bundle_generate_missing: false
+        vault_secret_bundle_items:
+          - {name: ca_certificate, length: 16}
+          - {name: client_certificate, length: 16}
+          - {name: private_key, length: 16}
+      when: _wunderbox_management_selected in ['alloy', 'all']
+      no_log: true
+      tags: [alloy, monitoring]
+
+    - name: Capture the Atlas Loki mTLS bundle
+      ansible.builtin.set_fact:
+        wunderbox_alloy_mtls: "{{ vault_secret_bundle_result }}"
+      when: _wunderbox_management_selected in ['alloy', 'all']
+      no_log: true
+      tags: [alloy, monitoring]
+
+    - name: Deploy Alloy service and security-log transport
+      ansible.builtin.include_role:
+        name: lit.supplementary.alloy_deploy
+      vars:
+        alloy_deploy_loki_tls_ca_content: "{{ wunderbox_alloy_mtls.ca_certificate }}"
+        alloy_deploy_loki_tls_cert_content: "{{ wunderbox_alloy_mtls.client_certificate }}"
+        alloy_deploy_loki_tls_key_content: "{{ wunderbox_alloy_mtls.private_key }}"
+      when: _wunderbox_management_selected in ['alloy', 'all']
+      no_log: true
+      tags: [alloy, monitoring]
+
+    - name: Deploy the public NGINX container gateway
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_deploy
+      when: _wunderbox_management_selected in ['nginx', 'all']
+      tags: [nginx]
+
+    - name: Configure HTTPS protection after all selected backends are healthy
+      ansible.builtin.include_role:
+        name: lit.supplementary.nginx_config
+      vars:
+        nginx_config_vault_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
+        nginx_config_vault_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+        nginx_config_vault_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
+        nginx_config_vault_auth_mount_point: >-
+          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+        nginx_config_vault_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+        nginx_config_vault_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+      when: _wunderbox_management_selected in ['nginx', 'all']
+      no_log: true
+      tags: [nginx]

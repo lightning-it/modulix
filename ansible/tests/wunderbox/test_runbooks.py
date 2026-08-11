@@ -170,6 +170,81 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         self.assertIn("192.0.2.10", readme)
         self.assertIn("deploy_sha256: disabled", readme)
 
+    def test_management_gateway_requires_vault_only_certificate_custody(self):
+        runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
+        source = (RUNBOOK_DIRECTORY / "30-management-services.yml").read_text(
+            encoding="utf-8"
+        )
+
+        custody_guard = next(
+            task
+            for task in runbook["pre_tasks"]
+            if task["name"] == "Enforce Vault-only public certificate custody"
+        )
+        assertions = custody_guard["ansible.builtin.assert"]["that"]
+        normalized_assertions = {" ".join(assertion.split()) for assertion in assertions}
+        self.assertIn(
+            "nginx_config_tls_source | default('', true) == 'vault'",
+            normalized_assertions,
+        )
+        self.assertIn(
+            "not ( nginx_config_vault_allow_local_fallback | default(true) | bool )",
+            normalized_assertions,
+        )
+        self.assertIn("vault_secret_bundle_generate_missing: false", source)
+        for key in ("ca_certificate", "client_certificate", "private_key"):
+            self.assertIn(f"name: {key}", source)
+
+    def test_management_guards_default_missing_inventory_contracts(self):
+        for name in (
+            "30-management-services.yml",
+            "31-management-backup.yml",
+            "33-management-acceptance.yml",
+        ):
+            with self.subTest(runbook=name):
+                source = (RUNBOOK_DIRECTORY / name).read_text(encoding="utf-8")
+                self.assertIn(
+                    "wunderbox_goal07_management_services | default({})", source
+                )
+                self.assertIn("'external_prerequisites'", source)
+                self.assertIn("is mapping", source)
+                self.assertNotIn(
+                    "wunderbox_goal07_management_services.external_prerequisites.",
+                    source,
+                )
+                if name == "31-management-backup.yml":
+                    self.assertNotIn("wunderbox_management_backup.", source)
+                    for key in (
+                        "backup_dir",
+                        "database",
+                        "database_user",
+                        "container",
+                    ):
+                        self.assertNotIn(
+                            f"_management_backup_contract.{key}", source
+                        )
+
+    def test_management_acceptance_verifies_vault_tls_files_and_identity(self):
+        source = (RUNBOOK_DIRECTORY / "33-management-acceptance.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Vault-only private-key custody", source)
+        self.assertIn("stat.mode == '0600'", source)
+        self.assertIn("-checkend", source)
+        self.assertIn("-checkhost", source)
+        self.assertIn("Verify NGINX certificate and private key match", source)
+
+    def test_management_acceptance_verifies_vault_mtls_files_and_identity(self):
+        source = (RUNBOOK_DIRECTORY / "33-management-acceptance.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Require Vault-backed Alloy mTLS files", source)
+        self.assertIn("atlas_loki_mtls_material_present_in_vault", source)
+        self.assertIn("Verify Alloy client certificate against its Vault CA bundle", source)
+        self.assertIn("Verify Alloy client certificate and private key match", source)
+
 
 if __name__ == "__main__":
     unittest.main()
