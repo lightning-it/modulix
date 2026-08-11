@@ -184,11 +184,17 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             "ansible_limit | string | trim == inventory_hostname",
             "ansible_play_hosts_all == [inventory_hostname]",
             "openssh_server_host_key_ed25519_fingerprint",
+            "hetzner_baremetal_rescue_known_hosts_path is defined",
+            "hetzner_baremetal_rescue_known_hosts_path\n            | default('')",
             "ssh-keyscan",
             "{{ ansible_port | string }}",
             "== _wunderbox_controller_ssh_trust_expected_fingerprint",
             "PIN-WUNDERBOX-OPENSSH:",
             "ansible.builtin.known_hosts",
+            "Inspect the controller trust directory before mutation",
+            "_wunderbox_controller_ssh_trust_directory_before.stat.islnk",
+            "Inspect the controller trust file before mutation",
+            "_wunderbox_controller_ssh_trust_file_before.stat.islnk",
             "not _wunderbox_controller_ssh_trust_readback.stat.islnk",
             "_wunderbox_controller_ssh_trust_readback.stat.mode == '0600'",
         ):
@@ -197,6 +203,14 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
 
         self.assertLess(
             source.index("Require the inventory-pinned OpenSSH fingerprint"),
+            source.index("Pin the verified installed OpenSSH host key"),
+        )
+        self.assertLess(
+            source.index("Inspect the controller trust directory before mutation"),
+            source.index("Create the private controller trust directory"),
+        )
+        self.assertLess(
+            source.index("Inspect the controller trust file before mutation"),
             source.index("Pin the verified installed OpenSSH host key"),
         )
 

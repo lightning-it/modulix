@@ -36,8 +36,14 @@
           - ansible_host | string == wunderbox_orchestration.target.ipv4
           - ansible_port | int > 0
           - ansible_port | int < 65536
-          - hetzner_baremetal_rescue_known_hosts_path is string
-          - hetzner_baremetal_rescue_known_hosts_path | trim | length > 0
+          - hetzner_baremetal_rescue_known_hosts_path is defined
+          - >-
+            hetzner_baremetal_rescue_known_hosts_path
+            | default('')
+            is string
+          - >-
+            hetzner_baremetal_rescue_known_hosts_path
+            | default('') | trim | length > 0
           - >-
             _wunderbox_controller_ssh_trust_expected_fingerprint
             is match('^SHA256:[A-Za-z0-9+/]{43}$')
@@ -163,6 +169,32 @@
               state: installed_openssh_verified_no_change
           when: _wunderbox_controller_ssh_trust_action == 'plan'
 
+        - name: Inspect the controller trust directory before mutation
+          ansible.builtin.stat:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path | dirname }}"
+            get_checksum: false
+            follow: false
+          delegate_to: localhost
+          become: false
+          register: _wunderbox_controller_ssh_trust_directory_before
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Reject an unsafe existing controller trust directory
+          ansible.builtin.assert:
+            that:
+              - >-
+                not _wunderbox_controller_ssh_trust_directory_before.stat.exists
+                or (
+                  _wunderbox_controller_ssh_trust_directory_before.stat.isdir
+                  and not
+                  _wunderbox_controller_ssh_trust_directory_before.stat.islnk
+                )
+            fail_msg: >-
+              The controller trust directory already exists but is not a real
+              directory. No controller trust was changed.
+            quiet: true
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
         - name: Create the private controller trust directory
           ansible.builtin.file:
             path: "{{ hetzner_baremetal_rescue_known_hosts_path | dirname }}"
@@ -170,6 +202,31 @@
             mode: "0700"
           delegate_to: localhost
           become: false
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Inspect the controller trust file before mutation
+          ansible.builtin.stat:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            get_checksum: false
+            follow: false
+          delegate_to: localhost
+          become: false
+          register: _wunderbox_controller_ssh_trust_file_before
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Reject an unsafe existing controller trust file
+          ansible.builtin.assert:
+            that:
+              - >-
+                not _wunderbox_controller_ssh_trust_file_before.stat.exists
+                or (
+                  _wunderbox_controller_ssh_trust_file_before.stat.isreg
+                  and not _wunderbox_controller_ssh_trust_file_before.stat.islnk
+                )
+            fail_msg: >-
+              The controller trust file already exists but is not a regular,
+              non-symlink file. No controller trust was changed.
+            quiet: true
           when: _wunderbox_controller_ssh_trust_action == 'apply'
 
         - name: Pin the verified installed OpenSSH host key
