@@ -87,6 +87,17 @@
             quiet: true
           tags: [always]
 
+        - name: Restore the package-compatible Podman AppArmor attachment
+          ansible.builtin.include_role:
+            name: lit.ubuntu.podman
+          vars:
+            podman_apparmor_profile_reload: true
+            podman_helper_apparmor_profiles:
+              - name: crun
+                executable: /usr/bin/crun
+                profile_path: /etc/apparmor.d/crun
+            podman_validate_executable: true
+
         - name: Deploy the approved Vault runtime
           ansible.builtin.include_role:
             name: lit.supplementary.vault_deploy
