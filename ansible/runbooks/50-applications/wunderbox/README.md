@@ -68,6 +68,11 @@ not a simulated change report from the composed roles.
 - `10-deploy.yml`: always import `07-preflight.yml` before the guarded deploy
   play; apply requires the deploy approval.
 - `20-ops.yml`: inspect Wunderbox runtime status without changing it.
+- `21-controller-ssh-trust.yml`: scan the installed OpenSSH endpoint on its
+  inventory-declared port, require the inventory-pinned Ed25519 fingerprint,
+  and refresh the private controller `known_hosts` file. The default `plan`
+  action performs only the live fingerprint comparison; `apply` additionally
+  requires `PIN-WUNDERBOX-OPENSSH:<fqdn>:<fingerprint>`.
 - `30-management-services.yml`: deploy Keycloak, NetBox, Guacamole, the public
   NGINX gateway, or Alloy independently on one exact host. Application secrets
   are read-before-generate in HC Vault and never written to local fallback files.
