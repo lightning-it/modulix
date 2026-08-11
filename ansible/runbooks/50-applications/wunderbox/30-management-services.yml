@@ -20,6 +20,17 @@
       - all
     _wunderbox_management_selected: >-
       {{ wunderbox_management_target | default('all') }}
+    _wunderbox_goal07_management_contract: >-
+      {{ wunderbox_goal07_management_services | default({}) }}
+    _wunderbox_management_external_prerequisites: >-
+      {{
+        _wunderbox_goal07_management_contract.get(
+          'external_prerequisites',
+          {}
+        )
+        if _wunderbox_goal07_management_contract is mapping
+        else {}
+      }}
     _wunderbox_management_vault_role_vars: &vault_role_vars
       vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
       vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
@@ -49,14 +60,24 @@
     - name: Enforce Vault-only public certificate custody
       ansible.builtin.assert:
         that:
-          - nginx_config_tls_source == 'vault'
-          - not (nginx_config_vault_allow_local_fallback | bool)
+          - _wunderbox_goal07_management_contract is mapping
+          - _wunderbox_management_external_prerequisites is mapping
+          - nginx_config_tls_source | default('', true) == 'vault'
+          - >-
+            not (
+              nginx_config_vault_allow_local_fallback
+              | default(true)
+              | bool
+            )
           - nginx_config_vault_kv_mount | default('', true) | trim | length > 0
           - nginx_config_vault_kv_path | default('', true) | trim | length > 0
           - >-
-            wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
+            _wunderbox_management_external_prerequisites.get(
+              'public_tls_material_present_in_vault',
+              false
+            )
             is sameas true or (
-              nginx_config_vault_issue_missing | bool and
+              nginx_config_vault_issue_missing | default(false) | bool and
               nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
               nginx_config_vault_pki_role | default('', true) | trim | length > 0
             )
@@ -70,26 +91,36 @@
     - name: Require completed external prerequisites for gateway and telemetry apply
       ansible.builtin.assert:
         that:
-          - wunderbox_goal07_management_services.external_prerequisites is mapping
+          - _wunderbox_goal07_management_contract is mapping
+          - _wunderbox_management_external_prerequisites is mapping
           - >-
             _wunderbox_management_selected not in ['nginx', 'all'] or
-            wunderbox_goal07_management_services.external_prerequisites.dns_records_present
+            _wunderbox_management_external_prerequisites.get(
+              'dns_records_present',
+              false
+            )
             is sameas true
           - >-
             _wunderbox_management_selected not in ['nginx', 'all'] or
             (
-              wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
+              _wunderbox_management_external_prerequisites.get(
+                'public_tls_material_present_in_vault',
+                false
+              )
               is sameas true
               or (
-                nginx_config_tls_source == 'vault' and
-                nginx_config_vault_issue_missing | bool and
+                nginx_config_tls_source | default('', true) == 'vault' and
+                nginx_config_vault_issue_missing | default(false) | bool and
                 nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
                 nginx_config_vault_pki_role | default('', true) | trim | length > 0
               )
             )
           - >-
             _wunderbox_management_selected not in ['alloy', 'all'] or
-            wunderbox_goal07_management_services.external_prerequisites.atlas_loki_mtls_material_present_in_vault
+            _wunderbox_management_external_prerequisites.get(
+              'atlas_loki_mtls_material_present_in_vault',
+              false
+            )
             is sameas true
         fail_msg: >-
           Productive gateway or telemetry apply is blocked until its

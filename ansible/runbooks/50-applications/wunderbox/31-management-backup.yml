@@ -9,11 +9,30 @@
   vars:
     _management_backup_targets: [keycloak, netbox, guacamole]
     _management_backup_selected: "{{ wunderbox_management_target | default('') }}"
+    _management_backup_config: "{{ wunderbox_management_backup | default({}) }}"
+    _management_backup_services: >-
+      {{
+        _management_backup_config.get('services', {})
+        if _management_backup_config is mapping
+        else {}
+      }}
     _management_backup_contract: >-
-      {{ wunderbox_management_backup.services[_management_backup_selected] }}
+      {{
+        _management_backup_services.get(_management_backup_selected, {})
+        if _management_backup_services is mapping
+        else {}
+      }}
+    _management_goal07_contract: >-
+      {{ wunderbox_goal07_management_services | default({}) }}
+    _management_external_prerequisites: >-
+      {{
+        _management_goal07_contract.get('external_prerequisites', {})
+        if _management_goal07_contract is mapping
+        else {}
+      }}
     _management_backup_file: >-
       {{
-        _management_backup_contract.backup_dir
+        _management_backup_contract.get('backup_dir', '')
         ~ '/postgres-'
         ~ _management_backup_selected
         ~ '-'
@@ -31,7 +50,7 @@
       }}
     _management_backup_object: >-
       {{
-        wunderbox_management_backup.prefix
+        _management_backup_config.get('prefix', '')
         ~ '/'
         ~ _management_backup_selected
         ~ '/'
@@ -49,16 +68,39 @@
           - ansible_limit | string | trim == inventory_hostname
           - _management_backup_selected in _management_backup_targets
           - wunderbox_management_backup_action | default('plan') in ['plan', 'backup']
-          - wunderbox_management_backup.versioning_required is sameas true
-          - wunderbox_management_backup.object_lock_mode == 'COMPLIANCE'
+          - _management_backup_config is mapping
+          - _management_backup_services is mapping
+          - _management_backup_contract is mapping
+          - _management_backup_contract | length > 0
+          - _management_goal07_contract is mapping
+          - _management_external_prerequisites is mapping
+          - _management_backup_config.get('endpoint', '') | trim | length > 0
+          - _management_backup_config.get('region', '') | trim | length > 0
+          - _management_backup_config.get('bucket', '') | trim | length > 0
+          - _management_backup_config.get('prefix', '') | trim | length > 0
+          - _management_backup_contract.get('backup_dir', '') | trim | length > 0
+          - _management_backup_contract.get('database', '') | trim | length > 0
+          - _management_backup_contract.get('database_user', '') | trim | length > 0
+          - _management_backup_contract.get('container', '') | trim | length > 0
+          - _management_backup_config.get('versioning_required', false) is sameas true
+          - _management_backup_config.get('object_lock_mode', '') == 'COMPLIANCE'
           - >-
-            wunderbox_management_backup.client_side_encryption_required
+            _management_backup_config.get(
+              'client_side_encryption_required',
+              false
+            )
             is sameas true
           - >-
-            wunderbox_goal07_management_services.external_prerequisites.object_storage_credentials_present_in_vault
+            _management_external_prerequisites.get(
+              'object_storage_credentials_present_in_vault',
+              false
+            )
             is sameas true
           - >-
-            wunderbox_goal07_management_services.external_prerequisites.backup_encryption_custody_present
+            _management_external_prerequisites.get(
+              'backup_encryption_custody_present',
+              false
+            )
             is sameas true
         fail_msg: >-
           Use the exact host, select keycloak, netbox, or guacamole, and set
@@ -140,18 +182,19 @@
         postgres_backup_restore_action: backup
         postgres_backup_restore_execute: true
         postgres_backup_restore_backup_dir: >-
-          {{ _management_backup_contract.backup_dir }}
+          {{ _management_backup_contract.get('backup_dir', '') }}
         postgres_backup_restore_file: "{{ _management_backup_file }}"
-        postgres_backup_restore_db_name: "{{ _management_backup_contract.database }}"
+        postgres_backup_restore_db_name: >-
+          {{ _management_backup_contract.get('database', '') }}
         postgres_backup_restore_db_user: >-
-          {{ _management_backup_contract.database_user }}
+          {{ _management_backup_contract.get('database_user', '') }}
         postgres_backup_restore_db_password: >-
           {{ management_backup_db_secret.db_password }}
         postgres_backup_restore_db_host: 127.0.0.1
         postgres_backup_restore_db_port: 5432
         postgres_backup_restore_execution_mode: podman
         postgres_backup_restore_container_name: >-
-          {{ _management_backup_contract.container }}
+          {{ _management_backup_contract.get('container', '') }}
         postgres_backup_restore_retention_keep_last: 0
       no_log: true
 
@@ -205,9 +248,9 @@
       become: false
       amazon.aws.s3_object:
         mode: put
-        endpoint_url: "{{ wunderbox_management_backup.endpoint }}"
-        region: "{{ wunderbox_management_backup.region }}"
-        bucket: "{{ wunderbox_management_backup.bucket }}"
+        endpoint_url: "{{ _management_backup_config.get('endpoint', '') }}"
+        region: "{{ _management_backup_config.get('region', '') }}"
+        bucket: "{{ _management_backup_config.get('bucket', '') }}"
         object: "{{ _management_backup_object }}"
         src: "{{ _management_backup_ciphertext }}"
         access_key: "{{ management_backup_s3_secret.access_key }}"
@@ -228,9 +271,9 @@
       become: false
       amazon.aws.s3_object:
         mode: get
-        endpoint_url: "{{ wunderbox_management_backup.endpoint }}"
-        region: "{{ wunderbox_management_backup.region }}"
-        bucket: "{{ wunderbox_management_backup.bucket }}"
+        endpoint_url: "{{ _management_backup_config.get('endpoint', '') }}"
+        region: "{{ _management_backup_config.get('region', '') }}"
+        bucket: "{{ _management_backup_config.get('bucket', '') }}"
         object: "{{ _management_backup_object }}"
         dest: "{{ _management_backup_readback }}"
         access_key: "{{ management_backup_s3_secret.access_key }}"
@@ -279,7 +322,7 @@
           ciphertext_path: "{{ _management_backup_ciphertext }}"
           ciphertext_sha256: >-
             {{ _management_backup_ciphertext_stat.stat.checksum }}
-          bucket: "{{ wunderbox_management_backup.bucket }}"
+          bucket: "{{ _management_backup_config.get('bucket', '') }}"
           object: "{{ _management_backup_object }}"
           s3_readback_verified: true
           encrypted: ansible-vault

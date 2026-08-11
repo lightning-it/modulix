@@ -182,13 +182,47 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             if task["name"] == "Enforce Vault-only public certificate custody"
         )
         assertions = custody_guard["ansible.builtin.assert"]["that"]
-        self.assertIn("nginx_config_tls_source == 'vault'", assertions)
+        normalized_assertions = {" ".join(assertion.split()) for assertion in assertions}
         self.assertIn(
-            "not (nginx_config_vault_allow_local_fallback | bool)", assertions
+            "nginx_config_tls_source | default('', true) == 'vault'",
+            normalized_assertions,
+        )
+        self.assertIn(
+            "not ( nginx_config_vault_allow_local_fallback | default(true) | bool )",
+            normalized_assertions,
         )
         self.assertIn("vault_secret_bundle_generate_missing: false", source)
         for key in ("ca_certificate", "client_certificate", "private_key"):
             self.assertIn(f"name: {key}", source)
+
+    def test_management_guards_default_missing_inventory_contracts(self):
+        for name in (
+            "30-management-services.yml",
+            "31-management-backup.yml",
+            "33-management-acceptance.yml",
+        ):
+            with self.subTest(runbook=name):
+                source = (RUNBOOK_DIRECTORY / name).read_text(encoding="utf-8")
+                self.assertIn(
+                    "wunderbox_goal07_management_services | default({})", source
+                )
+                self.assertIn("'external_prerequisites'", source)
+                self.assertIn("is mapping", source)
+                self.assertNotIn(
+                    "wunderbox_goal07_management_services.external_prerequisites.",
+                    source,
+                )
+                if name == "31-management-backup.yml":
+                    self.assertNotIn("wunderbox_management_backup.", source)
+                    for key in (
+                        "backup_dir",
+                        "database",
+                        "database_user",
+                        "container",
+                    ):
+                        self.assertNotIn(
+                            f"_management_backup_contract.{key}", source
+                        )
 
     def test_management_acceptance_verifies_vault_tls_files_and_identity(self):
         source = (RUNBOOK_DIRECTORY / "33-management-acceptance.yml").read_text(

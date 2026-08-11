@@ -15,6 +15,17 @@
       - all
     _wunderbox_management_acceptance_selected: >-
       {{ wunderbox_management_target | default('all') }}
+    _wunderbox_goal07_management_contract: >-
+      {{ wunderbox_goal07_management_services | default({}) }}
+    _wunderbox_management_external_prerequisites: >-
+      {{
+        _wunderbox_goal07_management_contract.get(
+          'external_prerequisites',
+          {}
+        )
+        if _wunderbox_goal07_management_contract is mapping
+        else {}
+      }}
 
   pre_tasks:
     - name: Require one exact host and an approved acceptance target
@@ -26,17 +37,28 @@
           - >-
             _wunderbox_management_acceptance_selected
             in _wunderbox_management_acceptance_targets
+          - _wunderbox_goal07_management_contract is mapping
+          - _wunderbox_management_external_prerequisites is mapping
           - >-
             _wunderbox_management_acceptance_selected == 'alloy' or
-            wunderbox_goal07_management_services.external_prerequisites.dns_records_present
+            _wunderbox_management_external_prerequisites.get(
+              'dns_records_present',
+              false
+            )
             is sameas true
           - >-
             _wunderbox_management_acceptance_selected == 'alloy' or
-            wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
+            _wunderbox_management_external_prerequisites.get(
+              'public_tls_material_present_in_vault',
+              false
+            )
             is sameas true
           - >-
             _wunderbox_management_acceptance_selected != 'all' or
-            wunderbox_goal07_management_services.external_prerequisites.atlas_loki_mtls_material_present_in_vault
+            _wunderbox_management_external_prerequisites.get(
+              'atlas_loki_mtls_material_present_in_vault',
+              false
+            )
             is sameas true
         fail_msg: >-
           Use --limit with the exact FQDN, select one declared management
@@ -181,7 +203,10 @@
           - alloy_deploy_loki_tls_enabled | bool
           - not (alloy_deploy_loki_tls_insecure_skip_verify | bool)
           - >-
-            wunderbox_goal07_management_services.external_prerequisites.atlas_loki_mtls_material_present_in_vault
+            _wunderbox_management_external_prerequisites.get(
+              'atlas_loki_mtls_material_present_in_vault',
+              false
+            )
             is sameas true
         fail_msg: >-
           Alloy mTLS files, private-key mode, or Vault custody differ from the
