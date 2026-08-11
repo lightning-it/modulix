@@ -46,6 +46,27 @@
         quiet: true
       tags: [always]
 
+    - name: Enforce Vault-only public certificate custody
+      ansible.builtin.assert:
+        that:
+          - nginx_config_tls_source == 'vault'
+          - not (nginx_config_vault_allow_local_fallback | bool)
+          - nginx_config_vault_kv_mount | default('', true) | trim | length > 0
+          - nginx_config_vault_kv_path | default('', true) | trim | length > 0
+          - >-
+            wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
+            is sameas true or (
+              nginx_config_vault_issue_missing | bool and
+              nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
+              nginx_config_vault_pki_role | default('', true) | trim | length > 0
+            )
+        fail_msg: >-
+          Public TLS must be resolved through Vault KV or Vault PKI. Local
+          certificate files and self-signed host generation are prohibited.
+        quiet: true
+      when: _wunderbox_management_selected in ['nginx', 'all']
+      tags: [always]
+
     - name: Require completed external prerequisites for gateway and telemetry apply
       ansible.builtin.assert:
         that:
@@ -56,8 +77,16 @@
             is sameas true
           - >-
             _wunderbox_management_selected not in ['nginx', 'all'] or
-            wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
-            is sameas true
+            (
+              wunderbox_goal07_management_services.external_prerequisites.public_tls_material_present_in_vault
+              is sameas true
+              or (
+                nginx_config_tls_source == 'vault' and
+                nginx_config_vault_issue_missing | bool and
+                nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
+                nginx_config_vault_pki_role | default('', true) | trim | length > 0
+              )
+            )
           - >-
             _wunderbox_management_selected not in ['alloy', 'all'] or
             wunderbox_goal07_management_services.external_prerequisites.atlas_loki_mtls_material_present_in_vault
@@ -225,7 +254,11 @@
         <<: *vault_role_vars
         vault_secret_bundle_kv_path: >-
           {{ wunderbox_management_vault_paths.alloy_mtls }}
-        vault_secret_bundle_items: []
+        vault_secret_bundle_generate_missing: false
+        vault_secret_bundle_items:
+          - {name: ca_certificate, length: 16}
+          - {name: client_certificate, length: 16}
+          - {name: private_key, length: 16}
       when: _wunderbox_management_selected in ['alloy', 'all']
       no_log: true
       tags: [alloy, monitoring]

@@ -71,8 +71,11 @@ not a simulated change report from the composed roles.
 - `30-management-services.yml`: deploy Keycloak, NetBox, Guacamole, the public
   NGINX gateway, or Alloy independently on one exact host. Application secrets
   are read-before-generate in HC Vault and never written to local fallback files.
-  Productive NGINX and Alloy applies fail closed until their inventory-declared
-  DNS/TLS and mTLS prerequisites are complete.
+  NGINX certificate material is resolved only through Vault KV or issued
+  through Vault PKI and then persisted to KV; local certificate fallback is
+  prohibited by the orchestration guard. Productive NGINX and Alloy applies
+  fail closed until their inventory-declared DNS/TLS and mTLS prerequisites
+  are complete.
 - `31-management-backup.yml`: create one service database dump, encrypt it
   client-side with the controller's Ansible Vault custody, upload only the
   ciphertext to the protected S3 bucket, and remove the transient plaintext.
@@ -83,6 +86,11 @@ not a simulated change report from the composed roles.
   disposable database and plaintext staging files.
 - `33-management-acceptance.yml`: read back internal health, public HTTPS, and
   listener isolation for one management target or the complete Goal 07 stack.
+  NGINX acceptance additionally checks Vault-only custody, certificate
+  validity/SAN coverage, private-key mode `0600`, and certificate/key matching.
+  Alloy acceptance verifies the Vault-backed CA/client-certificate/key bundle,
+  client-certificate validity and CA trust, private-key mode `0600`, and
+  certificate/key matching before mTLS is accepted.
 
 Semaphore retirement is disabled unless all of these conditions hold:
 

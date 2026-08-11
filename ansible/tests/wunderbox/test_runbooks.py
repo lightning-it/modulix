@@ -170,6 +170,47 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         self.assertIn("192.0.2.10", readme)
         self.assertIn("deploy_sha256: disabled", readme)
 
+    def test_management_gateway_requires_vault_only_certificate_custody(self):
+        runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
+        source = (RUNBOOK_DIRECTORY / "30-management-services.yml").read_text(
+            encoding="utf-8"
+        )
+
+        custody_guard = next(
+            task
+            for task in runbook["pre_tasks"]
+            if task["name"] == "Enforce Vault-only public certificate custody"
+        )
+        assertions = custody_guard["ansible.builtin.assert"]["that"]
+        self.assertIn("nginx_config_tls_source == 'vault'", assertions)
+        self.assertIn(
+            "not (nginx_config_vault_allow_local_fallback | bool)", assertions
+        )
+        self.assertIn("vault_secret_bundle_generate_missing: false", source)
+        for key in ("ca_certificate", "client_certificate", "private_key"):
+            self.assertIn(f"name: {key}", source)
+
+    def test_management_acceptance_verifies_vault_tls_files_and_identity(self):
+        source = (RUNBOOK_DIRECTORY / "33-management-acceptance.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Vault-only private-key custody", source)
+        self.assertIn("stat.mode == '0600'", source)
+        self.assertIn("-checkend", source)
+        self.assertIn("-checkhost", source)
+        self.assertIn("Verify NGINX certificate and private key match", source)
+
+    def test_management_acceptance_verifies_vault_mtls_files_and_identity(self):
+        source = (RUNBOOK_DIRECTORY / "33-management-acceptance.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Require Vault-backed Alloy mTLS files", source)
+        self.assertIn("atlas_loki_mtls_material_present_in_vault", source)
+        self.assertIn("Verify Alloy client certificate against its Vault CA bundle", source)
+        self.assertIn("Verify Alloy client certificate and private key match", source)
+
 
 if __name__ == "__main__":
     unittest.main()
