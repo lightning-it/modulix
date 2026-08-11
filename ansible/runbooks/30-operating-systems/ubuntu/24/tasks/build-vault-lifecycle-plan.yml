@@ -166,16 +166,15 @@
   changed_when: false
 
 - name: Inspect the controller process identity for immutable recovery planning
-  ansible.builtin.stat:
-    path: /proc/self
-    follow: true
-    get_attributes: false
-    get_checksum: false
-    get_mime: false
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/id
+      - -u
   register: _vault_lifecycle_controller_process
   delegate_to: localhost
   become: false
   changed_when: false
+  check_mode: false
   when: vault_lifecycle_operation in ['initialize_resume', 'initialize_finalize']
 
 - name: Read the controller init ciphertext signature for immutable recovery planning
@@ -317,7 +316,7 @@
       - _vault_lifecycle_controller_paths.results[1].stat.mode | default('') in ['0400', '0600']
       - >-
         _vault_lifecycle_controller_paths.results[1].stat.uid | default(-1) | int
-        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+        == _vault_lifecycle_controller_process.stdout | default('-2') | int
       - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int > 0
       - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int <= 67108864
       - >-
@@ -332,7 +331,7 @@
       - _vault_lifecycle_controller_paths.results[2].stat.mode | default('') in ['0400', '0600']
       - >-
         _vault_lifecycle_controller_paths.results[2].stat.uid | default(-1) | int
-        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+        == _vault_lifecycle_controller_process.stdout | default('-2') | int
       - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int > 0
       - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int <= 1048576
       - >-
@@ -346,7 +345,7 @@
           and _vault_lifecycle_controller_paths.results[4].stat.nlink | default(0) | int == 1
           and _vault_lifecycle_controller_paths.results[4].stat.mode | default('') in ['0400', '0600']
           and _vault_lifecycle_controller_paths.results[4].stat.uid | default(-1) | int
-              == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+              == _vault_lifecycle_controller_process.stdout | default('-2') | int
           and _vault_lifecycle_controller_paths.results[4].stat.size | default(0) | int > 0
           and _vault_lifecycle_controller_paths.results[4].stat.size | default(0) | int <= 1048576
           and _vault_lifecycle_controller_paths.results[4].stat.checksum | default('')
@@ -401,6 +400,9 @@
 - name: Require an initialized Vault and exact recovery escrows before resuming
   ansible.builtin.assert:
     that:
+      - _vault_lifecycle_controller_process.rc | default(-1) | int == 0
+      - _vault_lifecycle_controller_process.stdout | default('') is match('^[0-9]+$')
+      - _vault_lifecycle_controller_process.stderr | default('') | length == 0
       - _vault_lifecycle_container_image.rc == 0
       - >-
         _vault_lifecycle_container_image.stdout | trim
@@ -433,7 +435,7 @@
       - _vault_lifecycle_controller_paths.results[1].stat.mode | default('') in ['0400', '0600']
       - >-
         _vault_lifecycle_controller_paths.results[1].stat.uid | default(-1) | int
-        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+        == _vault_lifecycle_controller_process.stdout | default('-2') | int
       - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int > 0
       - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int <= 67108864
       - >-
@@ -473,6 +475,9 @@
 - name: Require exact initialized partial state before finalizing
   ansible.builtin.assert:
     that:
+      - _vault_lifecycle_controller_process.rc | default(-1) | int == 0
+      - _vault_lifecycle_controller_process.stdout | default('') is match('^[0-9]+$')
+      - _vault_lifecycle_controller_process.stderr | default('') | length == 0
       - _vault_lifecycle_container_image.rc == 0
       - >-
         _vault_lifecycle_container_image.stdout | trim
@@ -505,7 +510,7 @@
       - _vault_lifecycle_controller_paths.results[1].stat.mode | default('') in ['0400', '0600']
       - >-
         _vault_lifecycle_controller_paths.results[1].stat.uid | default(-1) | int
-        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+        == _vault_lifecycle_controller_process.stdout | default('-2') | int
       - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int > 0
       - _vault_lifecycle_controller_paths.results[1].stat.size | default(0) | int <= 67108864
       - >-
@@ -534,7 +539,7 @@
       - _vault_lifecycle_controller_paths.results[2].stat.mode | default('') in ['0400', '0600']
       - >-
         _vault_lifecycle_controller_paths.results[2].stat.uid | default(-1) | int
-        == _vault_lifecycle_controller_process.stat.uid | default(-2) | int
+        == _vault_lifecycle_controller_process.stdout | default('-2') | int
       - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int > 0
       - _vault_lifecycle_controller_paths.results[2].stat.size | default(0) | int <= 1048576
       - >-
