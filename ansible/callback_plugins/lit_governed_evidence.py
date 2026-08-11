@@ -17,7 +17,8 @@ from ansible.plugins.callback import CallbackBase
 
 SECRET_KEY_RE = re.compile(
     r"(?i)(?:password|passphrase|token|secret|private[_-]?key|credential|"
-    r"recovery[_-]?key|unseal|root[_-]?token)"
+    r"(?:api|access|auth|client|session)[_-]?key|recovery[_-]?key|unseal|"
+    r"root[_-]?token)"
 )
 
 

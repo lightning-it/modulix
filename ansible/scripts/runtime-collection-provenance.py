@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 
@@ -93,9 +94,7 @@ def main() -> int:
     parser.add_argument("--image-role", choices=("toolbox", "run_ee"), required=True)
     parser.add_argument("--image", required=True)
     args = parser.parse_args()
-    if "@sha256:" not in args.image or any(
-        character.isspace() for character in args.image
-    ):
+    if re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.image) is None:
         raise RuntimeError("image must be bound by an immutable digest")
     measured = {}
     loader = effective_loader_contract()
