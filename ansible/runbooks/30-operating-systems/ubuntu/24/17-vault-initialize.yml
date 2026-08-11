@@ -187,7 +187,12 @@
               IMPORT-VAULT-INIT:{{ inventory_hostname }}:{{
                 hetzner_baremetal_vault.seal.custody.onepassword.vault_id
               }}
-            vault_init_payload: "{{ vault_bootstrap_init_payload }}"
+            vault_init_payload:
+              unseal_keys_b64: "{{ vault_bootstrap_init_payload.unseal_keys_b64 }}"
+              unseal_keys_hex: "{{ vault_bootstrap_init_payload.unseal_keys_hex }}"
+              unseal_shares: "{{ vault_bootstrap_init_payload.unseal_shares }}"
+              unseal_threshold: "{{ vault_bootstrap_init_payload.unseal_threshold }}"
+              root_token: "{{ vault_bootstrap_init_payload.root_token }}"
             cli_path: "{{ hetzner_baremetal_onepassword.cli_path }}"
             cli_sha256: "{{ hetzner_baremetal_onepassword.cli_sha256 }}"
             cli_version: "{{ hetzner_baremetal_onepassword.cli_version }}"
