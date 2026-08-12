@@ -82,8 +82,9 @@
       - >-
         hetzner_baremetal_vault.network.ssh_tunnel.control_path
         is match('^/[^\r\n]+$')
+      - hetzner_baremetal_controller_runtime_root is string
       - >-
-        lookup('ansible.builtin.env', 'PWD') is match('^/[^\r\n]+$')
+        hetzner_baremetal_controller_runtime_root is match('^/[^\r\n]+$')
       - >-
         lookup('ansible.builtin.env', 'VAULT_ADDR') | length == 0
       - >-
@@ -103,9 +104,9 @@
 - name: Resolve canonical controller Vault SSH paths
   ansible.builtin.set_fact:
     _hetzner_vault_tunnel_workspace_path: >-
-      {{ lookup('ansible.builtin.env', 'PWD') | normpath }}
+      {{ hetzner_baremetal_controller_runtime_root | normpath }}
     _hetzner_vault_tunnel_workspace_canonical: >-
-      {{ lookup('ansible.builtin.env', 'PWD') | realpath }}
+      {{ hetzner_baremetal_controller_runtime_root | realpath }}
     _hetzner_vault_tunnel_key_path: >-
       {{ hetzner_baremetal_vault.network.ssh_tunnel.private_key_path | normpath }}
     _hetzner_vault_tunnel_key_canonical: >-
@@ -164,7 +165,7 @@
         _hetzner_vault_tunnel_known_hosts_path
         != _hetzner_vault_tunnel_control_path
     fail_msg: >-
-      Vault SSH inputs and the workspace-local control socket must be exact
+      Vault SSH inputs and the controller-local control socket must be exact
       canonical paths with no symlinked ancestor or ambiguous path component.
     quiet: true
   delegate_to: localhost
@@ -328,7 +329,7 @@
           and _hetzner_vault_tunnel_control_dir_before.stat.mode == '0700'
         )
     fail_msg: >-
-      The workspace .tmp path must be absent or an owner-controlled canonical
+      The controller runtime .tmp path must be absent or an owner-controlled canonical
       directory with mode 0700 before the Vault SSH socket is created.
     quiet: true
   delegate_to: localhost

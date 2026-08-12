@@ -1,0 +1,325 @@
+---
+- name: Inspect the encrypted Vault initialization escrow
+  ansible.builtin.stat:
+    path: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+    get_attributes: false
+    get_mime: false
+  register: _vault_pki_init_stat
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Read only the initialization ciphertext signature
+  ansible.builtin.command:
+    argv:
+      - head
+      - -c
+      - "15"
+      - "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+  register: _vault_pki_init_signature
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Require safe encrypted initialization custody
+  ansible.builtin.assert:
+    that:
+      - _vault_pki_init_stat.stat.exists | default(false)
+      - _vault_pki_init_stat.stat.isreg | default(false)
+      - not (_vault_pki_init_stat.stat.islnk | default(false))
+      - _vault_pki_init_stat.stat.nlink | int == 1
+      - _vault_pki_init_stat.stat.mode in ['0400', '0600']
+      - _vault_pki_init_stat.stat.size | int > 0
+      - _vault_pki_init_stat.stat.size | int <= 1048576
+      - _vault_pki_init_signature.stdout == '$ANSIBLE_VAULT;'
+    fail_msg: "Vault initialization custody is not safe Ansible Vault ciphertext."
+    quiet: true
+  no_log: true
+
+- name: Load initialization shares into protected memory
+  ansible.builtin.include_vars:
+    file: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+    name: _vault_pki_init_document
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Validate the exact Shamir share schema
+  ansible.builtin.assert:
+    that:
+      - _vault_pki_init_document.keys() | list == ['vault_init']
+      - _vault_pki_init_document.vault_init is mapping
+      - _vault_pki_init_document.vault_init.unseal_shares is integer
+      - _vault_pki_init_document.vault_init.unseal_threshold is integer
+      - _vault_pki_init_document.vault_init.unseal_shares | int == hetzner_baremetal_vault.seal.key_shares | int
+      - _vault_pki_init_document.vault_init.unseal_threshold | int == hetzner_baremetal_vault.seal.key_threshold | int
+      - _vault_pki_init_document.vault_init.unseal_keys_b64 is sequence
+      - _vault_pki_init_document.vault_init.unseal_keys_b64 is not string
+      - _vault_pki_init_document.vault_init.unseal_keys_b64 | length == hetzner_baremetal_vault.seal.key_shares | int
+      - >-
+        _vault_pki_init_document.vault_init.unseal_keys_b64 | unique | length
+        == hetzner_baremetal_vault.seal.key_shares | int
+    fail_msg: "Encrypted Vault initialization custody does not match the exact Shamir contract."
+    quiet: true
+  no_log: true
+
+- name: Generate, use, and revoke one ephemeral Vault root token
+  block:
+    - name: Inspect any existing root-generation attempt
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/generate-root/attempt"
+        method: GET
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 200
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      register: _vault_pki_generate_existing
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Refuse to interfere with another root-generation attempt
+      ansible.builtin.assert:
+        that:
+          - not (_vault_pki_generate_existing.json.started | default(false) | bool)
+        fail_msg: >-
+          A Vault root-generation attempt already exists; this runbook will
+          not cancel or reuse an operation it did not create.
+        quiet: true
+      no_log: true
+
+    - name: Start an ephemeral root-token generation attempt
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/generate-root/attempt"
+        method: POST
+        body_format: json
+        body: {}
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 200
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      register: _vault_pki_generate_start
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+
+    - name: Record ownership of the root-generation attempt
+      ansible.builtin.set_fact:
+        _vault_pki_generate_owned: true
+      changed_when: false
+      no_log: true
+
+    - name: Submit exactly the required Shamir shares
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/generate-root/update"
+        method: POST
+        body_format: json
+        body:
+          key: "{{ item }}"
+          nonce: "{{ _vault_pki_generate_start.json.nonce }}"
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 200
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      loop: >-
+        {{
+          _vault_pki_init_document.vault_init.unseal_keys_b64
+          [0:(_vault_pki_init_document.vault_init.unseal_threshold | int)]
+        }}
+      loop_control:
+        label: redacted-shamir-share
+      register: _vault_pki_generate_updates
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      no_log: true
+
+    - name: Require completed root-token generation
+      ansible.builtin.assert:
+        that:
+          - _vault_pki_generate_updates.results | length == _vault_pki_init_document.vault_init.unseal_threshold | int
+          - _vault_pki_generate_updates.results[-1].json.complete | bool
+          - _vault_pki_generate_updates.results[-1].json.encoded_token is match('^[A-Za-z0-9+/=]{16,4096}$')
+        fail_msg: "Vault did not complete the owned root-token generation attempt."
+        quiet: true
+      no_log: true
+
+    - name: Decode the generated root token in protected memory
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/decode-token"
+        method: POST
+        body_format: json
+        body:
+          encoded_token: "{{ _vault_pki_generate_updates.results[-1].json.encoded_token }}"
+          otp: "{{ _vault_pki_generate_start.json.otp }}"
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 200
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      register: _vault_pki_decode
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Record the ephemeral root token in protected memory
+      ansible.builtin.set_fact:
+        _vault_pki_ephemeral_root_token: "{{ _vault_pki_decode.json.data.token }}"
+      changed_when: false
+      no_log: true
+
+    - name: Verify generated root authorization
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/auth/token/lookup-self"
+        method: GET
+        headers:
+          X-Vault-Token: "{{ _vault_pki_ephemeral_root_token }}"
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: [200, 403]
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      register: _vault_pki_root_lookup
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Report the generated token verification status
+      ansible.builtin.debug:
+        msg:
+          lookup_self_status: "{{ _vault_pki_root_lookup.status | int }}"
+      changed_when: false
+
+    - name: Require a newly generated root-policy token
+      ansible.builtin.assert:
+        that:
+          - _vault_pki_root_lookup.status | int == 200
+          - "'root' in (_vault_pki_root_lookup.json.data.policies | default([]))"
+        fail_msg: "Generated Vault token does not carry the root policy."
+        quiet: true
+      no_log: true
+
+    - name: Configure the declared private CA hierarchy
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_config
+      vars:
+        vault_config_url: "{{ hetzner_baremetal_vault.api_addr }}"
+        vault_config_vault_address: "{{ hetzner_baremetal_vault.api_addr }}"
+        vault_config_api_url: "{{ hetzner_baremetal_vault.api_addr }}"
+        vault_config_api_delegate_to: localhost
+        vault_config_vault_validate_certs: true
+        vault_config_api_ca_cert_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        vault_config_vault_token: "{{ _vault_pki_ephemeral_root_token }}"
+        vault_config_token: "{{ _vault_pki_ephemeral_root_token }}"
+        vault_config_pki_enabled: false
+        terragrunt_vault_ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        terragrunt_skip_confirmation: true
+        terragrunt_import_strict: true
+        terragrunt_state_migration_strict: true
+        terragrunt_init_upgrade: true
+      no_log: true
+
+    - name: Reissue and validate the scoped controller AppRole working copy
+      ansible.builtin.include_role:
+        name: lit.supplementary.vault_scoped_approle
+      vars:
+        vault_scoped_approle_admin_token: "{{ _vault_pki_ephemeral_root_token }}"
+        vault_scoped_approle_revoke_admin_token: false
+      no_log: true
+
+    - name: Require the scoped controller AppRole lifecycle
+      ansible.builtin.assert:
+        that:
+          - vault_scoped_approle_configured | default(false) | bool
+        fail_msg: >-
+          The private PKI was configured, but the scoped controller AppRole
+          working copy was not reissued and validated.
+        quiet: true
+      no_log: true
+
+    - name: Hand the newly validated AppRole to immediate PKI readback
+      ansible.builtin.set_fact:
+        _hetzner_hashicorp_vault_auth:
+          url: "{{ hetzner_baremetal_vault.api_addr }}"
+          auth_mount_point: >-
+            {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+          role_id: "{{ _vault_scoped_approle_document.role_id }}"
+          secret_id: "{{ _vault_scoped_approle_document.secret_id }}"
+          ca_cert: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+          timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      changed_when: false
+      no_log: true
+
+    - name: Read the public root CA certificate after apply
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/{{ _vault_pki_root_mount }}/ca/pem"
+        method: GET
+        headers:
+          X-Vault-Token: "{{ _vault_pki_ephemeral_root_token }}"
+        return_content: true
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 200
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      register: _vault_pki_root_ca
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+
+    - name: Create the protected public trust-anchor directory
+      ansible.builtin.file:
+        path: "{{ _vault_pki_contract.trust_anchor.controller_export_path | dirname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Export only the public Vault PKI root certificate
+      ansible.builtin.copy:
+        dest: "{{ _vault_pki_contract.trust_anchor.controller_export_path }}"
+        content: "{{ _vault_pki_root_ca.content | trim }}\n"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+  always:
+    - name: Revoke the generated root token
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/auth/token/revoke-self"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ _vault_pki_ephemeral_root_token }}"
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 204
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      when: _vault_pki_ephemeral_root_token | default('', true) | trim | length > 0
+      no_log: true
+
+    - name: Cancel only the root-generation attempt owned by this run
+      ansible.builtin.uri:
+        url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/generate-root/attempt"
+        method: DELETE
+        validate_certs: true
+        ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+        status_code: 204
+        timeout: "{{ hetzner_baremetal_vault.timeout }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      when: _vault_pki_generate_owned | default(false) | bool
+      no_log: true

@@ -151,7 +151,7 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("[[ssh-keys]]", content)
         self.assertIn("for ssh_key in _agent_policy['items']", content)
         self.assertIn('item = "{{ ssh_key.item_id }}"', content)
-        self.assertIn("_agent_policy['items'] | length == 2", content)
+        self.assertIn("_agent_policy['items'] | length == 4", content)
         self.assertNotIn('vault = "{{ _agent_policy.vault_id }}"', content)
         self.assertNotIn('account = "{{ _agent_policy.account_id }}"', content)
         self.assertIn("IdentityAgent", content)

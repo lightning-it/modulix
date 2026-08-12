@@ -1,0 +1,53 @@
+---
+# Restore only controller working copies. The authoritative Shamir custody
+# remains the pinned 1Password item; the target holds an Ansible Vault
+# ciphertext recovery copy by design.
+- name: Create protected controller Vault input directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ hetzner_baremetal_vault.ca_cert_path | dirname }}"
+    - "{{ hetzner_baremetal_vault.seal.controller_init_file_path | dirname }}"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Restore the public Vault transport CA over pinned managed SSH
+  ansible.builtin.fetch:
+    src: "{{ hetzner_baremetal_vault.tls.target_ca_cert_path }}"
+    dest: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    flat: true
+    fail_on_missing: true
+    validate_checksum: true
+  no_log: true
+
+- name: Protect the restored public Vault transport CA
+  ansible.builtin.file:
+    path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    state: file
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Restore the encrypted Vault initialization recovery copy for apply
+  ansible.builtin.fetch:
+    src: "{{ hetzner_baremetal_vault.seal.target_ciphertext_path }}"
+    dest: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+    flat: true
+    fail_on_missing: true
+    validate_checksum: true
+  when: _vault_pki_action == 'apply'
+  no_log: true
+
+- name: Protect the restored Vault initialization ciphertext
+  ansible.builtin.file:
+    path: "{{ hetzner_baremetal_vault.seal.controller_init_file_path }}"
+    state: file
+    mode: "0600"
+  when: _vault_pki_action == 'apply'
+  delegate_to: localhost
+  become: false
+  no_log: true
