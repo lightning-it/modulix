@@ -27,14 +27,14 @@
       APPLY-WUNDERBOX-MANAGEMENT-TLS:{{ inventory_hostname }}:{{
       _management_tls_candidate_sha256 }}
     _management_tls_issue_path: >-
-      {{ _management_tls_contract.pki_mount }}/issue/{{
-      _management_tls_contract.pki_role }}
+      {{ _management_tls_contract.pki_mount | default('') }}/issue/{{
+      _management_tls_contract.pki_role | default('') }}
     _management_tls_kv_data_path: >-
-      {{ _management_tls_contract.kv_mount }}/data/{{
-      _management_tls_contract.kv_path }}
+      {{ _management_tls_contract.kv_mount | default('') }}/data/{{
+      _management_tls_contract.kv_path | default('') }}
     _management_tls_kv_metadata_path: >-
-      {{ _management_tls_contract.kv_mount }}/metadata/{{
-      _management_tls_contract.kv_path }}
+      {{ _management_tls_contract.kv_mount | default('') }}/metadata/{{
+      _management_tls_contract.kv_path | default('') }}
 
   pre_tasks:
     - name: Require one exact management TLS target and action

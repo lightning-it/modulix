@@ -285,6 +285,11 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             management_source,
         )
         self.assertIn("* 86400 < _management_tls_contract.ttl_seconds", source)
+        for field in ("pki_mount", "pki_role", "kv_mount", "kv_path"):
+            self.assertIn(
+                f"_management_tls_contract.{field} | default('')",
+                source,
+            )
         self.assertNotIn(
             "public_tls_material_present_in_vault',\n              false\n            )\n            is sameas true or",
             management_source,
