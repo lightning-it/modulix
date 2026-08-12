@@ -37,19 +37,19 @@
     that:
       - >-
         _management_tls_capabilities.results[0].json[_management_tls_issue_path]
-        | sort == ['create', 'update']
+        | default([]) | sort == ['create', 'update']
       - >-
         _management_tls_capabilities.results[0].json[_management_tls_kv_data_path]
-        == ['deny']
+        | default([]) == ['deny']
       - >-
         _management_tls_capabilities.results[1].json[_management_tls_issue_path]
-        == ['deny']
+        | default([]) == ['deny']
       - >-
         _management_tls_capabilities.results[1].json[_management_tls_kv_data_path]
-        | sort == ['create', 'patch', 'read', 'update']
+        | default([]) | sort == ['create', 'patch', 'read', 'update']
       - >-
         _management_tls_capabilities.results[1].json[_management_tls_kv_metadata_path]
-        | sort == ['list', 'read']
+        | default([]) | sort == ['list', 'read']
     fail_msg: "Issuer and KV custody AppRole capabilities are not separated."
     quiet: true
   no_log: true

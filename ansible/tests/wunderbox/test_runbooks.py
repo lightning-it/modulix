@@ -270,6 +270,7 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         self.assertIn("private_key:", apply_source)
         self.assertIn("no_log: true", apply_source)
         self.assertIn("== ['deny']", readback_source)
+        self.assertEqual(readback_source.count("| default([])"), 5)
         self.assertIn("issuer_and_custody_capabilities_separated: true", readback_source)
         self.assertIn("public_key_fingerprints.sha256", readback_source)
 
