@@ -10,9 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "wbx-governed-execution-ci.yml"
-DEVTOOLS_IMAGE_PATTERN = (
-    r"quay\.io/l-it/ee-wunder-devtools-ubi9@sha256:[0-9a-f]{64}"
-)
+DEVTOOLS_IMAGE_PATTERN = r"quay\.io/l-it/ee-wunder-devtools-ubi9@sha256:[0-9a-f]{64}"
 
 
 def strings(value):
