@@ -67,6 +67,12 @@ not a simulated change report from the composed roles.
   DHCP validation.
 - `10-deploy.yml`: always import `07-preflight.yml` before the guarded deploy
   play; apply requires the deploy approval.
+- `20-management-tls-custody.yml`: plan, issue, store, or independently read
+  back the shared management TLS identity. Issuance uses only the dedicated PKI
+  issuer AppRole; CAS-protected KV2 custody uses only the general controller
+  AppRole. Each AppRole is explicitly denied the other function. Apply requires
+  `APPLY-WUNDERBOX-MANAGEMENT-TLS:<fqdn>:<candidate_sha256>`. An unchanged
+  candidate with more than the declared renewal horizon is reused.
 - `20-ops.yml`: inspect Wunderbox runtime status without changing it.
 - `21-controller-ssh-trust.yml`: scan the installed OpenSSH endpoint on its
   inventory-declared port, require the inventory-pinned Ed25519 fingerprint,
@@ -76,11 +82,10 @@ not a simulated change report from the composed roles.
 - `30-management-services.yml`: deploy Keycloak, NetBox, Guacamole, the public
   NGINX gateway, or Alloy independently on one exact host. Application secrets
   are read-before-generate in HC Vault and never written to local fallback files.
-  NGINX certificate material is resolved only through Vault KV or issued
-  through Vault PKI and then persisted to KV; local certificate fallback is
-  prohibited by the orchestration guard. Productive NGINX and Alloy applies
-  fail closed until their inventory-declared DNS/TLS and mTLS prerequisites
-  are complete.
+  NGINX certificate material is read only from Vault KV; this deployment
+  runbook has no certificate-issuance path and accepts no local certificate
+  fallback. Productive NGINX and Alloy applies fail closed until their
+  inventory-declared DNS/TLS and mTLS prerequisites are complete.
 - `31-management-backup.yml`: create one service database dump, encrypt it
   client-side with the controller's Ansible Vault custody, upload only the
   ciphertext to the protected S3 bucket, and remove the transient plaintext.

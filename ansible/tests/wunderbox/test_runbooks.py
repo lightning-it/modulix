@@ -239,6 +239,63 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         for key in ("ca_certificate", "client_certificate", "private_key"):
             self.assertIn(f"name: {key}", source)
 
+    def test_management_tls_custody_separates_issuer_and_kv_approles(self):
+        path = RUNBOOK_DIRECTORY / "20-management-tls-custody.yml"
+        play = load_yaml(path)[0]
+        source = path.read_text(encoding="utf-8")
+        apply_source = (
+            RUNBOOK_DIRECTORY / "tasks/apply-management-tls-custody.yml"
+        ).read_text(encoding="utf-8")
+        readback_source = (
+            RUNBOOK_DIRECTORY / "tasks/readback-management-tls-custody.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(play["hosts"], "hetzner_baremetal")
+        self.assertEqual(play["serial"], 1)
+        self.assertIs(play["any_errors_fatal"], True)
+        self.assertIs(play["gather_facts"], False)
+        for required in (
+            "APPLY-WUNDERBOX-MANAGEMENT-TLS:",
+            "hetzner_baremetal_vault.pki_controller_auth",
+            "hetzner_baremetal_vault.controller_auth",
+            "_management_tls_candidate_sha256",
+            "Forget short-lived Vault tokens",
+            "close-hashicorp-vault-ssh-tunnel.yml",
+        ):
+            self.assertIn(required, source)
+        self.assertIn("options:", apply_source)
+        self.assertIn("cas:", apply_source)
+        self.assertIn(".get('data', {})", apply_source)
+        self.assertIn(".get('metadata', {})", apply_source)
+        self.assertIn("private_key:", apply_source)
+        self.assertIn("no_log: true", apply_source)
+        self.assertIn("== ['deny']", readback_source)
+        self.assertEqual(readback_source.count("| default([])"), 5)
+        self.assertIn("issuer_and_custody_capabilities_separated: true", readback_source)
+        self.assertIn("public_key_fingerprints.sha256", readback_source)
+
+        management_source = (RUNBOOK_DIRECTORY / "30-management-services.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "not (nginx_config_vault_issue_missing | default(true) | bool)",
+            management_source,
+        )
+        self.assertIn(
+            "must already be present in Vault KV before gateway deploy",
+            management_source,
+        )
+        self.assertIn("* 86400 < _management_tls_contract.ttl_seconds", source)
+        for field in ("pki_mount", "pki_role", "kv_mount", "kv_path"):
+            self.assertIn(
+                f"_management_tls_contract.{field} | default('')",
+                source,
+            )
+        self.assertNotIn(
+            "public_tls_material_present_in_vault',\n              false\n            )\n            is sameas true or",
+            management_source,
+        )
+
     def test_management_guards_default_missing_inventory_contracts(self):
         for name in (
             "30-management-services.yml",
