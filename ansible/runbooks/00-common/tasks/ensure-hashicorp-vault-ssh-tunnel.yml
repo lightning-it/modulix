@@ -14,6 +14,19 @@
   changed_when: false
   run_once: true
 
+- name: Resolve the optional controller Vault runtime root
+  ansible.builtin.set_fact:
+    _hetzner_vault_controller_runtime_root: >-
+      {{
+        hetzner_baremetal_controller_runtime_root
+        | default(lookup('ansible.builtin.env', 'PWD'), true)
+      }}
+  delegate_to: localhost
+  delegate_facts: false
+  become: false
+  changed_when: false
+  run_once: true
+
 - name: Validate the controller Vault SSH-tunnel contract
   ansible.builtin.assert:
     that:
@@ -82,9 +95,9 @@
       - >-
         hetzner_baremetal_vault.network.ssh_tunnel.control_path
         is match('^/[^\r\n]+$')
-      - hetzner_baremetal_controller_runtime_root is string
+      - _hetzner_vault_controller_runtime_root is string
       - >-
-        hetzner_baremetal_controller_runtime_root is match('^/[^\r\n]+$')
+        _hetzner_vault_controller_runtime_root is match('^/[^\r\n]+$')
       - >-
         lookup('ansible.builtin.env', 'VAULT_ADDR') | length == 0
       - >-
@@ -104,9 +117,9 @@
 - name: Resolve canonical controller Vault SSH paths
   ansible.builtin.set_fact:
     _hetzner_vault_tunnel_workspace_path: >-
-      {{ hetzner_baremetal_controller_runtime_root | normpath }}
+      {{ _hetzner_vault_controller_runtime_root | normpath }}
     _hetzner_vault_tunnel_workspace_canonical: >-
-      {{ hetzner_baremetal_controller_runtime_root | realpath }}
+      {{ _hetzner_vault_controller_runtime_root | realpath }}
     _hetzner_vault_tunnel_key_path: >-
       {{ hetzner_baremetal_vault.network.ssh_tunnel.private_key_path | normpath }}
     _hetzner_vault_tunnel_key_canonical: >-

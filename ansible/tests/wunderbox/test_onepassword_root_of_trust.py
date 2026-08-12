@@ -337,6 +337,24 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("| int in openssh_server_ports | map('int') | list", content)
         self.assertNotIn("ansible_port | default(22) | int == 22", content)
 
+    def test_vault_tunnel_default_and_root_attempt_cleanup_are_fail_closed(self):
+        tunnel = (
+            REPOSITORY_ROOT
+            / "ansible/runbooks/00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml"
+        ).read_text(encoding="utf-8")
+        apply_tasks = load_yaml(UBUNTU_DIRECTORY / "tasks/apply-vault-pki.yml")
+        cleanup = next(
+            task
+            for task in walk_tasks(apply_tasks)
+            if task.get("name")
+            == "Cancel only the root-generation attempt owned by this run"
+        )
+
+        self.assertIn("_hetzner_vault_controller_runtime_root", tunnel)
+        self.assertIn("default(lookup('ansible.builtin.env', 'PWD'), true)", tunnel)
+        self.assertEqual(cleanup["ansible.builtin.uri"]["status_code"], 204)
+        self.assertNotIn("failed_when", cleanup)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -320,6 +320,5 @@
       delegate_to: localhost
       become: false
       changed_when: false
-      failed_when: false
       when: _vault_pki_generate_owned | default(false) | bool
       no_log: true
