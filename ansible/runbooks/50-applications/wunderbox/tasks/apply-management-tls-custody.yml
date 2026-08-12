@@ -18,9 +18,19 @@
 - name: Normalize existing Vault KV2 custody
   ansible.builtin.set_fact:
     _management_tls_existing_data: >-
-      {{ _management_tls_existing_kv.json.data.data | default({}) }}
+      {{
+        (_management_tls_existing_kv.json | default({}))
+        .get('data', {})
+        .get('data', {})
+      }}
     _management_tls_kv_cas: >-
-      {{ _management_tls_existing_kv.json.data.metadata.version | default(0) | int }}
+      {{
+        (_management_tls_existing_kv.json | default({}))
+        .get('data', {})
+        .get('metadata', {})
+        .get('version', 0)
+        | int
+      }}
     _management_tls_existing_reusable: false
   no_log: true
 

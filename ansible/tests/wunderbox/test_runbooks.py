@@ -265,6 +265,8 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             self.assertIn(required, source)
         self.assertIn("options:", apply_source)
         self.assertIn("cas:", apply_source)
+        self.assertIn(".get('data', {})", apply_source)
+        self.assertIn(".get('metadata', {})", apply_source)
         self.assertIn("private_key:", apply_source)
         self.assertIn("no_log: true", apply_source)
         self.assertIn("== ['deny']", readback_source)
@@ -278,6 +280,11 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             "not (nginx_config_vault_issue_missing | default(true) | bool)",
             management_source,
         )
+        self.assertIn(
+            "must already be present in Vault KV before gateway deploy",
+            management_source,
+        )
+        self.assertIn("* 86400 < _management_tls_contract.ttl_seconds", source)
         self.assertNotIn(
             "public_tls_material_present_in_vault',\n              false\n            )\n            is sameas true or",
             management_source,

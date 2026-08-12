@@ -75,6 +75,12 @@
             _management_tls_contract.ttl_seconds | int
             <= wunderbox_vault_pki.leaf_role.ttl_seconds | int
           - _management_tls_contract.renew_before is match('^\\+[1-9][0-9]*d$')
+          - >-
+            (
+              _management_tls_contract.renew_before
+              | regex_replace('^\\+([0-9]+)d$', '\\1')
+              | int
+            ) * 86400 < _management_tls_contract.ttl_seconds | int
           - _management_tls_contract.private_key_format == 'pkcs8'
           - _management_tls_contract.pki_mount == wunderbox_vault_pki.intermediate.mount
           - _management_tls_contract.pki_role == wunderbox_vault_pki.leaf_role.name

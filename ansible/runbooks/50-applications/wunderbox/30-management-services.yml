@@ -78,8 +78,9 @@
               false
             ) is sameas true
         fail_msg: >-
-          Public TLS must be resolved through Vault KV or Vault PKI. Local
-          certificate files and self-signed host generation are prohibited.
+          Public TLS must already be present in Vault KV before gateway deploy.
+          PKI issuance belongs to the separate management TLS custody lifecycle;
+          local certificate files and self-signed host generation are prohibited.
         quiet: true
       when: _wunderbox_management_selected in ['nginx', 'all']
       tags: [always]
