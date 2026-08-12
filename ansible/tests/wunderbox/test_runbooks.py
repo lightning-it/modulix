@@ -170,6 +170,50 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         self.assertIn("192.0.2.10", readme)
         self.assertIn("deploy_sha256: disabled", readme)
 
+    def test_controller_ssh_trust_is_exact_fingerprint_bound(self):
+        path = RUNBOOK_DIRECTORY / "21-controller-ssh-trust.yml"
+        play = load_yaml(path)[0]
+        source = path.read_text(encoding="utf-8")
+
+        self.assertEqual(play["hosts"], "wunderboxes")
+        self.assertEqual(play["connection"], "local")
+        self.assertIs(play["gather_facts"], False)
+        self.assertEqual(play["serial"], 1)
+        self.assertIs(play["any_errors_fatal"], True)
+        for required in (
+            "ansible_limit | string | trim == inventory_hostname",
+            "ansible_play_hosts_all == [inventory_hostname]",
+            "openssh_server_host_key_ed25519_fingerprint",
+            "hetzner_baremetal_rescue_known_hosts_path is defined",
+            "hetzner_baremetal_rescue_known_hosts_path\n            | default('')",
+            "ssh-keyscan",
+            "{{ ansible_port | string }}",
+            "== _wunderbox_controller_ssh_trust_expected_fingerprint",
+            "PIN-WUNDERBOX-OPENSSH:",
+            "ansible.builtin.known_hosts",
+            "Inspect the controller trust directory before mutation",
+            "_wunderbox_controller_ssh_trust_directory_before.stat.islnk",
+            "Inspect the controller trust file before mutation",
+            "_wunderbox_controller_ssh_trust_file_before.stat.islnk",
+            "not _wunderbox_controller_ssh_trust_readback.stat.islnk",
+            "_wunderbox_controller_ssh_trust_readback.stat.mode == '0600'",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, source)
+
+        self.assertLess(
+            source.index("Require the inventory-pinned OpenSSH fingerprint"),
+            source.index("Pin the verified installed OpenSSH host key"),
+        )
+        self.assertLess(
+            source.index("Inspect the controller trust directory before mutation"),
+            source.index("Create the private controller trust directory"),
+        )
+        self.assertLess(
+            source.index("Inspect the controller trust file before mutation"),
+            source.index("Pin the verified installed OpenSSH host key"),
+        )
+
     def test_management_gateway_requires_vault_only_certificate_custody(self):
         runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
         source = (RUNBOOK_DIRECTORY / "30-management-services.yml").read_text(

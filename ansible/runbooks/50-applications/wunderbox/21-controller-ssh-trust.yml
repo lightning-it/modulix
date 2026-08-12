@@ -1,0 +1,303 @@
+---
+- name: Verify and pin the installed Wunderbox OpenSSH host key
+  hosts: wunderboxes
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    _wunderbox_controller_ssh_trust_action: >-
+      {{ wunderbox_controller_ssh_trust_action | default('plan') }}
+    _wunderbox_controller_ssh_trust_expected_fingerprint: >-
+      {{ openssh_server_host_key_ed25519_fingerprint | default('') }}
+    _wunderbox_controller_ssh_trust_host: >-
+      {{ '[' ~ ansible_host ~ ']:' ~ (ansible_port | string) }}
+    _wunderbox_controller_ssh_trust_confirmation_expected: >-
+      {{
+        'PIN-WUNDERBOX-OPENSSH:'
+        ~ inventory_hostname
+        ~ ':'
+        ~ _wunderbox_controller_ssh_trust_expected_fingerprint
+      }}
+
+  pre_tasks:
+    - name: Require one exact inventory host and a pinned trust contract
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - ansible_play_hosts_all == [inventory_hostname]
+          - wunderbox_orchestration is defined
+          - wunderbox_orchestration is mapping
+          - wunderbox_orchestration.target is mapping
+          - inventory_hostname == wunderbox_orchestration.target.fqdn
+          - ansible_host | string == wunderbox_orchestration.target.ipv4
+          - ansible_port | int > 0
+          - ansible_port | int < 65536
+          - hetzner_baremetal_rescue_known_hosts_path is defined
+          - >-
+            hetzner_baremetal_rescue_known_hosts_path
+            | default('')
+            is string
+          - >-
+            hetzner_baremetal_rescue_known_hosts_path
+            | default('') | trim | length > 0
+          - >-
+            _wunderbox_controller_ssh_trust_expected_fingerprint
+            is match('^SHA256:[A-Za-z0-9+/]{43}$')
+          - _wunderbox_controller_ssh_trust_action in ['plan', 'apply']
+        fail_msg: >-
+          Use one exact Wunderbox inventory FQDN with matching target identity,
+          installed OpenSSH port, controller known-hosts path, and a pinned
+          Ed25519 SHA-256 fingerprint.
+        quiet: true
+
+    - name: Require host- and fingerprint-bound approval for trust apply
+      ansible.builtin.assert:
+        that:
+          - wunderbox_controller_ssh_trust_confirmation is defined
+          - wunderbox_controller_ssh_trust_confirmation is string
+          - >-
+            wunderbox_controller_ssh_trust_confirmation
+            == _wunderbox_controller_ssh_trust_confirmation_expected
+        fail_msg: >-
+          Apply requires
+          PIN-WUNDERBOX-OPENSSH:<inventory-fqdn>:<approved-fingerprint>.
+        quiet: true
+      when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+  tasks:
+    - name: Scan exactly the installed OpenSSH Ed25519 host key
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - -q
+          - -T
+          - "10"
+          - -p
+          - "{{ ansible_port | string }}"
+          - -t
+          - ed25519
+          - "{{ ansible_host }}"
+      delegate_to: localhost
+      become: false
+      register: _wunderbox_controller_ssh_trust_keyscan
+      changed_when: false
+
+    - name: Require exactly one bounded OpenSSH key line
+      ansible.builtin.assert:
+        that:
+          - _wunderbox_controller_ssh_trust_keyscan.rc == 0
+          - _wunderbox_controller_ssh_trust_keyscan.stdout_lines | length == 1
+          - >-
+            _wunderbox_controller_ssh_trust_keyscan.stdout_lines[0].split()
+            | length == 3
+          - >-
+            _wunderbox_controller_ssh_trust_keyscan.stdout_lines[0].split()[0]
+            == _wunderbox_controller_ssh_trust_host
+          - >-
+            _wunderbox_controller_ssh_trust_keyscan.stdout_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _wunderbox_controller_ssh_trust_keyscan.stdout_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          The installed OpenSSH endpoint did not return exactly one valid,
+          port-bound Ed25519 host key.
+        quiet: true
+
+    - name: Create a temporary host-key fingerprint input
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .pub
+      delegate_to: localhost
+      become: false
+      register: _wunderbox_controller_ssh_trust_key_file
+      changed_when: false
+
+    - name: Verify and optionally pin the installed OpenSSH host key
+      block:
+        - name: Stage the scanned OpenSSH key for fingerprint verification
+          ansible.builtin.copy:
+            content: >-
+              {{ _wunderbox_controller_ssh_trust_keyscan.stdout | trim }}
+            dest: "{{ _wunderbox_controller_ssh_trust_key_file.path }}"
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Calculate the scanned OpenSSH key fingerprint
+          ansible.builtin.command:
+            argv:
+              - ssh-keygen
+              - -E
+              - sha256
+              - -lf
+              - "{{ _wunderbox_controller_ssh_trust_key_file.path }}"
+          delegate_to: localhost
+          become: false
+          register: _wunderbox_controller_ssh_trust_fingerprint
+          changed_when: false
+
+        - name: Require the inventory-pinned OpenSSH fingerprint
+          ansible.builtin.assert:
+            that:
+              - >-
+                _wunderbox_controller_ssh_trust_fingerprint.stdout_lines
+                | length == 1
+              - >-
+                _wunderbox_controller_ssh_trust_fingerprint.stdout.split()
+                | length >= 2
+              - >-
+                _wunderbox_controller_ssh_trust_fingerprint.stdout.split()[1]
+                == _wunderbox_controller_ssh_trust_expected_fingerprint
+            fail_msg: >-
+              The live installed OpenSSH fingerprint differs from the
+              inventory-pinned identity. No controller trust was changed.
+            quiet: true
+
+        - name: Report verified controller SSH trust plan
+          ansible.builtin.debug:
+            msg:
+              host: "{{ inventory_hostname }}"
+              endpoint: "{{ _wunderbox_controller_ssh_trust_host }}"
+              fingerprint: >-
+                {{ _wunderbox_controller_ssh_trust_expected_fingerprint }}
+              state: installed_openssh_verified_no_change
+          when: _wunderbox_controller_ssh_trust_action == 'plan'
+
+        - name: Inspect the controller trust directory before mutation
+          ansible.builtin.stat:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path | dirname }}"
+            get_checksum: false
+            follow: false
+          delegate_to: localhost
+          become: false
+          register: _wunderbox_controller_ssh_trust_directory_before
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Reject an unsafe existing controller trust directory
+          ansible.builtin.assert:
+            that:
+              - >-
+                not _wunderbox_controller_ssh_trust_directory_before.stat.exists
+                or (
+                  _wunderbox_controller_ssh_trust_directory_before.stat.isdir
+                  and not
+                  _wunderbox_controller_ssh_trust_directory_before.stat.islnk
+                )
+            fail_msg: >-
+              The controller trust directory already exists but is not a real
+              directory. No controller trust was changed.
+            quiet: true
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Create the private controller trust directory
+          ansible.builtin.file:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path | dirname }}"
+            state: directory
+            mode: "0700"
+          delegate_to: localhost
+          become: false
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Inspect the controller trust file before mutation
+          ansible.builtin.stat:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            get_checksum: false
+            follow: false
+          delegate_to: localhost
+          become: false
+          register: _wunderbox_controller_ssh_trust_file_before
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Reject an unsafe existing controller trust file
+          ansible.builtin.assert:
+            that:
+              - >-
+                not _wunderbox_controller_ssh_trust_file_before.stat.exists
+                or (
+                  _wunderbox_controller_ssh_trust_file_before.stat.isreg
+                  and not _wunderbox_controller_ssh_trust_file_before.stat.islnk
+                )
+            fail_msg: >-
+              The controller trust file already exists but is not a regular,
+              non-symlink file. No controller trust was changed.
+            quiet: true
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Pin the verified installed OpenSSH host key
+          ansible.builtin.known_hosts:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            name: "{{ _wunderbox_controller_ssh_trust_host }}"
+            key: "{{ _wunderbox_controller_ssh_trust_keyscan.stdout | trim }}"
+            state: present
+          delegate_to: localhost
+          become: false
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Enforce private mode on the controller trust file
+          ansible.builtin.file:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            state: file
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Read back the pinned controller trust file
+          ansible.builtin.stat:
+            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
+            checksum_algorithm: sha256
+            get_checksum: true
+            follow: false
+          delegate_to: localhost
+          become: false
+          register: _wunderbox_controller_ssh_trust_readback
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Require a private regular controller trust file
+          ansible.builtin.assert:
+            that:
+              - _wunderbox_controller_ssh_trust_readback.stat.exists
+              - _wunderbox_controller_ssh_trust_readback.stat.isreg
+              - not _wunderbox_controller_ssh_trust_readback.stat.islnk
+              - _wunderbox_controller_ssh_trust_readback.stat.mode == '0600'
+              - >-
+                _wunderbox_controller_ssh_trust_readback.stat.checksum
+                | default('')
+                is match('^[0-9a-f]{64}$')
+            fail_msg: >-
+              The pinned controller trust file failed its regular-file,
+              symlink, mode, or checksum readback.
+            quiet: true
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+
+        - name: Publish sanitized controller SSH trust evidence
+          ansible.builtin.debug:
+            msg:
+              host: "{{ inventory_hostname }}"
+              endpoint: "{{ _wunderbox_controller_ssh_trust_host }}"
+              fingerprint: >-
+                {{ _wunderbox_controller_ssh_trust_expected_fingerprint }}
+              known_hosts_sha256: >-
+                {{ _wunderbox_controller_ssh_trust_readback.stat.checksum }}
+              state: installed_openssh_pinned
+          when: _wunderbox_controller_ssh_trust_action == 'apply'
+      always:
+        - name: Remove the temporary host-key fingerprint input
+          ansible.builtin.file:
+            path: >-
+              {{ _wunderbox_controller_ssh_trust_key_file.path | default('') }}
+            state: absent
+          delegate_to: localhost
+          become: false
+          when:
+            - _wunderbox_controller_ssh_trust_key_file is defined
+            - >-
+              _wunderbox_controller_ssh_trust_key_file.path
+              | default('') | length > 0
+          changed_when: false
