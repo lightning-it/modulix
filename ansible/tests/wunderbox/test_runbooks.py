@@ -246,6 +246,7 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         apply_source = (
             RUNBOOK_DIRECTORY / "tasks/apply-management-tls-custody.yml"
         ).read_text(encoding="utf-8")
+        normalized_apply_source = " ".join(apply_source.split())
         readback_source = (
             RUNBOOK_DIRECTORY / "tasks/readback-management-tls-custody.yml"
         ).read_text(encoding="utf-8")
@@ -259,6 +260,9 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             "hetzner_baremetal_vault.pki_controller_auth",
             "hetzner_baremetal_vault.controller_auth",
             "_management_tls_candidate_sha256",
+            "_management_tls_candidate_schema_version: 2",
+            "custody_schema_version: \"{{ _management_tls_custody_schema_version }}\"",
+            "exact_pki_ca_endpoints",
             "Forget short-lived Vault tokens",
             "close-hashicorp-vault-ssh-tunnel.yml",
         ):
@@ -268,9 +272,89 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         self.assertIn(".get('data', {})", apply_source)
         self.assertIn(".get('metadata', {})", apply_source)
         self.assertIn("private_key:", apply_source)
+        self.assertIn(
+            "_management_tls_existing_data.schema_version | default(0) | int",
+            apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.ca_chain_source | default('')",
+            apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.root_mount | default('')",
+            apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.ca_chain | select('string') "
+            "| map('trim') | reject('equalto', '') | list | length ) == 2",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            "_management_tls_issued_ca_chain | select('string') | map('trim') "
+            "| reject('equalto', '') | list | length == 2",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.alt_names is sequence",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.alt_names is not string",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            'schema_version: "{{ _management_tls_custody_schema_version }}"',
+            apply_source,
+        )
         self.assertIn("no_log: true", apply_source)
+        self.assertIn(
+            "Read the exact public intermediate certificate for custody",
+            apply_source,
+        )
+        self.assertIn(
+            "Read the exact public root certificate for custody",
+            apply_source,
+        )
+        self.assertIn(
+            'ca_chain: "{{ _management_tls_issued_ca_chain }}"',
+            apply_source,
+        )
+        self.assertIn(
+            'ca_chain_source: "{{ _management_tls_contract.ca_chain_source }}"',
+            apply_source,
+        )
+        self.assertIn(
+            "_management_tls_stored.root_mount == _management_tls_contract.root_mount",
+            readback_source,
+        )
+        self.assertIn(
+            "== _management_tls_custody_schema_version",
+            readback_source,
+        )
+        self.assertNotIn("issued TLS contract diagnostics", apply_source)
         self.assertIn("== ['deny']", readback_source)
-        self.assertEqual(readback_source.count("| default([])"), 5)
+        capability_guard = next(
+            task
+            for task in load_yaml(
+                RUNBOOK_DIRECTORY / "tasks/readback-management-tls-custody.yml"
+            )
+            if task["name"] == "Require separated issuer and custody capabilities"
+        )
+        capability_assertions = capability_guard["ansible.builtin.assert"]["that"]
+        for path_variable in (
+            "_management_tls_issue_path",
+            "_management_tls_kv_data_path",
+            "_management_tls_kv_metadata_path",
+        ):
+            matching_assertions = [
+                assertion
+                for assertion in capability_assertions
+                if path_variable in assertion
+            ]
+            self.assertGreaterEqual(len(matching_assertions), 1)
+            self.assertTrue(
+                all("| default([])" in assertion for assertion in matching_assertions)
+            )
         self.assertIn("issuer_and_custody_capabilities_separated: true", readback_source)
         self.assertIn("public_key_fingerprints.sha256", readback_source)
 
@@ -291,9 +375,10 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
                 f"_management_tls_contract.{field} | default('')",
                 source,
             )
+        normalized_management_source = " ".join(management_source.split())
         self.assertNotIn(
-            "public_tls_material_present_in_vault',\n              false\n            )\n            is sameas true or",
-            management_source,
+            "public_tls_material_present_in_vault', false ) is sameas true or",
+            normalized_management_source,
         )
 
     def test_management_guards_default_missing_inventory_contracts(self):
