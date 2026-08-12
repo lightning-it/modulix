@@ -363,6 +363,8 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("_hetzner_vault_controller_auth", auth_resolver)
         self.assertIn("hetzner_baremetal_vault.pki_controller_auth", pki_runbook)
         self.assertIn("lit-wunderbox-pki-issuer", pki_runbook)
+        self.assertNotIn("ansible.builtin.meta: end_play", pki_runbook)
+        self.assertIn("when: _vault_pki_action == 'readback'", pki_runbook)
         self.assertEqual(cleanup["ansible.builtin.uri"]["status_code"], 204)
         self.assertNotIn("failed_when", cleanup)
 

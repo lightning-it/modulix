@@ -249,16 +249,13 @@
             fail_msg: "Vault must be initialized, active, and unsealed."
             quiet: true
 
-        - name: End after the read-only PKI plan
-          ansible.builtin.meta: end_play
-          when: _vault_pki_action == 'plan'
-
         - name: Apply the private PKI hierarchy
           ansible.builtin.include_tasks: tasks/apply-vault-pki.yml
           when: _vault_pki_action == 'apply'
 
         - name: Read back the private PKI hierarchy
           ansible.builtin.include_tasks: tasks/readback-vault-pki.yml
+          when: _vault_pki_action == 'readback'
 
       always:
         - name: Close the inventory-declared controller Vault transport
