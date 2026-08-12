@@ -158,10 +158,62 @@
   when: not (_management_tls_existing_reusable | bool)
   no_log: true
 
-- name: Inspect the newly issued CA chain
+- name: Read the exact public intermediate certificate for custody
+  ansible.builtin.uri:
+    url: >-
+      {{
+        hetzner_baremetal_vault.api_addr ~ '/v1/'
+        ~ _management_tls_contract.pki_mount ~ '/ca/pem'
+      }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _management_tls_issuer_token }}"
+    return_content: true
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _management_tls_intermediate_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: not (_management_tls_existing_reusable | bool)
+  no_log: true
+
+- name: Read the exact public root certificate for custody
+  ansible.builtin.uri:
+    url: >-
+      {{
+        hetzner_baremetal_vault.api_addr ~ '/v1/'
+        ~ _management_tls_contract.root_mount ~ '/ca/pem'
+      }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _management_tls_issuer_token }}"
+    return_content: true
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _management_tls_root_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: not (_management_tls_existing_reusable | bool)
+  no_log: true
+
+- name: Normalize the exact public CA chain for custody
+  ansible.builtin.set_fact:
+    _management_tls_issued_ca_chain:
+      - "{{ _management_tls_intermediate_readback.content }}"
+      - "{{ _management_tls_root_readback.content }}"
+  when: not (_management_tls_existing_reusable | bool)
+  no_log: true
+
+- name: Inspect the exact public CA chain for custody
   community.crypto.x509_certificate_info:
     content: "{{ item }}"
-  loop: "{{ _management_tls_issued_data.ca_chain }}"
+  loop: "{{ _management_tls_issued_ca_chain }}"
   register: _management_tls_issued_ca_info
   delegate_to: localhost
   become: false
@@ -173,9 +225,9 @@
     that:
       - _management_tls_issued_data.certificate | trim | length > 0
       - _management_tls_issued_data.private_key | trim | length > 0
-      - _management_tls_issued_data.ca_chain is sequence
-      - _management_tls_issued_data.ca_chain is not string
-      - _management_tls_issued_data.ca_chain | length >= 2
+      - _management_tls_issued_ca_chain is sequence
+      - _management_tls_issued_ca_chain is not string
+      - _management_tls_issued_ca_chain | length == 2
       - not (_management_tls_issued_cert_info.expired | bool)
       - _management_tls_issued_cert_info.valid_at.renewal_horizon | bool
       - >-
@@ -216,10 +268,12 @@
         alt_names: "{{ _management_tls_contract.dns_names }}"
         pki_mount: "{{ _management_tls_contract.pki_mount }}"
         pki_role: "{{ _management_tls_contract.pki_role }}"
+        ca_chain_source: "{{ _management_tls_contract.ca_chain_source }}"
+        root_mount: "{{ _management_tls_contract.root_mount }}"
         certificate: "{{ _management_tls_issued_data.certificate }}"
         private_key: "{{ _management_tls_issued_data.private_key }}"
         issuing_ca: "{{ _management_tls_issued_data.issuing_ca }}"
-        ca_chain: "{{ _management_tls_issued_data.ca_chain }}"
+        ca_chain: "{{ _management_tls_issued_ca_chain }}"
         serial_number: "{{ _management_tls_issued_data.serial_number }}"
     validate_certs: true
     ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"

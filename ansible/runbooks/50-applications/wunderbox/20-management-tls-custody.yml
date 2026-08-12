@@ -82,6 +82,8 @@
               | int
             ) * 86400 < _management_tls_contract.ttl_seconds | int
           - _management_tls_contract.private_key_format == 'pkcs8'
+          - _management_tls_contract.ca_chain_source == 'exact_pki_ca_endpoints'
+          - _management_tls_contract.root_mount == wunderbox_vault_pki.root.mount
           - _management_tls_contract.pki_mount == wunderbox_vault_pki.intermediate.mount
           - _management_tls_contract.pki_role == wunderbox_vault_pki.leaf_role.name
           - _management_tls_contract.kv_mount == wunderbox_management_vault_kv_mount

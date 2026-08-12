@@ -109,8 +109,9 @@
     that:
       - _management_tls_stored.keys() | list | sort == [
           'alt_names', 'ca_chain', 'candidate_sha256', 'certificate',
-          'common_name', 'issuing_ca', 'pki_mount', 'pki_role', 'private_key',
-          'schema_version', 'serial_number'
+          'ca_chain_source', 'common_name', 'issuing_ca', 'pki_mount',
+          'pki_role', 'private_key', 'root_mount', 'schema_version',
+          'serial_number'
         ] | sort
       - _management_tls_stored.schema_version | int == 1
       - _management_tls_stored.candidate_sha256 == _management_tls_candidate_sha256
@@ -118,6 +119,10 @@
       - _management_tls_stored.alt_names | sort == _management_tls_contract.dns_names | sort
       - _management_tls_stored.pki_mount == _management_tls_contract.pki_mount
       - _management_tls_stored.pki_role == _management_tls_contract.pki_role
+      - >-
+        _management_tls_stored.ca_chain_source
+        == _management_tls_contract.ca_chain_source
+      - _management_tls_stored.root_mount == _management_tls_contract.root_mount
       - _management_tls_stored_version | int >= 1
       - not (_management_tls_stored_cert_info.expired | bool)
       - _management_tls_stored_cert_info.valid_at.renewal_horizon | bool
