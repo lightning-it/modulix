@@ -256,8 +256,12 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             "Resolve scoped controller HashiCorp Vault authentication",
         )
         self.assertEqual(
+            lifecycle_tasks[0]["ansible.builtin.include_tasks"],
+            "../../00-common/tasks/resolve-hashicorp-vault-auth.yml",
+        )
+        self.assertEqual(
             lifecycle_cleanup[-1]["ansible.builtin.include_tasks"],
-            "../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml",
+            "../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml",
         )
         self.assertEqual(
             lifecycle_cleanup[0]["ansible.builtin.set_fact"][
@@ -265,6 +269,9 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             ],
             {},
         )
+        for task in (lifecycle_tasks[0], lifecycle_cleanup[-1]):
+            include_path = task["ansible.builtin.include_tasks"]
+            self.assertTrue((RUNBOOK_DIRECTORY / include_path).resolve().is_file())
 
     def test_management_tls_custody_separates_issuer_and_kv_approles(self):
         path = RUNBOOK_DIRECTORY / "20-management-tls-custody.yml"

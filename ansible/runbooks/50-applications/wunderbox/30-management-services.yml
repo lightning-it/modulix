@@ -132,7 +132,7 @@
       block:
         - name: Resolve scoped controller HashiCorp Vault authentication
           ansible.builtin.include_tasks: >-
-            ../../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+            ../../00-common/tasks/resolve-hashicorp-vault-auth.yml
           no_log: true
           tags: [always]
 
@@ -332,5 +332,5 @@
 
         - name: Close the inventory-declared controller Vault transport
           ansible.builtin.include_tasks: >-
-            ../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+            ../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
           tags: [always]
