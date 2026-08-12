@@ -7,7 +7,7 @@
     _hetzner_vault_controller_auth: >-
       {{
         hashicorp_vault_controller_auth
-        | default(hetzner_baremetal_vault.controller_auth, true)
+        | default(hetzner_baremetal_vault.controller_auth)
       }}
   delegate_to: localhost
   become: false

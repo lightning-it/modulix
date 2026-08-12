@@ -19,7 +19,12 @@
     _hetzner_vault_controller_runtime_root: >-
       {{
         hetzner_baremetal_controller_runtime_root
-        | default(lookup('ansible.builtin.env', 'PWD'), true)
+        | default(
+            ('/tmp' | realpath)
+            ~ '/wbx-v-'
+            ~ lookup('ansible.builtin.pipe', 'id -u'),
+            true
+          )
       }}
   delegate_to: localhost
   delegate_facts: false

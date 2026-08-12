@@ -16,6 +16,7 @@
     _vault_pki_intermediate_mount: >-
       {{ _vault_pki_contract.intermediate.mount | default('') }}
     _vault_pki_role_name: "{{ _vault_pki_contract.leaf_role.name | default('') }}"
+    _vault_pki_terraform_source: "{{ vault_terraform_source | default('') }}"
     _vault_pki_issue_path: >-
       {{ _vault_pki_intermediate_mount }}/issue/{{ _vault_pki_role_name }}
     _vault_pki_candidate:
@@ -25,7 +26,7 @@
       trust_model: "{{ _vault_pki_contract.trust_model | default('') }}"
       public_ca_or_acme_dependency_allowed: >-
         {{ _vault_pki_contract.public_ca_or_acme_dependency_allowed | default(true) }}
-      terraform_source: "{{ vault_terraform_source }}"
+      terraform_source: "{{ _vault_pki_terraform_source }}"
       state_moves: "{{ vault_config_terragrunt_state_moves | default([]) }}"
       state_removals: "{{ vault_config_terragrunt_state_removals | default([]) }}"
       auth_backends: "{{ vault_auth_backends | default([]) }}"
@@ -122,6 +123,12 @@
           - _vault_pki_contract.work_item == 'LI-139'
           - _vault_pki_contract.trust_model == 'private_self_signed_root_with_vault_intermediate'
           - _vault_pki_contract.public_ca_or_acme_dependency_allowed is sameas false
+          - >-
+            _vault_pki_terraform_source
+            is match(
+              '^git::https://github\\.com/lightning-it/'
+              ~ 'terraform-vault-instance\\.git\\?ref=[0-9a-f]{40}$'
+            )
           - _vault_pki_root_mount is match('^[a-z0-9][a-z0-9-]{2,63}$')
           - _vault_pki_contract.root.algorithm == 'ec'
           - _vault_pki_contract.root.bits | int == 384

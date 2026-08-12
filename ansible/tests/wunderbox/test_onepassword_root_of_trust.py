@@ -358,11 +358,16 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         )
 
         self.assertIn("_hetzner_vault_controller_runtime_root", tunnel)
-        self.assertIn("default(lookup('ansible.builtin.env', 'PWD'), true)", tunnel)
         self.assertIn("hashicorp_vault_controller_auth", auth_resolver)
         self.assertIn("_hetzner_vault_controller_auth", auth_resolver)
+        self.assertNotIn(
+            "default(hetzner_baremetal_vault.controller_auth, true)", auth_resolver
+        )
+        self.assertIn("('/tmp' | realpath)", tunnel)
         self.assertIn("hetzner_baremetal_vault.pki_controller_auth", pki_runbook)
         self.assertIn("lit-wunderbox-pki-issuer", pki_runbook)
+        self.assertIn("vault_terraform_source | default('')", pki_runbook)
+        self.assertIn("terraform-vault-instance\\\\.git", pki_runbook)
         self.assertNotIn("ansible.builtin.meta: end_play", pki_runbook)
         self.assertIn("when: _vault_pki_action == 'readback'", pki_runbook)
         self.assertEqual(cleanup["ansible.builtin.uri"]["status_code"], 204)
