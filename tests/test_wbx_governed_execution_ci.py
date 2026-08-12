@@ -10,9 +10,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "wbx-governed-execution-ci.yml"
-DEVTOOLS_IMAGE = (
-    "quay.io/l-it/ee-wunder-devtools-ubi9@sha256:"
-    "9713613aebfa04f3ea7a18748ee0b74de696038621419644e154c7e2b0815aec"
+DEVTOOLS_IMAGE_PATTERN = (
+    r"quay\.io/l-it/ee-wunder-devtools-ubi9@sha256:[0-9a-f]{64}"
 )
 
 
@@ -34,6 +33,8 @@ class GovernedExecutionWorkflowTests(unittest.TestCase):
         cls.workflow_text = WORKFLOW.read_text(encoding="utf-8")
         cls.workflow = yaml.load(cls.workflow_text, Loader=yaml.BaseLoader)
         cls.job = cls.workflow["jobs"]["governed-execution-contract"]
+        cls.container = cls.job["container"]
+        cls.devtools_image = cls.container["image"]
         cls.steps = {step["name"]: step for step in cls.job["steps"]}
 
     def test_gate_always_reports_for_pull_requests_and_protected_pushes(self) -> None:
@@ -51,10 +52,14 @@ class GovernedExecutionWorkflowTests(unittest.TestCase):
         self.assertEqual(self.job["timeout-minutes"], "10")
         self.assertEqual(self.job["permissions"], {"contents": "read"})
         self.assertEqual(
-            self.job["container"],
-            {"image": DEVTOOLS_IMAGE, "options": "--user 0:0"},
+            self.container,
+            {"image": self.devtools_image, "options": "--user 0:0"},
         )
-        self.assertRegex(DEVTOOLS_IMAGE, r"@sha256:[0-9a-f]{64}$")
+        self.assertRegex(self.devtools_image, rf"^{DEVTOOLS_IMAGE_PATTERN}$")
+        self.assertEqual(
+            re.findall(DEVTOOLS_IMAGE_PATTERN, self.workflow_text),
+            [self.devtools_image],
+        )
         self.assertNotIn("if", self.job)
         self.assertNotIn("continue-on-error", self.job)
 
