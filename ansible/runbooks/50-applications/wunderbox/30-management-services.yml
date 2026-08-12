@@ -71,16 +71,12 @@
             )
           - nginx_config_vault_kv_mount | default('', true) | trim | length > 0
           - nginx_config_vault_kv_path | default('', true) | trim | length > 0
+          - not (nginx_config_vault_issue_missing | default(true) | bool)
           - >-
             _wunderbox_management_external_prerequisites.get(
               'public_tls_material_present_in_vault',
               false
-            )
-            is sameas true or (
-              nginx_config_vault_issue_missing | default(false) | bool and
-              nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
-              nginx_config_vault_pki_role | default('', true) | trim | length > 0
-            )
+            ) is sameas true
         fail_msg: >-
           Public TLS must be resolved through Vault KV or Vault PKI. Local
           certificate files and self-signed host generation are prohibited.
@@ -102,19 +98,10 @@
             is sameas true
           - >-
             _wunderbox_management_selected not in ['nginx', 'all'] or
-            (
-              _wunderbox_management_external_prerequisites.get(
-                'public_tls_material_present_in_vault',
-                false
-              )
-              is sameas true
-              or (
-                nginx_config_tls_source | default('', true) == 'vault' and
-                nginx_config_vault_issue_missing | default(false) | bool and
-                nginx_config_vault_pki_path | default('', true) | trim | length > 0 and
-                nginx_config_vault_pki_role | default('', true) | trim | length > 0
-              )
-            )
+            _wunderbox_management_external_prerequisites.get(
+              'public_tls_material_present_in_vault',
+              false
+            ) is sameas true
           - >-
             _wunderbox_management_selected not in ['alloy', 'all'] or
             _wunderbox_management_external_prerequisites.get(

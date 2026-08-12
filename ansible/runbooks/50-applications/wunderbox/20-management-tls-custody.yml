@@ -1,0 +1,242 @@
+---
+- name: Plan, apply, or read back Wunderbox management TLS custody
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _management_tls_action: "{{ management_tls_action | default('plan') }}"
+    _management_tls_contract: "{{ wunderbox_management_public_tls | default({}) }}"
+    _management_tls_issuer_auth: >-
+      {{ hetzner_baremetal_vault.pki_controller_auth | default({}) }}
+    _management_tls_custody_auth: >-
+      {{ hetzner_baremetal_vault.controller_auth | default({}) }}
+    _management_tls_candidate:
+      schema_version: 1
+      host: "{{ inventory_hostname }}"
+      contract: "{{ _management_tls_contract }}"
+      issuer_policy_sha256: >-
+        {{ _management_tls_issuer_auth.policy | hash('sha256') }}
+      custody_policy_sha256: >-
+        {{ _management_tls_custody_auth.policy | hash('sha256') }}
+    _management_tls_candidate_sha256: >-
+      {{ _management_tls_candidate | to_json | hash('sha256') }}
+    _management_tls_expected_confirmation: >-
+      APPLY-WUNDERBOX-MANAGEMENT-TLS:{{ inventory_hostname }}:{{
+      _management_tls_candidate_sha256 }}
+    _management_tls_issue_path: >-
+      {{ _management_tls_contract.pki_mount }}/issue/{{
+      _management_tls_contract.pki_role }}
+    _management_tls_kv_data_path: >-
+      {{ _management_tls_contract.kv_mount }}/data/{{
+      _management_tls_contract.kv_path }}
+    _management_tls_kv_metadata_path: >-
+      {{ _management_tls_contract.kv_mount }}/metadata/{{
+      _management_tls_contract.kv_path }}
+
+  pre_tasks:
+    - name: Require one exact management TLS target and action
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all == [inventory_hostname]
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == hetzner_baremetal_vault.host
+          - _management_tls_action in ['plan', 'apply', 'readback']
+          - not ansible_check_mode
+        fail_msg: >-
+          Use --limit with the exact Vault host and select plan, apply, or
+          readback without --check.
+        quiet: true
+      tags: [always]
+
+    - name: Validate the management TLS custody contract
+      ansible.builtin.assert:
+        that:
+          - _management_tls_contract is mapping
+          - _management_tls_contract.schema_version | int == 1
+          - _management_tls_contract.work_item == 'LI-139'
+          - >-
+            _management_tls_contract.custody_model
+            == 'vault_pki_issue_then_exact_kv2_custody'
+          - _management_tls_contract.common_name in _management_tls_contract.dns_names
+          - _management_tls_contract.dns_names is sequence
+          - _management_tls_contract.dns_names is not string
+          - _management_tls_contract.dns_names | length == 3
+          - _management_tls_contract.dns_names | unique | length == 3
+          - >-
+            _management_tls_contract.dns_names | sort
+            == nginx_config_vhosts | map(attribute='server_name') | list | sort
+          - _management_tls_contract.ttl_seconds is integer
+          - _management_tls_contract.ttl_seconds | int > 0
+          - >-
+            _management_tls_contract.ttl_seconds | int
+            <= wunderbox_vault_pki.leaf_role.ttl_seconds | int
+          - _management_tls_contract.renew_before is match('^\\+[1-9][0-9]*d$')
+          - _management_tls_contract.private_key_format == 'pkcs8'
+          - _management_tls_contract.pki_mount == wunderbox_vault_pki.intermediate.mount
+          - _management_tls_contract.pki_role == wunderbox_vault_pki.leaf_role.name
+          - _management_tls_contract.kv_mount == wunderbox_management_vault_kv_mount
+          - _management_tls_contract.kv_path == wunderbox_management_vault_paths.nginx_tls
+          - _management_tls_contract.root_sha256 is match('^([0-9a-f]{2}:){31}[0-9a-f]{2}$')
+          - >-
+            _management_tls_contract.intermediate_sha256
+            is match('^([0-9a-f]{2}:){31}[0-9a-f]{2}$')
+          - _management_tls_issuer_auth.role_name == 'lit-wunderbox-pki-issuer'
+          - >-
+            _management_tls_issue_path
+            is match('^[a-z0-9][a-z0-9/_-]+$')
+          - >-
+            _management_tls_contract.kv_path
+            is match('^[a-z0-9][a-z0-9._/-]+$')
+        fail_msg: "Management TLS PKI and Vault custody contract is invalid."
+        quiet: true
+      tags: [always]
+
+    - name: Require exact candidate-bound management TLS confirmation
+      ansible.builtin.assert:
+        that:
+          - >-
+            management_tls_confirmation | default('')
+            == _management_tls_expected_confirmation
+        fail_msg: "Apply requires {{ _management_tls_expected_confirmation }}."
+        quiet: true
+      when: _management_tls_action == 'apply'
+      tags: [always]
+
+    - name: Report the management TLS custody candidate
+      ansible.builtin.debug:
+        msg:
+          action: "{{ _management_tls_action }}"
+          candidate_sha256: "{{ _management_tls_candidate_sha256 }}"
+          confirmation: "{{ _management_tls_expected_confirmation }}"
+          common_name: "{{ _management_tls_contract.common_name }}"
+          dns_names: "{{ _management_tls_contract.dns_names }}"
+          pki_role: "{{ _management_tls_contract.pki_role }}"
+          kv_path: "{{ _management_tls_contract.kv_path }}"
+          private_key_custody: hashicorp_vault_kv2_only
+      tags: [always]
+
+  tasks:
+    - name: Restore only the public Vault transport CA through managed SSH
+      ansible.builtin.include_tasks: >-
+        ../../30-operating-systems/ubuntu/24/tasks/restore-vault-controller-inputs.yml
+      vars:
+        _vault_pki_action: readback
+
+    - name: Execute management TLS lifecycle through the controller tunnel
+      block:
+        - name: Resolve the dedicated PKI issuer AppRole
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+          vars:
+            hashicorp_vault_controller_auth: "{{ _management_tls_issuer_auth }}"
+          when: _management_tls_action != 'plan'
+          no_log: true
+
+        - name: Preserve the dedicated PKI issuer authentication
+          ansible.builtin.set_fact:
+            _management_tls_issuer_resolved_auth: >-
+              {{ _hetzner_hashicorp_vault_auth }}
+          when: _management_tls_action != 'plan'
+          no_log: true
+
+        - name: Resolve the general KV custody AppRole
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+          vars:
+            hashicorp_vault_controller_auth: "{{ _management_tls_custody_auth }}"
+          when: _management_tls_action != 'plan'
+          no_log: true
+
+        - name: Preserve the general KV custody authentication
+          ansible.builtin.set_fact:
+            _management_tls_custody_resolved_auth: >-
+              {{ _hetzner_hashicorp_vault_auth }}
+          when: _management_tls_action != 'plan'
+          no_log: true
+
+        - name: Establish the controller Vault tunnel for plan
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml
+          when: _management_tls_action == 'plan'
+
+        - name: Validate active and unsealed Vault health
+          ansible.builtin.uri:
+            url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/health"
+            method: GET
+            validate_certs: true
+            ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+            status_code: 200
+            timeout: "{{ hetzner_baremetal_vault.timeout }}"
+          register: _management_tls_health
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Require active and unsealed Vault health
+          ansible.builtin.assert:
+            that:
+              - _management_tls_health.json.initialized | bool
+              - not (_management_tls_health.json.sealed | bool)
+              - not (_management_tls_health.json.standby | bool)
+            fail_msg: "Vault must be initialized, active, and unsealed."
+            quiet: true
+
+        - name: Authenticate both separated Vault AppRoles
+          ansible.builtin.uri:
+            url: >-
+              {{ item.auth.url }}/v1/auth/{{ item.auth.auth_mount_point }}/login
+            method: POST
+            body_format: json
+            body:
+              role_id: "{{ item.auth.role_id }}"
+              secret_id: "{{ item.auth.secret_id }}"
+            validate_certs: true
+            ca_path: "{{ item.auth.ca_cert }}"
+            status_code: 200
+            timeout: "{{ item.auth.timeout }}"
+          loop:
+            - name: issuer
+              auth: "{{ _management_tls_issuer_resolved_auth }}"
+            - name: custody
+              auth: "{{ _management_tls_custody_resolved_auth }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: _management_tls_logins
+          when: _management_tls_action != 'plan'
+          delegate_to: localhost
+          become: false
+          changed_when: false
+          no_log: true
+
+        - name: Preserve short-lived separated Vault tokens
+          ansible.builtin.set_fact:
+            _management_tls_issuer_token: >-
+              {{ _management_tls_logins.results[0].json.auth.client_token }}
+            _management_tls_custody_token: >-
+              {{ _management_tls_logins.results[1].json.auth.client_token }}
+          when: _management_tls_action != 'plan'
+          no_log: true
+
+        - name: Issue and store the management TLS identity
+          ansible.builtin.include_tasks: tasks/apply-management-tls-custody.yml
+          when: _management_tls_action == 'apply'
+
+        - name: Read back the management TLS identity and custody
+          ansible.builtin.include_tasks: tasks/readback-management-tls-custody.yml
+          when: _management_tls_action in ['apply', 'readback']
+
+      always:
+        - name: Forget short-lived Vault tokens
+          ansible.builtin.set_fact:
+            _management_tls_issuer_token: ""
+            _management_tls_custody_token: ""
+          no_log: true
+
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
+          tags: [always]
