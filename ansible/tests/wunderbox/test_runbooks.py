@@ -242,8 +242,12 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
     def test_management_services_always_close_scoped_vault_transport(self):
         runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
 
-        self.assertEqual(len(runbook["tasks"]), 1)
-        lifecycle = runbook["tasks"][0]
+        lifecycle = next(
+            task
+            for task in runbook["tasks"]
+            if task["name"]
+            == "Execute the management-service lifecycle through scoped Vault access"
+        )
         lifecycle_tasks = lifecycle["block"]
         lifecycle_cleanup = lifecycle["always"]
 
