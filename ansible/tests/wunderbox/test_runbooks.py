@@ -259,6 +259,7 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             "hetzner_baremetal_vault.pki_controller_auth",
             "hetzner_baremetal_vault.controller_auth",
             "_management_tls_candidate_sha256",
+            "_management_tls_candidate_schema_version: 2",
             "custody_schema_version: \"{{ _management_tls_custody_schema_version }}\"",
             "exact_pki_ca_endpoints",
             "Forget short-lived Vault tokens",
@@ -281,6 +282,10 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         self.assertIn(
             "_management_tls_existing_data.root_mount | default('')",
             apply_source,
+        )
+        self.assertGreaterEqual(
+            apply_source.count("| reject('equalto', '')"),
+            2,
         )
         self.assertIn(
             'schema_version: "{{ _management_tls_custody_schema_version }}"',

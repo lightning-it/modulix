@@ -61,6 +61,14 @@
         and _management_tls_existing_data.ca_chain is sequence
         and _management_tls_existing_data.ca_chain is not string
         and (_management_tls_existing_data.ca_chain | length) == 2
+        and (
+          _management_tls_existing_data.ca_chain
+          | select('string')
+          | map('trim')
+          | reject('equalto', '')
+          | list
+          | length
+        ) == 2
       }}
   no_log: true
 
@@ -242,6 +250,13 @@
       - _management_tls_issued_ca_chain is sequence
       - _management_tls_issued_ca_chain is not string
       - _management_tls_issued_ca_chain | length == 2
+      - >-
+        _management_tls_issued_ca_chain
+        | select('string')
+        | map('trim')
+        | reject('equalto', '')
+        | list
+        | length == 2
       - not (_management_tls_issued_cert_info.expired | bool)
       - _management_tls_issued_cert_info.valid_at.renewal_horizon | bool
       - >-

@@ -9,13 +9,14 @@
   vars:
     _management_tls_action: "{{ management_tls_action | default('plan') }}"
     _management_tls_contract: "{{ wunderbox_management_public_tls | default({}) }}"
+    _management_tls_candidate_schema_version: 2
     _management_tls_custody_schema_version: 2
     _management_tls_issuer_auth: >-
       {{ hetzner_baremetal_vault.pki_controller_auth | default({}) }}
     _management_tls_custody_auth: >-
       {{ hetzner_baremetal_vault.controller_auth | default({}) }}
     _management_tls_candidate:
-      schema_version: 1
+      schema_version: "{{ _management_tls_candidate_schema_version }}"
       host: "{{ inventory_hostname }}"
       custody_schema_version: "{{ _management_tls_custody_schema_version }}"
       contract: "{{ _management_tls_contract }}"
