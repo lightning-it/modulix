@@ -113,7 +113,9 @@
           'pki_role', 'private_key', 'root_mount', 'schema_version',
           'serial_number'
         ] | sort
-      - _management_tls_stored.schema_version | int == 1
+      - >-
+        _management_tls_stored.schema_version | int
+        == _management_tls_custody_schema_version
       - _management_tls_stored.candidate_sha256 == _management_tls_candidate_sha256
       - _management_tls_stored.common_name == _management_tls_contract.common_name
       - _management_tls_stored.alt_names | sort == _management_tls_contract.dns_names | sort
@@ -136,7 +138,7 @@
       - >-
         _management_tls_stored_cert_info.public_key_fingerprints.sha256
         == _management_tls_stored_key_info.public_key_fingerprints.sha256
-      - _management_tls_stored.ca_chain | length >= 2
+      - _management_tls_stored.ca_chain | length == 2
       - >-
         _management_tls_stored_ca_info.results[0].fingerprints.sha256
         == _management_tls_contract.intermediate_sha256

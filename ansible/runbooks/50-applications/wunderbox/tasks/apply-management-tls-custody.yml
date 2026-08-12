@@ -39,14 +39,28 @@
     _management_tls_existing_complete: >-
       {{
         _management_tls_existing_data is mapping
+        and (_management_tls_existing_data.schema_version | default(0) | int)
+            == _management_tls_custody_schema_version
         and (_management_tls_existing_data.candidate_sha256 | default(''))
             == _management_tls_candidate_sha256
+        and (_management_tls_existing_data.common_name | default(''))
+            == _management_tls_contract.common_name
+        and (_management_tls_existing_data.alt_names | default([]) | sort)
+            == (_management_tls_contract.dns_names | sort)
+        and (_management_tls_existing_data.pki_mount | default(''))
+            == _management_tls_contract.pki_mount
+        and (_management_tls_existing_data.pki_role | default(''))
+            == _management_tls_contract.pki_role
+        and (_management_tls_existing_data.ca_chain_source | default(''))
+            == _management_tls_contract.ca_chain_source
+        and (_management_tls_existing_data.root_mount | default(''))
+            == _management_tls_contract.root_mount
         and (_management_tls_existing_data.certificate | default('') | trim | length) > 0
         and (_management_tls_existing_data.private_key | default('') | trim | length) > 0
         and _management_tls_existing_data.ca_chain is defined
         and _management_tls_existing_data.ca_chain is sequence
         and _management_tls_existing_data.ca_chain is not string
-        and (_management_tls_existing_data.ca_chain | length) >= 2
+        and (_management_tls_existing_data.ca_chain | length) == 2
       }}
   no_log: true
 
@@ -262,7 +276,7 @@
       options:
         cas: "{{ _management_tls_kv_cas }}"
       data:
-        schema_version: 1
+        schema_version: "{{ _management_tls_custody_schema_version }}"
         candidate_sha256: "{{ _management_tls_candidate_sha256 }}"
         common_name: "{{ _management_tls_contract.common_name }}"
         alt_names: "{{ _management_tls_contract.dns_names }}"

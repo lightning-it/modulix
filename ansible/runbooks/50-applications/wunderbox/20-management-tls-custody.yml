@@ -9,6 +9,7 @@
   vars:
     _management_tls_action: "{{ management_tls_action | default('plan') }}"
     _management_tls_contract: "{{ wunderbox_management_public_tls | default({}) }}"
+    _management_tls_custody_schema_version: 2
     _management_tls_issuer_auth: >-
       {{ hetzner_baremetal_vault.pki_controller_auth | default({}) }}
     _management_tls_custody_auth: >-
@@ -16,6 +17,7 @@
     _management_tls_candidate:
       schema_version: 1
       host: "{{ inventory_hostname }}"
+      custody_schema_version: "{{ _management_tls_custody_schema_version }}"
       contract: "{{ _management_tls_contract }}"
       issuer_policy_sha256: >-
         {{ _management_tls_issuer_auth.policy | hash('sha256') }}
@@ -119,6 +121,7 @@
         msg:
           action: "{{ _management_tls_action }}"
           candidate_sha256: "{{ _management_tls_candidate_sha256 }}"
+          custody_schema_version: "{{ _management_tls_custody_schema_version }}"
           confirmation: "{{ _management_tls_expected_confirmation }}"
           common_name: "{{ _management_tls_contract.common_name }}"
           dns_names: "{{ _management_tls_contract.dns_names }}"
