@@ -167,7 +167,7 @@
         == _hetzner_vault_tunnel_control_canonical
       - >-
         _hetzner_vault_tunnel_control_path | dirname
-        == _hetzner_vault_tunnel_workspace_path ~ '/.tmp'
+        == _hetzner_vault_tunnel_workspace_path
       - _hetzner_vault_tunnel_control_path | length <= 100
       - >-
         _hetzner_vault_tunnel_control_path | basename
@@ -192,7 +192,7 @@
       {%- for candidate in [
         _hetzner_vault_tunnel_key_path | dirname,
         _hetzner_vault_tunnel_known_hosts_path | dirname,
-        _hetzner_vault_tunnel_workspace_path
+        _hetzner_vault_tunnel_workspace_path | dirname
       ] -%}
       {%- set parts = candidate.split('/') -%}
       {%- for index in range(1, parts | length) -%}
@@ -244,6 +244,12 @@
             item.stat.mode | default('')
             is match('^0[0-7][0-7][0145]$')
           )
+        )
+        or (
+          item.item in ['/tmp', '/private/tmp']
+          and item.stat.uid | default(-1) | int == 0
+          and item.stat.gid | default(-1) | int == 0
+          and item.stat.mode | default('') == '1777'
         )
     fail_msg: >-
       Every existing ancestor of the Vault SSH identity, trust file, and
@@ -342,7 +348,7 @@
           and _hetzner_vault_tunnel_control_dir_before.stat.mode == '0700'
         )
     fail_msg: >-
-      The controller runtime .tmp path must be absent or an owner-controlled canonical
+      The controller runtime path must be absent or an owner-controlled canonical
       directory with mode 0700 before the Vault SSH socket is created.
     quiet: true
   delegate_to: localhost

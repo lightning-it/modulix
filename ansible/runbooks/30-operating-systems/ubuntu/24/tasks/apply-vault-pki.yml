@@ -222,9 +222,9 @@
         vault_config_pki_enabled: false
         terragrunt_vault_ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
         terragrunt_skip_confirmation: true
-        terragrunt_import_strict: true
-        terragrunt_state_migration_strict: true
-        terragrunt_init_upgrade: true
+        vault_config_terragrunt_import_strict: true
+        vault_config_terragrunt_state_migration_strict: true
+        vault_config_terragrunt_init_upgrade: true
       no_log: true
 
     - name: Reissue and validate the scoped controller AppRole working copy
@@ -250,7 +250,7 @@
         _hetzner_hashicorp_vault_auth:
           url: "{{ hetzner_baremetal_vault.api_addr }}"
           auth_mount_point: >-
-            {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+            {{ _vault_pki_controller_auth.auth_mount_point }}
           role_id: "{{ _vault_scoped_approle_document.role_id }}"
           secret_id: "{{ _vault_scoped_approle_document.secret_id }}"
           ca_cert: "{{ hetzner_baremetal_vault.ca_cert_path }}"

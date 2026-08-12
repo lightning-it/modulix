@@ -342,6 +342,13 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
             REPOSITORY_ROOT
             / "ansible/runbooks/00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml"
         ).read_text(encoding="utf-8")
+        auth_resolver = (
+            REPOSITORY_ROOT
+            / "ansible/runbooks/00-common/tasks/resolve-hashicorp-vault-auth.yml"
+        ).read_text(encoding="utf-8")
+        pki_runbook = (UBUNTU_DIRECTORY / "19-vault-pki.yml").read_text(
+            encoding="utf-8"
+        )
         apply_tasks = load_yaml(UBUNTU_DIRECTORY / "tasks/apply-vault-pki.yml")
         cleanup = next(
             task
@@ -352,6 +359,10 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
 
         self.assertIn("_hetzner_vault_controller_runtime_root", tunnel)
         self.assertIn("default(lookup('ansible.builtin.env', 'PWD'), true)", tunnel)
+        self.assertIn("hashicorp_vault_controller_auth", auth_resolver)
+        self.assertIn("_hetzner_vault_controller_auth", auth_resolver)
+        self.assertIn("hetzner_baremetal_vault.pki_controller_auth", pki_runbook)
+        self.assertIn("lit-wunderbox-pki-issuer", pki_runbook)
         self.assertEqual(cleanup["ansible.builtin.uri"]["status_code"], 204)
         self.assertNotIn("failed_when", cleanup)
 

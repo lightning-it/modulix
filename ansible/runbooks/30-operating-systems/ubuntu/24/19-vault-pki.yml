@@ -10,6 +10,8 @@
   vars:
     _vault_pki_action: "{{ vault_pki_action | default('plan') }}"
     _vault_pki_contract: "{{ wunderbox_vault_pki | default({}) }}"
+    _vault_pki_controller_auth: >-
+      {{ hetzner_baremetal_vault.pki_controller_auth | default({}) }}
     _vault_pki_root_mount: "{{ _vault_pki_contract.root.mount | default('') }}"
     _vault_pki_intermediate_mount: >-
       {{ _vault_pki_contract.intermediate.mount | default('') }}
@@ -30,8 +32,10 @@
       root: "{{ _vault_pki_contract.root | default({}) }}"
       intermediate: "{{ _vault_pki_contract.intermediate | default({}) }}"
       leaf_role: "{{ _vault_pki_contract.leaf_role | default({}) }}"
-      controller_policy_sha256: >-
+      general_controller_policy_sha256: >-
         {{ hetzner_baremetal_vault.controller_auth.policy | hash('sha256') }}
+      pki_controller_policy_sha256: >-
+        {{ _vault_pki_controller_auth.policy | hash('sha256') }}
     _vault_pki_candidate_sha256: >-
       {{ _vault_pki_candidate | to_json | hash('sha256') }}
     _vault_pki_expected_confirmation: >-
@@ -60,39 +64,39 @@
     vault_scoped_approle_kv_mount_point: >-
       {{ hetzner_baremetal_vault.engine_mount_point }}
     vault_scoped_approle_auth_mount_point: >-
-      {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+      {{ _vault_pki_controller_auth.auth_mount_point }}
     vault_scoped_approle_role_name: >-
-      {{ hetzner_baremetal_vault.controller_auth.role_name }}
+      {{ _vault_pki_controller_auth.role_name }}
     vault_scoped_approle_policy_name: >-
-      {{ hetzner_baremetal_vault.controller_auth.policy_name }}
+      {{ _vault_pki_controller_auth.policy_name }}
     vault_scoped_approle_policy: >-
-      {{ hetzner_baremetal_vault.controller_auth.policy }}
+      {{ _vault_pki_controller_auth.policy }}
     vault_scoped_approle_token_type: >-
-      {{ hetzner_baremetal_vault.controller_auth.token_type }}
+      {{ _vault_pki_controller_auth.token_type }}
     vault_scoped_approle_token_ttl: >-
-      {{ hetzner_baremetal_vault.controller_auth.token_ttl }}
+      {{ _vault_pki_controller_auth.token_ttl }}
     vault_scoped_approle_token_ttl_seconds: >-
-      {{ hetzner_baremetal_vault.controller_auth.token_ttl_seconds }}
+      {{ _vault_pki_controller_auth.token_ttl_seconds }}
     vault_scoped_approle_token_max_ttl: >-
-      {{ hetzner_baremetal_vault.controller_auth.token_max_ttl }}
+      {{ _vault_pki_controller_auth.token_max_ttl }}
     vault_scoped_approle_token_max_ttl_seconds: >-
-      {{ hetzner_baremetal_vault.controller_auth.token_max_ttl_seconds }}
+      {{ _vault_pki_controller_auth.token_max_ttl_seconds }}
     vault_scoped_approle_token_num_uses: >-
-      {{ hetzner_baremetal_vault.controller_auth.token_num_uses }}
+      {{ _vault_pki_controller_auth.token_num_uses }}
     vault_scoped_approle_secret_id_ttl: >-
-      {{ hetzner_baremetal_vault.controller_auth.secret_id_ttl }}
+      {{ _vault_pki_controller_auth.secret_id_ttl }}
     vault_scoped_approle_secret_id_num_uses: >-
-      {{ hetzner_baremetal_vault.controller_auth.secret_id_num_uses }}
+      {{ _vault_pki_controller_auth.secret_id_num_uses }}
     vault_scoped_approle_controller_escrow_root_path: >-
       {{ hetzner_baremetal_vault.seal.controller_init_escrow_root_path }}
     vault_scoped_approle_controller_document_path: >-
-      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path }}
+      {{ _vault_pki_controller_auth.ansible_vault_path }}
     vault_scoped_approle_document_schema_version: >-
-      {{ hetzner_baremetal_vault.controller_auth.schema_version }}
+      {{ _vault_pki_controller_auth.schema_version }}
     vault_scoped_approle_document_subject: >-
-      {{ hetzner_baremetal_vault.controller_auth.subject }}
+      {{ _vault_pki_controller_auth.subject }}
     vault_scoped_approle_capability_probes: >-
-      {{ hetzner_baremetal_vault.controller_auth.capability_probes }}
+      {{ _vault_pki_controller_auth.capability_probes }}
 
   pre_tasks:
     - name: Require one exact Vault PKI target and action
@@ -151,15 +155,27 @@
           - vault_pki_roots | length == 1
           - vault_pki_intermediates | length == 1
           - vault_pki_roles | length == 1
-          - vault_policies | length == 1
-          - vault_policies[0].name == hetzner_baremetal_vault.controller_auth.policy_name
-          - vault_policies[0].policy == hetzner_baremetal_vault.controller_auth.policy
+          - _vault_pki_controller_auth is mapping
+          - _vault_pki_controller_auth.role_name == 'lit-wunderbox-pki-issuer'
+          - _vault_pki_controller_auth.policy_name == 'lit-wunderbox-pki-issuer'
+          - vault_policies | length == 2
+          - >-
+            vault_policies | map(attribute='name') | list | sort
+            == [
+              hetzner_baremetal_vault.controller_auth.policy_name,
+              _vault_pki_controller_auth.policy_name
+            ] | sort
           - >-
             _vault_pki_contract.leaf_role.allowed_dns_names | sort
             == nginx_config_vhosts | map(attribute='server_name') | list | sort
           - >-
-            hetzner_baremetal_vault.controller_auth.policy
+            _vault_pki_controller_auth.policy
             is search('path "' ~ _vault_pki_issue_path ~ '"')
+          - >-
+            not (
+              hetzner_baremetal_vault.controller_auth.policy
+              is search('path "' ~ _vault_pki_issue_path ~ '"')
+            )
         fail_msg: >-
           The private self-signed Vault PKI hierarchy, exact DNS role, or
           controller policy mapping is incomplete or unsafe.
@@ -198,6 +214,8 @@
         - name: Resolve scoped controller HashiCorp Vault authentication
           ansible.builtin.include_tasks: >-
             ../../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+          vars:
+            hashicorp_vault_controller_auth: "{{ _vault_pki_controller_auth }}"
           when: _vault_pki_action == 'readback'
           no_log: true
 
