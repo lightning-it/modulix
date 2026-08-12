@@ -1,3 +1,21 @@
+---
+id: adr-renovate-guarded-automerge
+title: Guarded automatic merge for Renovate
+description: Defines the exact trust and CI boundary for unattended Renovate merges.
+document:
+  status: maintained
+  approval_status: approved
+  version: "1.0"
+  classification: PUBLIC
+  owner: Lightning IT Documentation Maintainers
+  approver: Lightning IT Product Owners
+  audience:
+    - repository maintainers
+    - platform engineers
+  last_reviewed: "2026-08-11"
+  review_cadence: annual
+---
+
 <!-- Managed by lightning-it/shared-assets-lit. Change the canonical file there. -->
 
 # ADR: Guarded automatic merge for Renovate
