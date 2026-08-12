@@ -239,6 +239,29 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         for key in ("ca_certificate", "client_certificate", "private_key"):
             self.assertIn(f"name: {key}", source)
 
+    def test_management_services_always_close_scoped_vault_transport(self):
+        runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
+
+        self.assertEqual(len(runbook["tasks"]), 1)
+        lifecycle = runbook["tasks"][0]
+        lifecycle_tasks = lifecycle["block"]
+        lifecycle_cleanup = lifecycle["always"]
+
+        self.assertEqual(
+            lifecycle_tasks[0]["name"],
+            "Resolve scoped controller HashiCorp Vault authentication",
+        )
+        self.assertEqual(
+            lifecycle_cleanup[-1]["ansible.builtin.include_tasks"],
+            "../../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml",
+        )
+        self.assertEqual(
+            lifecycle_cleanup[0]["ansible.builtin.set_fact"][
+                "_hetzner_hashicorp_vault_auth"
+            ],
+            {},
+        )
+
     def test_management_tls_custody_separates_issuer_and_kv_approles(self):
         path = RUNBOOK_DIRECTORY / "20-management-tls-custody.yml"
         play = load_yaml(path)[0]
