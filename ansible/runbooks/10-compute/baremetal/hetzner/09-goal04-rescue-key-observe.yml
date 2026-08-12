@@ -1,0 +1,92 @@
+---
+- name: Observe the exact Goal 04 Rescue SSH key in Hetzner Robot
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _wbx_goal04_expected_host: wunderbox01.prd.edge.pub.l-it.io
+    _wbx_goal04_expected_server: 3035773
+    _wbx_goal04_expected_ipv4: 136.243.38.174
+
+  pre_tasks:
+    - name: Require the exact frozen Goal 04 target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == _wbx_goal04_expected_host
+          - inventory_hostname == _wbx_goal04_expected_host
+          - hetzner_robot_server_number | int == _wbx_goal04_expected_server
+          - ansible_host == _wbx_goal04_expected_ipv4
+          - hostname_fqdn == _wbx_goal04_expected_host
+          - wunderbox_controller_approval_authority_bootstrap is mapping
+          - >-
+            wunderbox_controller_approval_authority_bootstrap.public_key
+            is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3}$')
+        fail_msg: >-
+          Goal 04 Rescue-key observation requires the exact frozen host,
+          server number, IPv4, FQDN, and inventory-pinned Ed25519 public key.
+        quiet: true
+      tags: [always]
+
+    - name: Resolve Robot API credentials from the selected external backend
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+  tasks:
+    - name: Read the account-wide Robot SSH-key inventory
+      community.hrobot.ssh_key_info:
+        hetzner_user: "{{ _hetzner_robot_user }}"
+        hetzner_password: "{{ _hetzner_robot_password }}"
+      register: _wbx_goal04_robot_ssh_keys
+      delegate_to: localhost
+      become: false
+
+    - name: Select only the exact inventory-pinned bootstrap public key
+      ansible.builtin.set_fact:
+        _wbx_goal04_matching_robot_ssh_keys: >-
+          {{
+            _wbx_goal04_robot_ssh_keys.ssh_keys
+            | selectattr(
+                'data',
+                'equalto',
+                wunderbox_controller_approval_authority_bootstrap.public_key
+              )
+            | list
+          }}
+      changed_when: false
+      no_log: true
+
+    - name: Report the non-secret exact-match result
+      ansible.builtin.debug:
+        msg:
+          exact_public_key_registered: >-
+            {{ _wbx_goal04_matching_robot_ssh_keys | length == 1 }}
+          exact_match_count: "{{ _wbx_goal04_matching_robot_ssh_keys | length }}"
+          exact_match_names: >-
+            {{
+              _wbx_goal04_matching_robot_ssh_keys
+              | map(attribute='name')
+              | list
+            }}
+          total_robot_key_count: "{{ _wbx_goal04_robot_ssh_keys.ssh_keys | length }}"
+          expected_sha256_fingerprint: >-
+            {{
+              wunderbox_controller_approval_authority_bootstrap
+              .onepassword_item.expected_fingerprint
+            }}
+
+    - name: Require the new bootstrap key to be the sole Robot SSH key
+      ansible.builtin.assert:
+        that:
+          - _wbx_goal04_matching_robot_ssh_keys | length == 1
+          - _wbx_goal04_matching_robot_ssh_keys[0].name == 'id_ed25519_lit_bootstrap'
+          - _wbx_goal04_robot_ssh_keys.ssh_keys | length == 1
+        fail_msg: >-
+          Robot does not contain exactly the one approved bootstrap SSH key.
+        quiet: true

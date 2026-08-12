@@ -9,7 +9,16 @@ The main entrypoints are:
 - `07-robot-credentials.yml`: create or verify the encrypted Robot credential
   document.
 - `08-recovery-secrets.yml`: create or verify per-host encrypted-root recovery
-  secrets used during installation.
+  secrets used during installation. The external `onepassword_cli` option
+  supports an independent root-of-trust bootstrap without depending on a Vault
+  service hosted by the target being built.
+- `09-onepassword-recovery-create.yml`: sign and immediately consume two
+  independent, short-lived approvals for initial external Password and
+  Dropbear SSH-key creation. It requires one exact target, six frozen Git
+  commits and an explicit target-bound creation confirmation.
+- `07-onepassword-ssh-agent-import.yml`: import one existing, exact local
+  Ed25519 key into the declared 1Password vault without exposing its private
+  value, then verify the same fingerprint through the pinned SSH Agent.
 - `08-recovery-secrets-migrate.yml`: migrate bootstrap recovery documents to
   the declared HashiCorp Vault backend.
 - `08-robot-credentials-migrate.yml`: migrate the controller-local Robot
@@ -20,6 +29,13 @@ The main entrypoints are:
   workflow.
 - `09-robot-ops.yml`: perform one explicitly authorized Robot lifecycle
   operation.
+- `09-root-of-trust-g0-observe.yml`: observe one exactly selected root of
+  trust through read-only Robot server/firewall calls and a forced-check-mode
+  vSwitch probe. Unsafe drift is returned as findings; API or identity
+  ambiguity remains fatal.
+- `09-root-of-trust-g2-plan.yml`: validate the same exact target, complete
+  fleet/install order, root-first prerequisite/Tang/Vault placement, and the
+  exact bootstrap/hardened Robot firewall plans entirely on the controller.
 - `10-robot-firewall-hardened-tang.yml`: apply the separately authorized Robot
   firewall policy used by a Tang endpoint after its trust material is pinned.
 - `10-installimage.yml`: plan or execute an inventory-selected operating-system
@@ -41,11 +57,59 @@ must never be passed as extra vars, command-line arguments, or environment
 values. After HashiCorp Vault migration, normal provider operations use the
 scoped KV v2 document and TLS-validated controller transport.
 
+An independent root-of-trust target selects `onepassword_cli` for two separate
+items in the explicitly selected external vault: a Password item for the LUKS
+recovery passphrase and an Ed25519 SSH Key item for Dropbear recovery access.
+The CLI creates both values inside 1Password. The private SSH key is never
+exported; only its public key is installed into the generated initramfs with the
+forced `/bin/cryptroot-unlock` command. Each item is immutable in automation:
+after initial discovery or creation, inventory must pin its exact item ID and
+positive item version, and the SSH item must additionally pin the locally
+recomputed SHA-256 public-key fingerprint.
+
+Password and SSH-key creation are separate gates with separate action selectors
+and confirmations. Metadata-only output deliberately exposes the non-sensitive
+IDs, versions, public key, and fingerprint so they can be reviewed and pinned;
+it never exposes a secret. Before installation and every unlock, the exact
+1Password Agent socket must both enumerate the pinned public key and complete a
+fresh `ssh-keygen -Y sign`/`verify` challenge. The controller rejects service
+account, Connect, and shell-session tokens, so only the already unlocked desktop
+integration is accepted.
+
+The dedicated unlock action revalidates both item versions, reads the Password
+value only through an inherited descriptor, executes an explicitly pinned
+non-TTY SSH session with `/bin/cryptroot-unlock`, sends the passphrase without a
+newline, and closes stdin to delimit it by EOF. The value never enters Ansible
+facts, registered task content, command arguments, environment variables,
+process output, logs, Git, or a plaintext file. Creation confirmations are
+`CREATE-ONEPASSWORD-SECRET:<inventory-hostname>` and
+`CREATE-ONEPASSWORD-SSH-KEY:<inventory-hostname>`; unlock uses
+`UNLOCK:<inventory-hostname>`.
+
 Every destructive or availability-affecting runbook requires an exact
 `--limit`, operation selector, and fresh confirmation string. Rescue
 validation and extended SMART tests remain separate from `09-robot-ops.yml`,
 so a read-only validation run cannot implicitly authorize a reset, rescue
 activation, or firewall change.
+
+The two root-of-trust gates share this generic inventory selection shape:
+
+```yaml
+hetzner_baremetal_root_of_trust:
+  schema_version: 1
+  selection_scope: single_root_of_trust
+  inventory_hostname: root01.example.invalid
+  server_lifecycle:
+    status: ready
+    cancelled: false
+```
+
+Both gates require one exact `--limit` equal to `inventory_hostname`. G0
+requires Robot credentials because it reads provider state; G2 never resolves
+credentials and does not invoke provider, managed-host, secret-backend, or
+installimage/G3 operations. The Collection owns all observation and validation
+logic; these runbooks only map rendered inventory into the generic role
+entrypoints.
 
 ## Operating-system adapters
 

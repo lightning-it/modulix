@@ -1,0 +1,67 @@
+---
+# WBX-G0 is observation only. Robot server/firewall APIs are read-only and the
+# vSwitch module is forced into check mode by the collection role. Drift is a
+# sanitized finding; only API failures or ambiguous target identity fail hard.
+- name: Observe one exact infrastructure root of trust
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Enforce the generic single-root selection
+      ansible.builtin.import_tasks: tasks/require-root-of-trust-selection.yml
+      tags: [always]
+
+    - name: Resolve encrypted Robot API credentials for read-only observation
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+  tasks:
+    - name: Observe Robot identity, firewall, and vSwitch state
+      ansible.builtin.include_role:
+        name: lit.foundational.root_of_trust_validate
+        tasks_from: g0_observe
+      vars:
+        root_of_trust_validate_selection_scope: >-
+          {{ hetzner_baremetal_root_of_trust.selection_scope }}
+        root_of_trust_validate_robot_user: "{{ _hetzner_robot_user }}"
+        root_of_trust_validate_robot_password: "{{ _hetzner_robot_password }}"
+        root_of_trust_validate_target:
+          inventory_hostname: "{{ inventory_hostname }}"
+          server_number: "{{ hetzner_robot_server_number }}"
+          server_ip: "{{ ansible_host }}"
+          server_name: "{{ inventory_hostname }}"
+          status: "{{ hetzner_baremetal_root_of_trust.server_lifecycle.status }}"
+          cancelled: >-
+            {{ hetzner_baremetal_root_of_trust.server_lifecycle.cancelled }}
+        root_of_trust_validate_expected_firewall:
+          status: >-
+            {{
+              'active'
+              if hetzner_baremetal_robot_firewall.enabled | bool
+              else 'disabled'
+            }}
+          port: "{{ hetzner_baremetal_robot_firewall.port }}"
+          filter_ipv6: "{{ hetzner_baremetal_robot_firewall.filter_ipv6 }}"
+          allowlist_hos: "{{ hetzner_baremetal_robot_firewall.allowlist_hos }}"
+          rules:
+            input: >-
+              {{
+                hetzner_baremetal_robot_firewall.common_input_rules
+                + hetzner_baremetal_robot_firewall_extra_input_rules
+              }}
+            output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
+        root_of_trust_validate_expected_vswitch:
+          name: "{{ mgmt_transport.name }}"
+          vlan: "{{ mgmt_transport.vlan_id }}"
+          servers: >-
+            {{
+              groups['hetzner_baremetal']
+              | map('extract', hostvars, 'ansible_host')
+              | map('string') | list
+            }}
+      tags: [always]

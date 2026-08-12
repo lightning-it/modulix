@@ -1,0 +1,20 @@
+---
+- name: Apply the inventory-defined Ubuntu users for one or more exact hosts
+  hosts: all
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require an explicit limit and Ubuntu target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_limit | string | trim | length > 0
+          - ansible_distribution == 'Ubuntu'
+        fail_msg: Use an explicit --limit selecting only intended Ubuntu hosts.
+        quiet: true
+
+  roles:
+    - role: lit.ubuntu.users

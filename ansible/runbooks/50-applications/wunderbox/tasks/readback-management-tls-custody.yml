@@ -1,0 +1,163 @@
+---
+- name: Read back separated AppRole capabilities
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/capabilities-self"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ item.token }}"
+    body_format: json
+    body:
+      paths: "{{ item.paths }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  loop:
+    - name: issuer
+      token: "{{ _management_tls_issuer_token }}"
+      paths:
+        - "{{ _management_tls_issue_path }}"
+        - "{{ _management_tls_kv_data_path }}"
+    - name: custody
+      token: "{{ _management_tls_custody_token }}"
+      paths:
+        - "{{ _management_tls_issue_path }}"
+        - "{{ _management_tls_kv_data_path }}"
+        - "{{ _management_tls_kv_metadata_path }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _management_tls_capabilities
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require separated issuer and custody capabilities
+  ansible.builtin.assert:
+    that:
+      - >-
+        _management_tls_capabilities.results[0].json[_management_tls_issue_path]
+        | default([]) | sort == ['create', 'update']
+      - >-
+        _management_tls_capabilities.results[0].json[_management_tls_kv_data_path]
+        | default([]) == ['deny']
+      - >-
+        _management_tls_capabilities.results[1].json[_management_tls_issue_path]
+        | default([]) == ['deny']
+      - >-
+        _management_tls_capabilities.results[1].json[_management_tls_kv_data_path]
+        | default([]) | sort == ['create', 'patch', 'read', 'update']
+      - >-
+        _management_tls_capabilities.results[1].json[_management_tls_kv_metadata_path]
+        | default([]) | sort == ['list', 'read']
+    fail_msg: "Issuer and KV custody AppRole capabilities are not separated."
+    quiet: true
+  no_log: true
+
+- name: Read the exact management TLS identity from Vault KV2
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/{{ _management_tls_kv_data_path }}"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _management_tls_custody_token }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _management_tls_kv_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Normalize the Vault-only management TLS identity
+  ansible.builtin.set_fact:
+    _management_tls_stored: "{{ _management_tls_kv_readback.json.data.data }}"
+    _management_tls_stored_version: >-
+      {{ _management_tls_kv_readback.json.data.metadata.version | int }}
+  no_log: true
+
+- name: Inspect the stored management TLS certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ _management_tls_stored.certificate }}"
+    valid_at:
+      renewal_horizon: "{{ _management_tls_contract.renew_before }}"
+  register: _management_tls_stored_cert_info
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Inspect the stored management TLS private key
+  community.crypto.openssl_privatekey_info:
+    content: "{{ _management_tls_stored.private_key }}"
+  register: _management_tls_stored_key_info
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Inspect the stored management TLS CA chain
+  community.crypto.x509_certificate_info:
+    content: "{{ item }}"
+  loop: "{{ _management_tls_stored.ca_chain }}"
+  register: _management_tls_stored_ca_info
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Require exact Vault-only management TLS custody
+  ansible.builtin.assert:
+    that:
+      - _management_tls_stored.keys() | list | sort == [
+          'alt_names', 'ca_chain', 'candidate_sha256', 'certificate',
+          'ca_chain_source', 'common_name', 'issuing_ca', 'pki_mount',
+          'pki_role', 'private_key', 'root_mount', 'schema_version',
+          'serial_number'
+        ] | sort
+      - >-
+        _management_tls_stored.schema_version | int
+        == _management_tls_custody_schema_version
+      - _management_tls_stored.candidate_sha256 == _management_tls_candidate_sha256
+      - _management_tls_stored.common_name == _management_tls_contract.common_name
+      - _management_tls_stored.alt_names | sort == _management_tls_contract.dns_names | sort
+      - _management_tls_stored.pki_mount == _management_tls_contract.pki_mount
+      - _management_tls_stored.pki_role == _management_tls_contract.pki_role
+      - >-
+        _management_tls_stored.ca_chain_source
+        == _management_tls_contract.ca_chain_source
+      - _management_tls_stored.root_mount == _management_tls_contract.root_mount
+      - _management_tls_stored_version | int >= 1
+      - not (_management_tls_stored_cert_info.expired | bool)
+      - _management_tls_stored_cert_info.valid_at.renewal_horizon | bool
+      - >-
+        _management_tls_stored_cert_info.subject.commonName
+        == _management_tls_contract.common_name
+      - >-
+        _management_tls_stored_cert_info.subject_alt_name | sort
+        == _management_tls_contract.dns_names
+           | map('regex_replace', '^', 'DNS:') | list | sort
+      - >-
+        _management_tls_stored_cert_info.public_key_fingerprints.sha256
+        == _management_tls_stored_key_info.public_key_fingerprints.sha256
+      - _management_tls_stored.ca_chain | length == 2
+      - >-
+        _management_tls_stored_ca_info.results[0].fingerprints.sha256
+        == _management_tls_contract.intermediate_sha256
+      - >-
+        _management_tls_stored_ca_info.results[-1].fingerprints.sha256
+        == _management_tls_contract.root_sha256
+    fail_msg: "Stored management TLS identity differs from the exact contract."
+    quiet: true
+  no_log: true
+
+- name: Report successful management TLS custody readback
+  ansible.builtin.debug:
+    msg:
+      candidate_sha256: "{{ _management_tls_candidate_sha256 }}"
+      kv_version: "{{ _management_tls_stored_version }}"
+      certificate_sha256: >-
+        {{ _management_tls_stored_cert_info.fingerprints.sha256 }}
+      serial_number: "{{ _management_tls_stored.serial_number }}"
+      not_after: "{{ _management_tls_stored_cert_info.not_after }}"
+      dns_names: "{{ _management_tls_contract.dns_names }}"
+      private_key_custody: hashicorp_vault_kv2_only
+      issuer_and_custody_capabilities_separated: true

@@ -1,0 +1,30 @@
+---
+- name: Manage the portable Ubuntu host firewall
+  hosts: wunderboxes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require an exact single-host execution boundary
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == host_firewall_expected_inventory_hostname
+          - ansible_host == host_firewall_expected_public_ipv4
+          - >-
+            host_firewall_runtime_action | default('plan')
+            in ['plan', 'preview', 'check', 'apply', 'confirm', 'rollback', 'readback']
+        fail_msg: >-
+          Host firewall execution requires one exact inventory FQDN, matching
+          public identity, and an explicit supported lifecycle action.
+        quiet: true
+      tags: [always]
+
+  roles:
+    - role: lit.ubuntu.host_firewall
+      host_firewall_enabled: true
+      host_firewall_action: "{{ host_firewall_runtime_action | default('plan') }}"

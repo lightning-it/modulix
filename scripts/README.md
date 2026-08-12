@@ -64,3 +64,30 @@ Run ansible-navigator wrapper from repository root:
 
 Behavior note:
 - Docker-based hooks require access to a container API socket in the runtime where `pre-commit` executes.
+
+## Governed Ansible execution
+
+`governed-ansible-exec.py` is the reusable execution and evidence engine for
+policy-bound Ansible actions. It validates a fixed controller trust descriptor,
+signed manifests and approvals, immutable repository snapshots, runtime
+attestations, replay protection, process containment and typed evidence before
+it builds an Ansible command from policy-owned inputs.
+
+The engine deliberately contains no customer identity, host name, provider
+number, network, firewall allowlist or accepted topology. A policy may instead
+pin an environment-owned projection contract by repository, relative path and
+SHA-256. The recorder loads that contract only from the authorized read-only
+Git snapshot, validates its closed schema, compares its target and controller
+with the signed manifest and revalidates the exact bytes at every relevant
+process boundary.
+
+Component policy, schema and adapter documentation belongs to the repository
+that owns that policy. Concrete inventory values belong to the applicable
+inventory repository. Customer-specific commands, paths, evidence locations
+and execution order belong in the private operations repository; they must not
+be copied into this public reusable component.
+
+The reusable, sanitized Wunderbox binding is owned by this repository under
+`policies/wunderbox/`; its fixed adapter is `scripts/wbx-governed-exec.py`.
+The separate validation repository remains an immutable execution input, but
+does not own production execution or approval logic.

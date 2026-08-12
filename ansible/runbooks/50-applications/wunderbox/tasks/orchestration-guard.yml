@@ -1,0 +1,294 @@
+---
+# Shared, read-only orchestration boundary for every public Wunderbox runbook.
+# Expected values belong to inventory. Request values must be injected at a
+# higher precedence for each invocation and are deliberately not defaulted here.
+
+- name: Require the Wunderbox orchestration contract
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration is defined
+      - wunderbox_orchestration is mapping
+    fail_msg: >-
+      Refusing Wunderbox execution without the inventory-declared
+      wunderbox_orchestration contract.
+    quiet: true
+  changed_when: false
+
+- name: Validate the Wunderbox orchestration schema
+  ansible.builtin.assert:
+    that:
+      - >-
+        wunderbox_orchestration.keys() | list | sort
+        == ['approval_tokens', 'enabled', 'gate', 'retirement',
+            'schema_version', 'target']
+      - wunderbox_orchestration.schema_version is integer
+      - wunderbox_orchestration.schema_version == 1
+      - wunderbox_orchestration.enabled is boolean
+      - wunderbox_orchestration.target is mapping
+      - wunderbox_orchestration.gate is mapping
+      - wunderbox_orchestration.approval_tokens is mapping
+      - wunderbox_orchestration.retirement is mapping
+      - >-
+        wunderbox_orchestration.target.keys() | list | sort
+        == ['fqdn', 'id', 'ipv4', 'provider_id']
+      - >-
+        wunderbox_orchestration.gate.keys() | list | sort
+        == ['id', 'required_status']
+      - >-
+        wunderbox_orchestration.approval_tokens.keys() | list | sort
+        == ['deploy_sha256', 'prepare_sha256', 'retirement_sha256']
+      - >-
+        wunderbox_orchestration.retirement.keys() | list | sort
+        == ['allowed']
+      - wunderbox_orchestration.retirement.allowed is boolean
+    fail_msg: >-
+      The Wunderbox orchestration contract must use schema version 1 and
+      contain only the documented target, gate, approval-token, and retirement
+      fields.
+    quiet: true
+  changed_when: false
+
+- name: Validate the inventory-declared Wunderbox identity
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration.target.id is string
+      - wunderbox_orchestration.target.id | trim | length > 0
+      - wunderbox_orchestration.target.id is not search('[\r\n]')
+      - wunderbox_orchestration.target.fqdn is string
+      - wunderbox_orchestration.target.fqdn | trim | length > 0
+      - wunderbox_orchestration.target.fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+      - wunderbox_orchestration.target.fqdn is not search('\.\.')
+      - wunderbox_orchestration.target.ipv4 is string
+      - >-
+        wunderbox_orchestration.target.ipv4
+        is match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+      - >-
+        wunderbox_orchestration.target.ipv4.split('.')
+        | map('int') | min >= 0
+      - >-
+        wunderbox_orchestration.target.ipv4.split('.')
+        | map('int') | max <= 255
+      - wunderbox_orchestration.target.provider_id is string
+      - wunderbox_orchestration.target.provider_id | trim | length > 0
+      - wunderbox_orchestration.target.provider_id is not search('[\r\n]')
+    fail_msg: >-
+      Inventory must declare one non-empty target ID, FQDN, IPv4 address, and
+      provider ID for the Wunderbox.
+    quiet: true
+  changed_when: false
+
+- name: Validate the inventory-declared Wunderbox approval policy
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration.gate.id is string
+      - wunderbox_orchestration.gate.id | trim | length > 0
+      - wunderbox_orchestration.gate.id is not search('[\r\n]')
+      - wunderbox_orchestration.gate.required_status == 'approved'
+      - >-
+        wunderbox_orchestration.approval_tokens.prepare_sha256 == 'disabled'
+        or wunderbox_orchestration.approval_tokens.prepare_sha256
+        is match('^[0-9a-f]{64}$')
+      - >-
+        wunderbox_orchestration.approval_tokens.deploy_sha256 == 'disabled'
+        or wunderbox_orchestration.approval_tokens.deploy_sha256
+        is match('^[0-9a-f]{64}$')
+      - >-
+        wunderbox_orchestration.approval_tokens.retirement_sha256 == 'disabled'
+        or wunderbox_orchestration.approval_tokens.retirement_sha256
+        is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      Inventory must require the approved gate status and use either disabled
+      or a lowercase SHA-256 digest for every expected approval token.
+    quiet: true
+  changed_when: false
+
+- name: Require one exact inventory FQDN limit
+  ansible.builtin.assert:
+    that:
+      - _wunderbox_orchestration_phase in ['prepare', 'preflight', 'deploy', 'ops']
+      - _wunderbox_orchestration_mutating is boolean
+      - ansible_limit is defined
+      - ansible_limit | string | trim == inventory_hostname
+      - ansible_play_hosts_all | length == 1
+      - ansible_play_hosts_all == [inventory_hostname]
+      - inventory_hostname == wunderbox_orchestration.target.fqdn
+      - "'wunderboxes' in groups"
+      - inventory_hostname in groups['wunderboxes']
+    fail_msg: >-
+      Refusing Wunderbox fleet or pattern execution. Pass one exact --limit
+      equal to the inventory-declared target FQDN.
+    quiet: true
+  changed_when: false
+
+- name: Require explicit runtime confirmation of the Wunderbox target
+  ansible.builtin.assert:
+    that:
+      - wunderbox_request_target is defined
+      - wunderbox_request_target is mapping
+    fail_msg: >-
+      Supply the runtime-only wunderbox_request_target confirmation for this
+      invocation.
+    quiet: true
+  changed_when: false
+
+- name: Match the runtime target confirmation to inventory
+  ansible.builtin.assert:
+    that:
+      - >-
+        wunderbox_request_target.keys() | list | sort
+        == ['fqdn', 'id', 'ipv4', 'provider_id']
+      - wunderbox_request_target.id == wunderbox_orchestration.target.id
+      - wunderbox_request_target.fqdn == wunderbox_orchestration.target.fqdn
+      - wunderbox_request_target.ipv4 == wunderbox_orchestration.target.ipv4
+      - >-
+        wunderbox_request_target.provider_id
+        == wunderbox_orchestration.target.provider_id
+    fail_msg: >-
+      Runtime target confirmation does not exactly match the inventory target
+      ID, FQDN, IPv4 address, and provider ID.
+    quiet: true
+  changed_when: false
+
+- name: Require the expected connected Wunderbox identity
+  ansible.builtin.assert:
+    that:
+      - ansible_facts is mapping
+      - ansible_facts.get('default_ipv4', none) is mapping
+      - ansible_facts.get('fqdn', '') == wunderbox_orchestration.target.fqdn
+      - >-
+        ansible_facts.get('default_ipv4', {}).get('address', '')
+        == wunderbox_orchestration.target.ipv4
+      - ansible_host | string == wunderbox_orchestration.target.ipv4
+    fail_msg: >-
+      The connected host facts or Ansible destination do not match the
+      inventory-declared Wunderbox FQDN and IPv4 address.
+    quiet: true
+  changed_when: false
+
+- name: Validate the Wunderbox execution mode and retirement request
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration_action | default('plan') in ['plan', 'apply']
+      - (wunderbox_retirement_requested | default(false)) is boolean
+      - >-
+        not (wunderbox_retirement_requested | default(false) | bool)
+        or _wunderbox_orchestration_phase == 'deploy'
+      - >-
+        not (wunderbox_retirement_requested | default(false) | bool)
+        or wunderbox_orchestration_action | default('plan') == 'apply'
+      - >-
+        not (wunderbox_retirement_requested | default(false) | bool)
+        or not ansible_check_mode
+    fail_msg: >-
+      Use action plan for read-only evaluation or action apply for productive
+      execution. Retirement is allowed only during a non-check deploy apply.
+    quiet: true
+  changed_when: false
+
+- name: Require the inventory deployment enablement gate
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration.enabled | bool
+    fail_msg: >-
+      Productive Wunderbox execution is disabled by inventory.
+    quiet: true
+  changed_when: false
+  when:
+    - _wunderbox_orchestration_mutating | bool
+    - wunderbox_orchestration_action | default('plan') == 'apply'
+    - not ansible_check_mode
+
+- name: Require a runtime gate observation for productive execution
+  ansible.builtin.assert:
+    that:
+      - wunderbox_request_gate is defined
+      - wunderbox_request_gate is mapping
+    fail_msg: >-
+      Productive Wunderbox execution requires a runtime-only gate observation.
+    quiet: true
+  changed_when: false
+  when:
+    - _wunderbox_orchestration_mutating | bool
+    - wunderbox_orchestration_action | default('plan') == 'apply'
+    - not ansible_check_mode
+
+- name: Match the observed gate to the inventory requirement
+  ansible.builtin.assert:
+    that:
+      - >-
+        wunderbox_request_gate.keys() | list | sort
+        == ['id', 'observed_status']
+      - wunderbox_request_gate.id == wunderbox_orchestration.gate.id
+      - >-
+        wunderbox_request_gate.observed_status
+        == wunderbox_orchestration.gate.required_status
+    fail_msg: >-
+      The runtime gate ID or observed status does not match the inventory
+      approval requirement.
+    quiet: true
+  changed_when: false
+  when:
+    - _wunderbox_orchestration_mutating | bool
+    - wunderbox_orchestration_action | default('plan') == 'apply'
+    - not ansible_check_mode
+
+- name: Require the explicit prepare approval token
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration.approval_tokens.prepare_sha256 != 'disabled'
+      - wunderbox_prepare_approval_token is defined
+      - wunderbox_prepare_approval_token is string
+      - wunderbox_prepare_approval_token | length > 0
+      - >-
+        wunderbox_prepare_approval_token | hash('sha256')
+        == wunderbox_orchestration.approval_tokens.prepare_sha256
+    fail_msg: >-
+      Productive Wunderbox preparation requires the matching runtime-only
+      approval token.
+    quiet: true
+  changed_when: false
+  no_log: true
+  when:
+    - _wunderbox_orchestration_phase == 'prepare'
+    - wunderbox_orchestration_action | default('plan') == 'apply'
+    - not ansible_check_mode
+
+- name: Require the explicit deploy approval token
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration.approval_tokens.deploy_sha256 != 'disabled'
+      - wunderbox_deploy_approval_token is defined
+      - wunderbox_deploy_approval_token is string
+      - wunderbox_deploy_approval_token | length > 0
+      - >-
+        wunderbox_deploy_approval_token | hash('sha256')
+        == wunderbox_orchestration.approval_tokens.deploy_sha256
+    fail_msg: >-
+      Productive Wunderbox deployment requires the matching runtime-only
+      approval token.
+    quiet: true
+  changed_when: false
+  no_log: true
+  when:
+    - _wunderbox_orchestration_phase == 'deploy'
+    - wunderbox_orchestration_action | default('plan') == 'apply'
+    - not ansible_check_mode
+
+- name: Require separate approval for Wunderbox retirement
+  ansible.builtin.assert:
+    that:
+      - wunderbox_orchestration.retirement.allowed | bool
+      - wunderbox_orchestration.approval_tokens.retirement_sha256 != 'disabled'
+      - wunderbox_retirement_approval_token is defined
+      - wunderbox_retirement_approval_token is string
+      - wunderbox_retirement_approval_token | length > 0
+      - >-
+        wunderbox_retirement_approval_token | hash('sha256')
+        == wunderbox_orchestration.approval_tokens.retirement_sha256
+    fail_msg: >-
+      Wunderbox retirement requires both inventory opt-in and the matching
+      runtime-only retirement approval token.
+    quiet: true
+  changed_when: false
+  no_log: true
+  when: wunderbox_retirement_requested | default(false) | bool

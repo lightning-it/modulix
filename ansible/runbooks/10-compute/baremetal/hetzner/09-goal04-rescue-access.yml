@@ -1,0 +1,7 @@
+---
+# Goal 04 verifies only the one Robot-authorized bootstrap identity. The later
+# installation preflight continues to require both deploy and break-glass keys.
+- name: Run the root-of-trust Rescue preflight for the Goal 04 bootstrap key
+  ansible.builtin.import_playbook: 09-root-of-trust-g3-preflight.yml
+  vars:
+    breakglass_public_keys: []

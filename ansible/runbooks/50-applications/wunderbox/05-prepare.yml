@@ -3,7 +3,11 @@
   hosts: wunderboxes
   become: true
   gather_facts: true
+  any_errors_fatal: true
+  serial: 1
   vars:
+    _wunderbox_orchestration_phase: prepare
+    _wunderbox_orchestration_mutating: true
     _wunderbox_services_cfg: >-
       {{
         (
@@ -19,6 +23,18 @@
         )
       }}
     _enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']
+
+  pre_tasks:
+    - name: Enforce the Wunderbox orchestration boundary
+      ansible.builtin.import_tasks: tasks/orchestration-guard.yml
+      tags: [always]
+
+    - name: End after the read-only Wunderbox preparation plan
+      ansible.builtin.meta: end_play
+      when: >-
+        ansible_check_mode
+        or wunderbox_orchestration_action | default('plan') == 'plan'
+      tags: [always]
 
   tasks:
     - name: Enable required repos

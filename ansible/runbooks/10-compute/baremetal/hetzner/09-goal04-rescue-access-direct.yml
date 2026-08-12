@@ -1,0 +1,116 @@
+---
+- name: Validate the exact local Goal 04 bootstrap identity
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require the exact frozen Goal 04 target
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all == ['wunderbox01.prd.edge.pub.l-it.io']
+          - inventory_hostname == 'wunderbox01.prd.edge.pub.l-it.io'
+          - hetzner_robot_server_number | int == 3035773
+          - ansible_host == '136.243.38.174'
+          - >-
+            wunderbox_controller_approval_authority_bootstrap
+            .onepassword_item.expected_fingerprint
+            == 'SHA256:wgY6uOEcOYxkukZOys1UNIZOUZUioHyryTwZmAzSyFQ'
+        fail_msg: Direct Rescue access requires the exact frozen Goal 04 target and key.
+        quiet: true
+
+  tasks:
+    - name: Inspect the exact local bootstrap private key
+      ansible.builtin.stat:
+        path: "{{ wunderbox_controller_approval_authority_bootstrap.private_key_path }}"
+        follow: false
+        get_checksum: false
+      register: _wbx_goal04_private_key
+      delegate_to: localhost
+      become: false
+
+    - name: Require an owner-only regular non-symlink private key
+      ansible.builtin.assert:
+        that:
+          - _wbx_goal04_private_key.stat.exists | default(false)
+          - _wbx_goal04_private_key.stat.isreg | default(false)
+          - not (_wbx_goal04_private_key.stat.islnk | default(false))
+          - _wbx_goal04_private_key.stat.uid | int == 501
+          - _wbx_goal04_private_key.stat.mode == '0600'
+        fail_msg: The exact local bootstrap private key failed ownership or mode checks.
+        quiet: true
+      delegate_to: localhost
+      become: false
+
+    - name: Derive the local bootstrap public-key fingerprint
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/ssh-keygen
+          - -E
+          - sha256
+          - -lf
+          - "{{ wunderbox_controller_approval_authority_bootstrap.private_key_path }}.pub"
+      register: _wbx_goal04_local_fingerprint
+      changed_when: false
+      delegate_to: localhost
+      become: false
+
+    - name: Require the exact approved bootstrap fingerprint
+      ansible.builtin.assert:
+        that:
+          - >-
+            _wbx_goal04_local_fingerprint.stdout
+            | regex_findall('SHA256:[A-Za-z0-9+/]{43}')
+            == [
+              wunderbox_controller_approval_authority_bootstrap
+              .onepassword_item.expected_fingerprint
+            ]
+        fail_msg: The local bootstrap key does not match the approved public identity.
+        quiet: true
+      delegate_to: localhost
+      become: false
+
+- name: Validate exact Goal 04 Rescue access hardware SMART and identity
+  hosts: hetzner_baremetal
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    ansible_user: root
+    ansible_port: 22
+    ansible_become: false
+    ansible_private_key_file: >-
+      {{ wunderbox_controller_approval_authority_bootstrap.private_key_path }}
+    ansible_ssh_common_args: >-
+      -F /dev/null
+      -o UserKnownHostsFile={{ hetzner_baremetal_rescue_known_hosts_path }}
+      -o GlobalKnownHostsFile=/dev/null
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o BatchMode=yes
+      -o PasswordAuthentication=no
+      -o KbdInteractiveAuthentication=no
+      -o GSSAPIAuthentication=no
+      -o HostKeyAlgorithms=ssh-ed25519
+
+  roles:
+    - role: lit.foundational.hetzner_rescue_validate
+      hetzner_rescue_validate_expected_disks: >-
+        {{ hetzner_installimage_expected_disks }}
+      hetzner_rescue_validate_deploy_ssh_public_keys: >-
+        {{ hetzner_rescue_ssh_public_keys }}
+      hetzner_rescue_validate_robot_user_keys_max_bytes: >-
+        {{ hetzner_baremetal_rescue_robot_user_keys_max_bytes }}
+      hetzner_rescue_validate_rescue_marker_path: >-
+        {{ hetzner_installimage_binary }}
+      hetzner_rescue_validate_smart_policy: >-
+        {{ hetzner_baremetal_smart_policy }}
+      hetzner_rescue_validate_smart_overrides: >-
+        {{ hetzner_baremetal_smart_overrides | default({}) }}

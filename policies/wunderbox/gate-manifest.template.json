@@ -1,0 +1,86 @@
+{
+  "schema_version": 2,
+  "manifest_status": "TEMPLATE",
+  "policy_sha256": "REPLACE_WITH_REVIEWED_POLICY_SHA256",
+  "safety_hold": true,
+  "target": {
+    "target_id": "REPLACE_WITH_ASSESSMENT_TARGET_ID",
+    "fqdn": "REPLACE_WITH_EXACT_TARGET_FQDN",
+    "public_ipv4": "192.0.2.1",
+    "provider_id": "REPLACE_WITH_PROVIDER_OBJECT_ID"
+  },
+  "controller": {
+    "device_id": "REPLACE_WITH_CONTROLLER_ID",
+    "source_cidr": "192.0.2.2/32",
+    "ssh": {
+      "source_directory": "/REPLACE/WITH/OWNER_ONLY/SSH/DIRECTORY",
+      "private_key_name": "REPLACE_WITH_PRIVATE_KEY_FILENAME",
+      "private_key_sha256": "REPLACE_WITH_64_HEX",
+      "known_hosts_name": "REPLACE_WITH_DEDICATED_KNOWN_HOSTS_FILENAME",
+      "known_hosts_sha256": "REPLACE_WITH_64_HEX"
+    }
+  },
+  "runtime": {
+    "toolbox_image": "registry.example.invalid/toolbox@sha256:REPLACE_WITH_64_HEX",
+    "run_ee_image": "registry.example.invalid/run-ee@sha256:REPLACE_WITH_64_HEX",
+    "attestation_path": "/REPLACE/WITH/OWNER-ONLY/runtime-attestation.json",
+    "attestation_sha256": "REPLACE_WITH_64_HEX",
+    "attestation_signature_path": "/REPLACE/WITH/OWNER-ONLY/runtime-attestation.sig"
+  },
+  "gates": {
+    "WBX-G0": "NOT_STARTED",
+    "WBX-G1": "NOT_STARTED",
+    "WBX-G2": "NOT_STARTED",
+    "WBX-G3": "NOT_STARTED",
+    "WBX-G4": "NOT_STARTED",
+    "WBX-G5": "NOT_STARTED"
+  },
+  "repositories": {
+    "automation": {
+      "branch": "REPLACE_WITH_REVIEWED_BRANCH",
+      "commit": "REPLACE_WITH_FULL_GIT_SHA"
+    },
+    "inventory": {
+      "branch": "REPLACE_WITH_REVIEWED_BRANCH",
+      "commit": "REPLACE_WITH_FULL_GIT_SHA"
+    },
+    "foundational": {
+      "branch": "REPLACE_WITH_REVIEWED_BRANCH",
+      "commit": "REPLACE_WITH_FULL_GIT_SHA"
+    },
+    "ubuntu": {
+      "branch": "REPLACE_WITH_REVIEWED_BRANCH",
+      "commit": "REPLACE_WITH_FULL_GIT_SHA"
+    },
+    "validation": {
+      "branch": "REPLACE_WITH_REVIEWED_BRANCH",
+      "commit": "REPLACE_WITH_FULL_GIT_SHA"
+    },
+    "operations": {
+      "branch": "REPLACE_WITH_REVIEWED_BRANCH",
+      "commit": "REPLACE_WITH_FULL_GIT_SHA"
+    }
+  },
+  "authorizations": {
+    "REPLACE_WITH_EACH_POLICY_ACTION_ID": {
+      "status": "NOT_APPROVED",
+      "approval_reference": "REPLACE_WITH_IMMUTABLE_APPROVAL_REFERENCE",
+      "approval_sha256": "REPLACE_WITH_64_HEX",
+      "not_before_utc": "REPLACE_WITH_ISO_8601_UTC",
+      "expires_utc": "REPLACE_WITH_ISO_8601_UTC",
+      "execution_approval": {
+        "schema_version": 1,
+        "execution_id": "REPLACE_WITH_EXACT_RECORDER_EXECUTION_ID",
+        "commit_shas": {
+          "REPLACE_WITH_EACH_REQUIRED_REPOSITORY": "REPLACE_WITH_FULL_GIT_SHA"
+        },
+        "nonce": "REPLACE_WITH_64_RANDOM_LOWERCASE_HEX",
+        "issued_at": "REPLACE_WITH_WHOLE_SECOND_UTC",
+        "expires_at": "REPLACE_WITH_WHOLE_SECOND_UTC_MAX_15_MINUTES",
+        "replay_directory": "REPLACE_WITH_OWNER_ONLY_ABSOLUTE_DIRECTORY",
+        "signature": "REPLACE_WITH_REAL_ARMORED_EXECUTION_APPROVAL_SIGNATURE"
+      },
+      "consumer_approval_contracts": {}
+    }
+  }
+}
