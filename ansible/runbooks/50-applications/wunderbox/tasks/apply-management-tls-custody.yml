@@ -45,7 +45,10 @@
             == _management_tls_candidate_sha256
         and (_management_tls_existing_data.common_name | default(''))
             == _management_tls_contract.common_name
-        and (_management_tls_existing_data.alt_names | default([]) | sort)
+        and _management_tls_existing_data.alt_names is defined
+        and _management_tls_existing_data.alt_names is sequence
+        and _management_tls_existing_data.alt_names is not string
+        and (_management_tls_existing_data.alt_names | sort)
             == (_management_tls_contract.dns_names | sort)
         and (_management_tls_existing_data.pki_mount | default(''))
             == _management_tls_contract.pki_mount

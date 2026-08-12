@@ -246,6 +246,7 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
         apply_source = (
             RUNBOOK_DIRECTORY / "tasks/apply-management-tls-custody.yml"
         ).read_text(encoding="utf-8")
+        normalized_apply_source = " ".join(apply_source.split())
         readback_source = (
             RUNBOOK_DIRECTORY / "tasks/readback-management-tls-custody.yml"
         ).read_text(encoding="utf-8")
@@ -283,9 +284,23 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             "_management_tls_existing_data.root_mount | default('')",
             apply_source,
         )
-        self.assertGreaterEqual(
-            apply_source.count("| reject('equalto', '')"),
-            2,
+        self.assertIn(
+            "_management_tls_existing_data.ca_chain | select('string') "
+            "| map('trim') | reject('equalto', '') | list | length ) == 2",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            "_management_tls_issued_ca_chain | select('string') | map('trim') "
+            "| reject('equalto', '') | list | length == 2",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.alt_names is sequence",
+            normalized_apply_source,
+        )
+        self.assertIn(
+            "_management_tls_existing_data.alt_names is not string",
+            normalized_apply_source,
         )
         self.assertIn(
             'schema_version: "{{ _management_tls_custody_schema_version }}"',
