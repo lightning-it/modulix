@@ -151,7 +151,7 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("[[ssh-keys]]", content)
         self.assertIn("for ssh_key in _agent_policy['items']", content)
         self.assertIn('item = "{{ ssh_key.item_id }}"', content)
-        self.assertIn("_agent_policy['items'] | length == 2", content)
+        self.assertIn("_agent_policy['items'] | length == 4", content)
         self.assertNotIn('vault = "{{ _agent_policy.vault_id }}"', content)
         self.assertNotIn('account = "{{ _agent_policy.account_id }}"', content)
         self.assertIn("IdentityAgent", content)
@@ -336,6 +336,42 @@ class OnePasswordRootOfTrustTests(unittest.TestCase):
         self.assertIn("ansible_port | default(openssh_server_transition_bootstrap_port)", content)
         self.assertIn("| int in openssh_server_ports | map('int') | list", content)
         self.assertNotIn("ansible_port | default(22) | int == 22", content)
+
+    def test_vault_tunnel_default_and_root_attempt_cleanup_are_fail_closed(self):
+        tunnel = (
+            REPOSITORY_ROOT
+            / "ansible/runbooks/00-common/tasks/ensure-hashicorp-vault-ssh-tunnel.yml"
+        ).read_text(encoding="utf-8")
+        auth_resolver = (
+            REPOSITORY_ROOT
+            / "ansible/runbooks/00-common/tasks/resolve-hashicorp-vault-auth.yml"
+        ).read_text(encoding="utf-8")
+        pki_runbook = (UBUNTU_DIRECTORY / "19-vault-pki.yml").read_text(
+            encoding="utf-8"
+        )
+        apply_tasks = load_yaml(UBUNTU_DIRECTORY / "tasks/apply-vault-pki.yml")
+        cleanup = next(
+            task
+            for task in walk_tasks(apply_tasks)
+            if task.get("name")
+            == "Cancel only the root-generation attempt owned by this run"
+        )
+
+        self.assertIn("_hetzner_vault_controller_runtime_root", tunnel)
+        self.assertIn("hashicorp_vault_controller_auth", auth_resolver)
+        self.assertIn("_hetzner_vault_controller_auth", auth_resolver)
+        self.assertNotIn(
+            "default(hetzner_baremetal_vault.controller_auth, true)", auth_resolver
+        )
+        self.assertIn("('/tmp' | realpath)", tunnel)
+        self.assertIn("hetzner_baremetal_vault.pki_controller_auth", pki_runbook)
+        self.assertIn("lit-wunderbox-pki-issuer", pki_runbook)
+        self.assertIn("vault_terraform_source | default('')", pki_runbook)
+        self.assertIn("terraform-vault-instance\\\\.git", pki_runbook)
+        self.assertNotIn("ansible.builtin.meta: end_play", pki_runbook)
+        self.assertIn("when: _vault_pki_action == 'readback'", pki_runbook)
+        self.assertEqual(cleanup["ansible.builtin.uri"]["status_code"], 204)
+        self.assertNotIn("failed_when", cleanup)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,18 @@
 # Resolve the controller's scoped HashiCorp Vault AppRole credential from an
 # immutable Ansible Vault document. Callers must keep this include and every
 # task consuming the resulting fact under no_log.
+- name: Select the requested controller Vault authentication contract
+  ansible.builtin.set_fact:
+    _hetzner_vault_controller_auth: >-
+      {{
+        hashicorp_vault_controller_auth
+        | default(hetzner_baremetal_vault.controller_auth)
+      }}
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
 - name: Establish the inventory-declared controller Vault SSH tunnel
   ansible.builtin.include_tasks: ensure-hashicorp-vault-ssh-tunnel.yml
 
@@ -23,31 +35,31 @@
       - hetzner_baremetal_vault.timeout | int >= 1
       - hetzner_baremetal_vault.retries is integer
       - hetzner_baremetal_vault.retries | int >= 0
-      - hetzner_baremetal_vault.controller_auth is mapping
+      - _hetzner_vault_controller_auth is mapping
       - >-
-        hetzner_baremetal_vault.controller_auth.schema_version
+        _hetzner_vault_controller_auth.schema_version
         is integer
       - >-
-        hetzner_baremetal_vault.controller_auth.schema_version | int == 1
-      - hetzner_baremetal_vault.controller_auth.subject is string
+        _hetzner_vault_controller_auth.schema_version | int == 1
+      - _hetzner_vault_controller_auth.subject is string
       - >-
-        hetzner_baremetal_vault.controller_auth.subject
+        _hetzner_vault_controller_auth.subject
         is match('^[a-z0-9][a-z0-9._-]{2,127}$')
-      - hetzner_baremetal_vault.controller_auth.auth_method == 'approle'
-      - hetzner_baremetal_vault.controller_auth.auth_mount_point is string
+      - _hetzner_vault_controller_auth.auth_method == 'approle'
+      - _hetzner_vault_controller_auth.auth_mount_point is string
       - >-
-        hetzner_baremetal_vault.controller_auth.auth_mount_point
+        _hetzner_vault_controller_auth.auth_mount_point
         is match('^[A-Za-z0-9][A-Za-z0-9._/-]*$')
       - >-
-        not hetzner_baremetal_vault.controller_auth.auth_mount_point
+        not _hetzner_vault_controller_auth.auth_mount_point
         .startswith('/')
       - >-
-        not hetzner_baremetal_vault.controller_auth.auth_mount_point
+        not _hetzner_vault_controller_auth.auth_mount_point
         .endswith('/')
       - >-
-        hetzner_baremetal_vault.controller_auth.ansible_vault_path is string
+        _hetzner_vault_controller_auth.ansible_vault_path is string
       - >-
-        hetzner_baremetal_vault.controller_auth.ansible_vault_path
+        _hetzner_vault_controller_auth.ansible_vault_path
         is match('^/')
       - >-
         lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE')
@@ -71,9 +83,9 @@
     _hetzner_vault_auth_secrets_root_canonical: >-
       {{ (lookup('ansible.builtin.env', 'PWD') ~ '/.secrets') | realpath }}
     _hetzner_vault_auth_document_path_normalized: >-
-      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path | normpath }}
+      {{ _hetzner_vault_controller_auth.ansible_vault_path | normpath }}
     _hetzner_vault_auth_document_path_canonical: >-
-      {{ hetzner_baremetal_vault.controller_auth.ansible_vault_path | realpath }}
+      {{ _hetzner_vault_controller_auth.ansible_vault_path | realpath }}
     _hetzner_vault_auth_ca_path_normalized: >-
       {{ hetzner_baremetal_vault.ca_cert_path | normpath }}
     _hetzner_vault_auth_ca_path_canonical: >-
@@ -104,7 +116,7 @@
       - _hetzner_vault_auth_ca_path_normalized is match('^/')
       - _hetzner_vault_auth_password_path_normalized is match('^/')
       - >-
-        hetzner_baremetal_vault.controller_auth.ansible_vault_path
+        _hetzner_vault_controller_auth.ansible_vault_path
         == _hetzner_vault_auth_document_path_normalized
       - >-
         _hetzner_vault_auth_document_path_canonical
@@ -354,11 +366,11 @@
       - _hetzner_vault_auth_document.schema_version is integer
       - >-
         _hetzner_vault_auth_document.schema_version
-        == hetzner_baremetal_vault.controller_auth.schema_version
+        == _hetzner_vault_controller_auth.schema_version
       - _hetzner_vault_auth_document.subject is string
       - >-
         _hetzner_vault_auth_document.subject
-        == hetzner_baremetal_vault.controller_auth.subject
+        == _hetzner_vault_controller_auth.subject
       - _hetzner_vault_auth_document.auth_method == 'approle'
       - _hetzner_vault_auth_document.role_id is string
       - >-
@@ -385,7 +397,7 @@
       retries: "{{ hetzner_baremetal_vault.retries | int }}"
       auth_method: approle
       auth_mount_point: >-
-        {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+        {{ _hetzner_vault_controller_auth.auth_mount_point }}
       role_id: "{{ _hetzner_vault_auth_document.role_id }}"
       secret_id: "{{ _hetzner_vault_auth_document.secret_id }}"
       ca_sha256: >-

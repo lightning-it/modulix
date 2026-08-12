@@ -1,0 +1,183 @@
+---
+- name: Authenticate the scoped controller AppRole for PKI readback
+  ansible.builtin.uri:
+    url: >-
+      {{ _hetzner_hashicorp_vault_auth.url }}/v1/auth/{{
+      _hetzner_hashicorp_vault_auth.auth_mount_point }}/login
+    method: POST
+    body_format: json
+    body:
+      role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+      secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+    validate_certs: true
+    ca_path: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+    status_code: 200
+    timeout: "{{ _hetzner_hashicorp_vault_auth.timeout }}"
+  register: _vault_pki_readback_login
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Read back scoped PKI capabilities
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/sys/capabilities-self"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ _vault_pki_readback_login.json.auth.client_token }}"
+    body_format: json
+    body:
+      paths: "{{ _vault_pki_expected_capabilities.keys() | list }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_pki_capabilities
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require exact least-privilege PKI capabilities
+  ansible.builtin.assert:
+    that:
+      - _vault_pki_capability_actual == _vault_pki_capability_expected
+    fail_msg: "Scoped AppRole PKI capability readback differs from the exact contract."
+    quiet: true
+  vars:
+    _vault_pki_capability_actual: >-
+      {{ _vault_pki_capabilities.json[item] | default([]) | sort }}
+    _vault_pki_capability_expected: >-
+      {{ _vault_pki_expected_capabilities[item] | sort }}
+  loop: "{{ _vault_pki_expected_capabilities.keys() | list }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Require exact least-privilege PKI capability paths
+  ansible.builtin.assert:
+    that:
+      - >-
+        _vault_pki_expected_capabilities.keys() | list | difference(
+          _vault_pki_capabilities.json.keys() | list
+        ) | length == 0
+    fail_msg: "Vault did not return every declared PKI capability path."
+    quiet: true
+
+- name: Read back the private PKI root certificate
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/{{ _vault_pki_root_mount }}/ca/pem"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_pki_readback_login.json.auth.client_token }}"
+    return_content: true
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_pki_root_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Read back the private PKI intermediate certificate
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/{{ _vault_pki_intermediate_mount }}/ca/pem"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_pki_readback_login.json.auth.client_token }}"
+    return_content: true
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_pki_intermediate_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Read back the restricted leaf role
+  ansible.builtin.uri:
+    url: >-
+      {{ hetzner_baremetal_vault.api_addr }}/v1/{{ _vault_pki_intermediate_mount
+      }}/roles/{{ _vault_pki_role_name }}
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _vault_pki_readback_login.json.auth.client_token }}"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 200
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  register: _vault_pki_role_readback
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Inspect the root CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ _vault_pki_root_readback.content }}"
+  register: _vault_pki_root_info
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Inspect the intermediate CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ _vault_pki_intermediate_readback.content }}"
+  register: _vault_pki_intermediate_info
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Require the exact private CA hierarchy and leaf restrictions
+  ansible.builtin.assert:
+    that:
+      - _vault_pki_root_info.subject_ordered == _vault_pki_root_info.issuer_ordered
+      - _vault_pki_intermediate_info.issuer_ordered == _vault_pki_root_info.subject_ordered
+      - _vault_pki_intermediate_info.subject_ordered != _vault_pki_intermediate_info.issuer_ordered
+      - _vault_pki_root_info.public_key_type == 'ECC'
+      - _vault_pki_intermediate_info.public_key_type == 'ECC'
+      - >-
+        _vault_pki_role_readback.json.data.allowed_domains | sort
+        == _vault_pki_contract.leaf_role.allowed_dns_names | sort
+      - not (_vault_pki_role_readback.json.data.allow_subdomains | bool)
+      - not (_vault_pki_role_readback.json.data.allow_glob_domains | bool)
+      - not (_vault_pki_role_readback.json.data.allow_ip_sans | bool)
+      - not (_vault_pki_role_readback.json.data.allow_localhost | bool)
+      - _vault_pki_role_readback.json.data.ttl | int == _vault_pki_contract.leaf_role.ttl_seconds | int
+      - _vault_pki_role_readback.json.data.max_ttl | int == _vault_pki_contract.leaf_role.ttl_seconds | int
+    fail_msg: "Vault PKI readback differs from the exact CA and DNS-role contract."
+    quiet: true
+  no_log: true
+
+- name: Reject certificate issuance outside the exact DNS allowlist
+  ansible.builtin.uri:
+    url: "{{ hetzner_baremetal_vault.api_addr }}/v1/{{ _vault_pki_issue_path }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ _vault_pki_readback_login.json.auth.client_token }}"
+    body_format: json
+    body:
+      common_name: unauthorized.invalid
+      ttl: "5m"
+    validate_certs: true
+    ca_path: "{{ hetzner_baremetal_vault.ca_cert_path }}"
+    status_code: 400
+    timeout: "{{ hetzner_baremetal_vault.timeout }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Report successful private Vault PKI readback
+  ansible.builtin.debug:
+    msg:
+      candidate_sha256: "{{ _vault_pki_candidate_sha256 }}"
+      root_sha256: "{{ _vault_pki_root_info.fingerprints.sha256 }}"
+      intermediate_sha256: "{{ _vault_pki_intermediate_info.fingerprints.sha256 }}"
+      leaf_role: "{{ _vault_pki_role_name }}"
+      allowed_dns_names: "{{ _vault_pki_contract.leaf_role.allowed_dns_names }}"
+      unauthorized_name_rejected: true
+      public_ca_or_acme_dependency_allowed: false
