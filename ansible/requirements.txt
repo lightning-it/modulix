@@ -1,6 +1,6 @@
 # Local controller Python dependencies for direct ansible-playbook runs.
 # Needed for VMware tasks delegated to localhost.
-ansible-core==2.18.18
+ansible-core==2.18.19
 requests==2.34.2
 pyvmomi==9.1.0.0
 # Needed by community.hashi_vault modules delegated to localhost.
