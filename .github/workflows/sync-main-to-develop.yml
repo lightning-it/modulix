@@ -1,10 +1,12 @@
+# Managed by lightning-it/shared-assets-lit.
+# Keep this repository-local workflow aligned with the protected release policy.
 # yamllint disable rule:truthy
 ---
 name: Sync main back to develop
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,9 +17,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
-    name: Open main-to-develop sync PR
+  backmerge:
+    if: github.repository_owner == 'lightning-it'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Mint release automation App token
@@ -27,93 +30,172 @@ jobs:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
 
-      - name: Resolve release automation App bot identity
+      - name: Validate release bot token
         id: release-bot
         env:
           APP_SLUG: ${{ steps.release-app.outputs.app-slug }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          APP_INSTALLATION_ID: ${{ steps.release-app.outputs.installation-id }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          bot_json="$(gh api "users/${APP_SLUG}%5Bbot%5D" 2>/dev/null || printf '{}')"
-          login="$(jq -r '.login // ""' <<<"$bot_json")"
-          bot_id="$(jq -r '.id // ""' <<<"$bot_json")"
-          if [ "$login" != "${APP_SLUG}[bot]" ] || ! [[ "$bot_id" =~ ^[0-9]+$ ]]; then
-            echo "::error::Unable to resolve the release automation App bot identity."
+          test "${APP_SLUG}" = "lightning-it-release-automation"
+          test "${APP_INSTALLATION_ID}" = "148019054"
+          installations="$(
+            gh api --paginate --slurp \
+              "installation/repositories?per_page=100"
+          )"
+          # GH_TOKEN is the downscoped token minted above. This endpoint returns
+          # repositories visible to that token, not the App installation's full
+          # organization-wide repository selection.
+          # shellcheck disable=SC2016  # jq variables must not expand in the shell.
+          repository_filter='
+            [.[].repositories[]?] as $repositories
+            | (($repositories | length) == 1
+               and $repositories[0].full_name == $repository)
+          '
+          jq -e --arg repository "${REPOSITORY}" \
+            "${repository_filter}" \
+            <<<"${installations}" >/dev/null
+          login="$(gh api "users/lightning-it-release-automation%5Bbot%5D" --jq .login)"
+          bot_id="$(gh api "users/lightning-it-release-automation%5Bbot%5D" --jq .id)"
+          if [ "${login}" != "lightning-it-release-automation[bot]" ] || ! [[ "${bot_id}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Release App identity mismatch: expected lightning-it-release-automation[bot]."
             exit 1
           fi
-          echo "login=$login" >>"$GITHUB_OUTPUT"
-          echo "email=${bot_id}+${login}@users.noreply.github.com" >>"$GITHUB_OUTPUT"
+          echo "email=${bot_id}+${login}@users.noreply.github.com" >>"${GITHUB_OUTPUT}"
 
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          fetch-depth: 0
-          token: ${{ steps.release-app.outputs.token }}
-          persist-credentials: true
-
-      - name: Configure git author
+      - name: Create file-identical ancestry backmerge
         env:
-          RELEASE_BOT_EMAIL: ${{ steps.release-bot.outputs.email }}
-          RELEASE_BOT_LOGIN: ${{ steps.release-bot.outputs.login }}
-        run: |
-          git config user.name "$RELEASE_BOT_LOGIN"
-          git config user.email "$RELEASE_BOT_EMAIL"
-
-      - name: Create or update sync PR
-        env:
-          RELEASE_TOKEN: ${{ steps.release-app.outputs.token }}
-          REPO: ${{ github.repository }}
+          BOT_EMAIL: ${{ steps.release-bot.outputs.email }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          token_header="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${token_header}"
 
-          if [ -z "${RELEASE_TOKEN:-}" ]; then
-            echo "release automation App token is required to create or update"
-            echo "modulix automation main-to-develop sync PRs."
-            exit 1
-          fi
-
-          git fetch origin main develop
-          sync_branch="chore/sync-main-to-develop"
-          title="chore: sync main back to develop"
-
-          pr_url="$(GH_TOKEN="$RELEASE_TOKEN" gh pr list \
-            --repo "$REPO" \
-            --base develop \
-            --head "$sync_branch" \
-            --state open \
-            --json url \
-            --jq '.[0].url')"
-
+          git init --quiet repository
+          cd repository
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
+            fetch --quiet --no-tags origin main develop
+          main_short="$(git rev-parse --short=12 origin/main)"
+          develop_short="$(git rev-parse --short=12 origin/develop)"
+          repository_name="${REPOSITORY#*/}"
+          branch="backmerge/${repository_name}-${main_short}-${develop_short}-main"
+          title="chore(governance): record main ancestry before ${main_short}"
+          git config user.name lightning-it-release-automation[bot]
+          git config user.email "${BOT_EMAIL}"
           if git merge-base --is-ancestor origin/main origin/develop; then
-            echo "develop already contains main; nothing to sync."
-            if [ -n "$pr_url" ]; then
-              GH_TOKEN="$RELEASE_TOKEN" gh pr close "$pr_url" \
-                --repo "$REPO" \
-                --comment "Closing empty back-sync PR: develop already contains main."
-            fi
+            echo 'develop already contains the current main ancestry.'
             exit 0
           fi
 
-          git checkout -B "$sync_branch" origin/develop
-          git merge --no-ff origin/main -m "chore: sync main back to develop"
-          git push --force-with-lease origin "HEAD:${sync_branch}"
+          git switch --create "${branch}" origin/develop
+          # Bind the merge object to an existing Git timestamp so retries
+          # reproduce the exact same commit and never require a force-update.
+          merge_date="$(git show -s --format=%cI origin/main)"
+          GIT_AUTHOR_DATE="${merge_date}" GIT_COMMITTER_DATE="${merge_date}" \
+            git merge --no-ff --strategy=ours origin/main \
+            --message 'merge: preserve develop tree and main ancestry'
+          git merge-base --is-ancestor origin/main HEAD
+          git merge-base --is-ancestor origin/develop HEAD
+          [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]
+          git diff --quiet origin/develop HEAD
+          create_backmerge_branch() {
+            local branch_name="$1"
+            local desired_head="$2"
+            local remote_head
 
-          body=$'Back-sync PR from `main` to `develop`.\n\n'
-          body+=$'This keeps `develop` ancestry current after a production '
-          body+=$'promotion merge into `main`, so the next `develop` to `main` '
-          body+=$'promotion PR can open cleanly.'
+            if git \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
+              push \
+              --force-with-lease="refs/heads/${branch_name}:" \
+              origin \
+              "${desired_head}:refs/heads/${branch_name}"; then
+              echo 'Created exact backmerge branch with a create-only lease.'
+              return 0
+            fi
 
-          if [ -z "$pr_url" ]; then
-            GH_TOKEN="$RELEASE_TOKEN" gh pr create \
-              --repo "$REPO" \
-              --base develop \
-              --head "$sync_branch" \
-              --title "$title" \
-              --body "$body"
-          else
-            GH_TOKEN="$RELEASE_TOKEN" gh pr edit "$pr_url" \
-              --repo "$REPO" \
-              --title "$title" \
-              --body "$body"
+            if ! remote_head="$(
+              git \
+                -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
+                ls-remote --exit-code --heads \
+                origin "refs/heads/${branch_name}" \
+                | awk '{print $1}'
+            )"; then
+              echo "::error::Unable to create or verify the backmerge branch."
+              return 1
+            fi
+            if [ "${remote_head}" != "${desired_head}" ]; then
+              echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+              return 1
+            fi
+            echo 'Exact backmerge branch already exists; no update required.'
+          }
+
+          local_head="$(git rev-parse HEAD)"
+          create_backmerge_branch "${branch}" "${local_head}"
+
+          pr_number="$(
+            gh api --method GET "repos/${REPOSITORY}/pulls" \
+              -f state=open \
+              -f base=develop \
+              -f "head=lightning-it:${branch}" \
+              --jq '.[0].number // empty'
+          )"
+          if [ -z "${pr_number}" ]; then
+            pr_url="$(
+              gh pr create \
+                --repo "${REPOSITORY}" \
+                --base develop \
+                --head "${branch}" \
+                --title "${title}" \
+                --body 'Automated develop-tree-preserving ancestry backmerge after a protected main promotion.'
+            )"
+            pr_number="${pr_url##*/}"
           fi
+
+          pr_details="$(gh pr view "${pr_number}" \
+            --repo "${REPOSITORY}" \
+            --json author,baseRefName,headRefName,headRefOid,headRepositoryOwner,title)"
+          # shellcheck disable=SC2016  # jq variables must not expand in the shell.
+          pr_filter='
+            .author.login == "app/lightning-it-release-automation"
+            and .baseRefName == "develop"
+            and .headRefName == $branch
+            and .headRefOid == $expected_head
+            and .headRepositoryOwner.login == "lightning-it"
+            and .title == $title
+          '
+          jq -e \
+              --arg branch "${branch}" \
+              --arg expected_head "${local_head}" \
+              --arg title "${title}" \
+              "${pr_filter}" \
+              <<<"${pr_details}" \
+            | grep -qx true
+          pr_id="$(gh pr view "${pr_number}" --repo "${REPOSITORY}" --json id --jq .id)"
+          auto_merge_enabled="$(
+            gh pr view "${pr_number}" --repo "${REPOSITORY}" \
+              --json autoMergeRequest --jq '.autoMergeRequest != null'
+          )"
+          case "${auto_merge_enabled}" in
+            true) ;;
+            false)
+              query="mutation(\$pr:ID!){enablePullRequestAutoMerge("
+              query+="input:{pullRequestId:\$pr,mergeMethod:MERGE}){"
+              query+="pullRequest{autoMergeRequest{enabledAt}}}}"
+              gh api graphql \
+                -f query="${query}" \
+                -f pr="${pr_id}" \
+                --jq '.data.enablePullRequestAutoMerge.pullRequest.autoMergeRequest != null' \
+                | grep -qx true
+              ;;
+            *) echo "::error::Unable to determine auto-merge state."; exit 1 ;;
+          esac
