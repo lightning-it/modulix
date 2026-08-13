@@ -1,0 +1,94 @@
+---
+- name: Reconcile one host's provider transport firewall
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _robot_firewall_expected_confirmation: >-
+      {{
+        'APPLY-ROBOT-TRANSPORT:' ~ inventory_hostname ~ ':'
+        ~ (hetzner_robot_server_number | string) ~ ':' ~ ansible_host
+      }}
+
+  pre_tasks:
+    - name: Require exact target and action
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - hostname_fqdn == inventory_hostname
+          - robot_firewall_action | default('plan') in ['plan', 'apply', 'audit']
+          - >-
+            robot_firewall_action | default('plan') != 'apply'
+            or robot_firewall_confirmation | default('')
+               == _robot_firewall_expected_confirmation
+        fail_msg: >-
+          The provider transport firewall requires one exact host and the
+          target-bound apply confirmation.
+        quiet: true
+
+    - name: Resolve Robot API credentials
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+
+    - name: Build exact firewall-only declaration
+      ansible.builtin.set_fact:
+        _robot_single_host_firewalls:
+          - server_number: "{{ hetzner_robot_server_number }}"
+            port: "{{ hetzner_baremetal_robot_firewall.port }}"
+            filter_ipv6: "{{ hetzner_baremetal_robot_firewall.filter_ipv6 }}"
+            allowlist_hos: "{{ hetzner_baremetal_robot_firewall.allowlist_hos }}"
+            rules:
+              input: "{{ hetzner_baremetal_robot_firewall.common_input_rules }}"
+              output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
+            state: present
+      changed_when: false
+      no_log: true
+
+  tasks:
+    - name: Validate provider transport declaration
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+      vars:
+        hetzner_robot_cac_validate_only: true
+        hetzner_robot_cac_user: ""
+        hetzner_robot_cac_password: ""
+        hetzner_robot_cac_firewalls: "{{ _robot_single_host_firewalls }}"
+      when: robot_firewall_action | default('plan') == 'plan'
+
+    - name: Apply provider transport declaration
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+      vars:
+        hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+        hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+        hetzner_robot_cac_firewalls: "{{ _robot_single_host_firewalls }}"
+      when: robot_firewall_action | default('plan') == 'apply'
+
+    - name: Audit exact provider transport declaration
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+        tasks_from: audit
+      vars:
+        hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+        hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+        hetzner_robot_cac_audit_servers:
+          - server_ip: "{{ ansible_host }}"
+            server_name: "{{ inventory_hostname }}"
+            status: ready
+            cancelled: false
+            firewall:
+              status: active
+              port: "{{ hetzner_baremetal_robot_firewall.port }}"
+              filter_ipv6: "{{ hetzner_baremetal_robot_firewall.filter_ipv6 }}"
+              allowlist_hos: "{{ hetzner_baremetal_robot_firewall.allowlist_hos }}"
+              rules:
+                input: "{{ hetzner_baremetal_robot_firewall.common_input_rules }}"
+                output: "{{ hetzner_baremetal_robot_firewall.output_rules }}"
+      no_log: true
+      when: robot_firewall_action | default('plan') == 'audit'

@@ -1,0 +1,196 @@
+---
+- name: Restore-prove one Wunderbox management-service target
+  hosts: wunderboxes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    _management_restore_targets: [keycloak, netbox, guacamole]
+    _management_restore_selected: "{{ wunderbox_management_target | default('') }}"
+    _management_restore_contract: >-
+      {{ wunderbox_management_backup.services[_management_restore_selected] }}
+    _management_restore_db: "goal07_restore_{{ _management_restore_selected }}"
+    _management_restore_plaintext: >-
+      {{
+        '/srv/backups/management-services/restore-drill-'
+        ~ _management_restore_selected
+        ~ '.dump'
+      }}
+    _management_restore_controller_plaintext: >-
+      {{ wunderbox_management_restore_ciphertext_path | default('') ~ '.restore-plaintext' }}
+
+  pre_tasks:
+    - name: Inspect the selected encrypted restore artifact
+      delegate_to: localhost
+      become: false
+      ansible.builtin.stat:
+        path: "{{ wunderbox_management_restore_ciphertext_path | default('') }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+        follow: false
+      register: _management_restore_ciphertext_stat
+
+    - name: Require exact host, service, ciphertext, and restore authorization
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - _management_restore_selected in _management_restore_targets
+          - _management_restore_ciphertext_stat.stat.exists | default(false)
+          - _management_restore_ciphertext_stat.stat.isreg | default(false)
+          - not (_management_restore_ciphertext_stat.stat.islnk | default(false))
+          - _management_restore_ciphertext_stat.stat.mode in ['0400', '0600']
+          - >-
+            wunderbox_management_restore_confirmation | default('')
+            == 'RESTORE-GOAL07:'
+            ~ _management_restore_selected
+            ~ ':'
+            ~ _management_restore_ciphertext_stat.stat.checksum
+        fail_msg: >-
+          Restore drill requires one exact host, one service, protected
+          Ansible Vault ciphertext, and RESTORE-GOAL07:<service>:<sha256>.
+        quiet: true
+
+  tasks:
+    - name: Restore and verify only a disposable drill database
+      block:
+        - name: Decrypt the authorized backup to protected controller staging
+          delegate_to: localhost
+          become: false
+          ansible.builtin.command:
+            argv:
+              - ansible-vault
+              - decrypt
+              - --vault-password-file
+              - "{{ lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') }}"
+              - --output
+              - "{{ _management_restore_controller_plaintext }}"
+              - "{{ wunderbox_management_restore_ciphertext_path }}"
+          changed_when: true
+          no_log: true
+
+        - name: Protect the controller restore staging file
+          delegate_to: localhost
+          become: false
+          ansible.builtin.file:
+            path: "{{ _management_restore_controller_plaintext }}"
+            mode: '0600'
+          no_log: true
+
+        - name: Ensure protected target restore staging exists
+          ansible.builtin.file:
+            path: "{{ _management_restore_plaintext | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Stage the restore dump on the target
+          ansible.builtin.copy:
+            src: "{{ _management_restore_controller_plaintext }}"
+            dest: "{{ _management_restore_plaintext }}"
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        - name: Remove a stale disposable restore database
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ _management_restore_contract.container }}"
+              - dropdb
+              - --if-exists
+              - -U
+              - "{{ _management_restore_contract.database_user }}"
+              - "{{ _management_restore_db }}"
+          changed_when: true
+          no_log: true
+
+        - name: Create the disposable restore database
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ _management_restore_contract.container }}"
+              - createdb
+              - -U
+              - "{{ _management_restore_contract.database_user }}"
+              - "{{ _management_restore_db }}"
+          changed_when: true
+          no_log: true
+
+        - name: Restore ciphertext contents into the disposable database
+          ansible.builtin.shell: >-
+            podman exec -i
+            {{ _management_restore_contract.container | quote }}
+            pg_restore --exit-on-error
+            -U {{ _management_restore_contract.database_user | quote }}
+            -d {{ _management_restore_db | quote }}
+            < {{ _management_restore_plaintext | quote }}
+          changed_when: true
+          no_log: true
+
+        - name: Verify the restored database catalog
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ _management_restore_contract.container }}"
+              - psql
+              - -At
+              - -U
+              - "{{ _management_restore_contract.database_user }}"
+              - -d
+              - "{{ _management_restore_db }}"
+              - -c
+              - SELECT count(*) FROM pg_catalog.pg_tables;
+          register: _management_restore_verify
+          changed_when: false
+          failed_when: _management_restore_verify.stdout | int < 1
+          no_log: true
+      always:
+        - name: Remove the disposable restore database
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ _management_restore_contract.container }}"
+              - dropdb
+              - --if-exists
+              - -U
+              - "{{ _management_restore_contract.database_user }}"
+              - "{{ _management_restore_db }}"
+          changed_when: true
+          failed_when: false
+          no_log: true
+
+        - name: Remove the transient target restore plaintext
+          ansible.builtin.file:
+            path: "{{ _management_restore_plaintext }}"
+            state: absent
+          no_log: true
+
+        - name: Remove the transient controller restore plaintext
+          delegate_to: localhost
+          become: false
+          ansible.builtin.file:
+            path: "{{ _management_restore_controller_plaintext }}"
+            state: absent
+          no_log: true
+
+    - name: Publish sanitized restore-drill evidence
+      ansible.builtin.set_fact:
+        wunderbox_management_restore_result:
+          schema_version: 1
+          host: "{{ inventory_hostname }}"
+          service: "{{ _management_restore_selected }}"
+          ciphertext_sha256: >-
+            {{ _management_restore_ciphertext_stat.stat.checksum }}
+          production_database_modified: false
+          disposable_database_removed: true
+          checked_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      changed_when: false

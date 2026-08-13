@@ -1,0 +1,71 @@
+---
+- name: Provision the Ubuntu nftables persistence boundary
+  hosts: wunderboxes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    host_firewall_persistent_root_config_path: /etc/nftables.conf
+    host_firewall_persistent_include_path: /etc/nftables.d/lit-host-firewall.nft
+    host_firewall_persistent_include_directive: >-
+      include "/etc/nftables.d/lit-host-firewall.nft"
+
+  pre_tasks:
+    - name: Require exact single-host persistence provisioning
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == inventory_hostname
+          - inventory_hostname == host_firewall_expected_inventory_hostname
+          - ansible_host == host_firewall_expected_public_ipv4
+          - >-
+            host_firewall_persistence_confirmation | default('')
+            == 'PROVISION-HOST-FIREWALL-PERSISTENCE:' ~ inventory_hostname
+        quiet: true
+
+  tasks:
+    - name: Create isolated nftables include directory
+      ansible.builtin.file:
+        path: "{{ host_firewall_persistent_include_path | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Preprovision regular role-owned include
+      ansible.builtin.copy:
+        content: "# Reserved for lit.ubuntu.host_firewall transactions.\n"
+        dest: "{{ host_firewall_persistent_include_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+        force: false
+
+    - name: Add exact isolated include to administrator root configuration
+      ansible.builtin.lineinfile:
+        path: "{{ host_firewall_persistent_root_config_path }}"
+        line: "{{ host_firewall_persistent_include_directive }}"
+        state: present
+        insertafter: EOF
+        create: false
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Check complete administrator nftables configuration
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/nft
+          - --check
+          - --file
+          - "{{ host_firewall_persistent_root_config_path }}"
+      changed_when: false
+
+    - name: Enable nftables boot persistence without changing runtime rules
+      ansible.builtin.systemd_service:
+        name: nftables.service
+        enabled: true
+        state: stopped

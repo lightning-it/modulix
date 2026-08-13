@@ -1,7 +1,7 @@
 ---
 # Leave Rescue only after explicit approval, verify the generated Dropbear and
-# OpenSSH host keys against the fingerprints stored on the new /boot, and wait
-# while the operator performs the one-time interactive recovery unlock.
+# OpenSSH host keys against the fingerprints stored on the new /boot, pin the
+# Dropbear identity, and stop before the independently recorded unlock.
 - name: Perform the first encrypted Ubuntu boot
   hosts: hetzner_baremetal
   gather_facts: false
@@ -44,7 +44,10 @@
             or hetzner_installimage_layout.software_raid.level | int == 1
           - >-
             hetzner_baremetal_secret_backend
-            in ['ansible_vault_bootstrap', 'hashicorp_vault']
+            in ['ansible_vault_bootstrap', 'hashicorp_vault', 'onepassword_cli']
+          - >-
+            luks_unlock_dropbear_known_hosts_path
+            | default('') is match('^/')
           - >-
             hetzner_first_boot_confirmation | default('')
             == 'BOOT:' ~ inventory_hostname
@@ -306,24 +309,17 @@
             fail_msg: >-
               The first-boot Dropbear host key is not the generated key.
 
-        - name: Pin the generated Dropbear host key
-          ansible.builtin.known_hosts:
-            path: "{{ hetzner_baremetal_rescue_known_hosts_path }}"
-            name: >-
+        - name: Pin exactly one generated Dropbear host key
+          ansible.builtin.copy:
+            content: |
               {{
                 '[' ~ inventory_hostname ~ ']:'
-                ~ (luks_unlock_dropbear_port | string)
-              }}
-            key: >-
-              {{
-                '[' ~ inventory_hostname ~ ']:'
-                ~ (luks_unlock_dropbear_port | string)
-                ~ ',[' ~ ansible_host ~ ']:'
                 ~ (luks_unlock_dropbear_port | string)
                 ~ ' '
                 ~ _first_boot_dropbear_keyscan.stdout.split(' ', 1)[1]
               }}
-            state: present
+            dest: "{{ luks_unlock_dropbear_known_hosts_path }}"
+            mode: "0600"
           delegate_to: localhost
           become: false
       always:
@@ -335,14 +331,71 @@
           become: false
           changed_when: false
 
-    - name: Pause for the operator-triggered no-output encrypted-root unlock
-      ansible.builtin.pause:
-        prompt: >-
-          The generated Dropbear key is verified and pinned. In a second
-          terminal run the dedicated 10-bootstrap-unlock.yml command
-          from the private operator guide for this exact host. It decrypts the
-          bootstrap escrow only in memory and supplies the passphrase through
-          SSH stdin under no_log. After it reports success, press Enter here.
+    - name: Hash the exact pinned Dropbear known-hosts file
+      ansible.builtin.stat:
+        path: "{{ luks_unlock_dropbear_known_hosts_path }}"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: _first_boot_dropbear_known_hosts
+      changed_when: false
+
+    - name: Read the exact pinned Dropbear known-hosts file
+      ansible.builtin.slurp:
+        path: "{{ luks_unlock_dropbear_known_hosts_path }}"
+      delegate_to: localhost
+      become: false
+      register: _first_boot_dropbear_known_hosts_content
+      changed_when: false
+
+    - name: Decode the exact pinned Dropbear known-hosts line
+      ansible.builtin.set_fact:
+        _first_boot_dropbear_known_hosts_lines: >-
+          {{
+            (
+              _first_boot_dropbear_known_hosts_content.content
+              | b64decode
+            ).splitlines()
+          }}
+      changed_when: false
+
+    - name: Require one hashed Dropbear known-hosts file
+      ansible.builtin.assert:
+        that:
+          - _first_boot_dropbear_known_hosts.stat.exists | default(false)
+          - _first_boot_dropbear_known_hosts.stat.isreg | default(false)
+          - _first_boot_dropbear_known_hosts.stat.mode | default('') == '0600'
+          - >-
+            _first_boot_dropbear_known_hosts.stat.checksum
+            | default('') is match('^[0-9a-f]{64}$')
+          - _first_boot_dropbear_known_hosts_lines | length == 1
+          - _first_boot_dropbear_known_hosts_lines[0].split() | length == 3
+          - >-
+            _first_boot_dropbear_known_hosts_lines[0].split()[0]
+            == '[' ~ inventory_hostname ~ ']:'
+            ~ (luks_unlock_dropbear_port | string)
+          - >-
+            _first_boot_dropbear_known_hosts_lines[0].split()[1]
+            == 'ssh-ed25519'
+          - >-
+            _first_boot_dropbear_known_hosts_lines[0].split()[2]
+            is match('^[A-Za-z0-9+/]+={0,2}$')
+        fail_msg: >-
+          The dedicated Dropbear known-hosts file is not one owner-only,
+          exactly target-bound Ed25519 entry with a SHA-256 digest.
+
+    - name: Report the verified first-boot host-key handoff
+      ansible.builtin.debug:
+        msg:
+          target: "{{ inventory_hostname }}"
+          dropbear_fingerprint: "{{ _first_boot_dropbear_fingerprint }}"
+          openssh_fingerprint: "{{ _first_boot_openssh_fingerprint }}"
+          dropbear_port: "{{ luks_unlock_dropbear_port | int }}"
+          known_hosts_sha256: >-
+            {{ _first_boot_dropbear_known_hosts.stat.checksum }}
+
+    - name: End the boot phase before the independently recorded unlock
+      ansible.builtin.meta: end_play
 
     - name: Wait for installed OpenSSH
       ansible.builtin.wait_for:

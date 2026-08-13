@@ -17,19 +17,98 @@ inventory variables.
   Nessus CaC, Forgejo CaC, Keycloak CaC, and Nexus initial
   config.
 
-## Run
+## Orchestration Safety Boundary
 
-```bash
-ansible-playbook -i inventory.yml \
-  ansible/runbooks/50-applications/wunderbox/10-deploy.yml
+Every runbook requires an exact `--limit` equal to the one inventory FQDN.
+Patterns, groups, and multi-host selections are refused. The connected host,
+the Ansible destination, and a runtime target confirmation must all match the
+inventory-declared target ID, FQDN, IPv4 address, and provider ID.
+
+The public inventory contract is:
+
+```yaml
+wunderbox_orchestration:
+  schema_version: 1
+  enabled: false
+  target:
+    id: asset-placeholder
+    fqdn: wunderbox.example.invalid
+    ipv4: 192.0.2.10
+    provider_id: provider-resource-placeholder
+  gate:
+    id: change-gate-placeholder
+    required_status: approved
+  approval_tokens:
+    prepare_sha256: disabled
+    deploy_sha256: disabled
+    retirement_sha256: disabled
+  retirement:
+    allowed: false
 ```
+
+`wunderbox_request_target` is a runtime-only mapping with the same four target
+fields. It must be injected at higher precedence for every invocation; do not
+copy it into the expected inventory contract. A productive run additionally
+requires `wunderbox_orchestration_action: apply`, a runtime-only
+`wunderbox_request_gate` containing `id` and `observed_status`, and the matching
+phase approval token. The inventory stores only the expected lowercase SHA-256
+digest, never the supplied token.
+
+The default action is `plan`. Both plan action and Ansible check mode run the
+identity guard and deployment preflight, then end before any preparation,
+deployment, or retirement role. Check mode is therefore a safety preflight,
+not a simulated change report from the composed roles.
 
 ## Runbooks
 
-- `05-prepare.yml`: prepare optional repos and firewall policy.
-- `07-preflight.yml`: validate service inventory and guarded DHCP enablement.
-- `10-deploy.yml`: deploy and configure the full Wunderbox stack.
-- `20-ops.yml`: inspect Wunderbox runtime status.
+- `05-prepare.yml`: plan or apply optional repos and firewall policy; apply
+  requires the prepare approval.
+- `07-preflight.yml`: read-only target, service inventory, runtime, and guarded
+  DHCP validation.
+- `10-deploy.yml`: always import `07-preflight.yml` before the guarded deploy
+  play; apply requires the deploy approval.
+- `20-management-tls-custody.yml`: plan, issue, store, or independently read
+  back the shared management TLS identity. Issuance uses only the dedicated PKI
+  issuer AppRole; CAS-protected KV2 custody uses only the general controller
+  AppRole. Each AppRole is explicitly denied the other function. Apply requires
+  `APPLY-WUNDERBOX-MANAGEMENT-TLS:<fqdn>:<candidate_sha256>`. An unchanged
+  candidate with more than the declared renewal horizon is reused.
+- `20-ops.yml`: inspect Wunderbox runtime status without changing it.
+- `21-controller-ssh-trust.yml`: scan the installed OpenSSH endpoint on its
+  inventory-declared port, require the inventory-pinned Ed25519 fingerprint,
+  and refresh the private controller `known_hosts` file. The default `plan`
+  action performs only the live fingerprint comparison; `apply` additionally
+  requires `PIN-WUNDERBOX-OPENSSH:<fqdn>:<fingerprint>`.
+- `30-management-services.yml`: deploy Keycloak, NetBox, Guacamole, the public
+  NGINX gateway, or Alloy independently on one exact host. Application secrets
+  are read-before-generate in HC Vault and never written to local fallback files.
+  NGINX certificate material is read only from Vault KV; this deployment
+  runbook has no certificate-issuance path and accepts no local certificate
+  fallback. Productive NGINX and Alloy applies fail closed until their
+  inventory-declared DNS/TLS and mTLS prerequisites are complete.
+- `31-management-backup.yml`: create one service database dump, encrypt it
+  client-side with the controller's Ansible Vault custody, upload only the
+  ciphertext to the protected S3 bucket, and remove the transient plaintext.
+  Backup apply is blocked until Vault-backed S3 credentials and controller
+  encryption custody are explicitly attested in inventory.
+- `32-management-restore-drill.yml`: require a ciphertext-bound confirmation,
+  restore into a disposable database, verify its catalog, and always remove the
+  disposable database and plaintext staging files.
+- `33-management-acceptance.yml`: read back internal health, public HTTPS, and
+  listener isolation for one management target or the complete Goal 07 stack.
+  NGINX acceptance additionally checks Vault-only custody, certificate
+  validity/SAN coverage, private-key mode `0600`, and certificate/key matching.
+  Alloy acceptance verifies the Vault-backed CA/client-certificate/key bundle,
+  client-certificate validity and CA trust, private-key mode `0600`, and
+  certificate/key matching before mTLS is accepted.
+
+Semaphore retirement is disabled unless all of these conditions hold:
+
+- the service is disabled in inventory;
+- `wunderbox_orchestration.retirement.allowed` is explicitly `true`;
+- the runtime-only `wunderbox_retirement_requested` value is the Boolean
+  `true` during a non-check deploy apply; and
+- the separate retirement approval token matches its inventory hash.
 
 Enable services through inventory:
 
@@ -52,6 +131,8 @@ services:
     alloy_deploy: enabled
     grafana_deploy: enabled
     checkmk_deploy: enabled
+    netbox_deploy: enabled
+    guacamole_deploy: enabled
 ```
 
 Per-service overrides may also use `wunderbox_service_<service>: enabled` or
@@ -73,6 +154,8 @@ hostnames and credentials must come from inventory, HC Vault, or Ansible Vault.
 | Nessus | `https://nessus.example.invalid` | Nessus admin credentials from Vault-backed vars |
 | Forgejo | `https://forgejo.example.invalid` | Forgejo admin/user credentials from Vault-backed vars |
 | Keycloak | `https://keycloak.example.invalid` | Realm user or admin credentials from Vault-backed vars |
+| NetBox | `https://netbox.example.invalid` | Keycloak OIDC or local break-glass account from Vault |
+| Guacamole | `https://guacamole.example.invalid/guacamole/` | Keycloak OIDC or local break-glass account from Vault |
 | Grafana | `https://grafana.example.invalid` | Grafana admin credentials from Vault-backed vars |
 | Checkmk | `https://checkmk.example.invalid` | Checkmk admin credentials from Vault-backed vars |
 | PostgreSQL | `postgresql://postgres.example.invalid:5432` | Database credentials from Vault-backed vars |
@@ -84,11 +167,9 @@ At the end of the playbook, the `wunderbox_verify` tag checks enabled HTTP
 endpoints from the control node. Current checks cover CoreDNS, NGINX, Vault,
 MinIO, Nexus, Nessus, Forgejo, Keycloak, Grafana, and Checkmk.
 
-```bash
-ansible-playbook -i inventory.yml \
-  ansible/runbooks/50-applications/wunderbox/10-deploy.yml \
-  --tags wunderbox_verify
-```
+Tag selection does not bypass the imported deployment preflight. Endpoint-only
+verification through the deploy runbook remains behind the same exact target
+and deployment approval boundary.
 
 DHCP is guarded by explicit production validation variables because it depends
 on L2/broadcast behavior. Keep DHCP disabled until network validation evidence

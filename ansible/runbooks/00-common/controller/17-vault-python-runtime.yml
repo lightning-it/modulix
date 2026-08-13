@@ -1,0 +1,50 @@
+---
+- name: Prepare the pinned local Python runtime for Vault controller modules
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+
+  vars:
+    _project_root: "{{ lookup('ansible.builtin.env', 'PWD') }}"
+    _requirements_path: "{{ _project_root }}/requirements.txt"
+    _runtime_path: "{{ _project_root }}/.venv-vault-py314"
+
+  pre_tasks:
+    - name: Require the exact project-local runtime contract
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == 'localhost'
+          - _project_root is match('^/Users/rene/Documents/Codex/[^\r\n]+/ansible$')
+          - _requirements_path == _project_root ~ '/requirements.txt'
+          - _runtime_path == _project_root ~ '/.venv-vault-py314'
+        quiet: true
+
+  tasks:
+    - name: Create the isolated project-local Python runtime
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3
+          - -m
+          - venv
+          - "{{ _runtime_path }}"
+        creates: "{{ _runtime_path }}/bin/python"
+
+    - name: Install the exact pinned controller requirements
+      ansible.builtin.pip:
+        requirements: "{{ _requirements_path }}"
+        virtualenv: "{{ _runtime_path }}"
+        virtualenv_command: /opt/homebrew/bin/python3 -m venv
+
+    - name: Verify the exact pinned hvac version
+      ansible.builtin.command:
+        argv:
+          - "{{ _runtime_path }}/bin/python"
+          - -c
+          - >-
+            import importlib.metadata;
+            assert importlib.metadata.version('hvac') == '2.4.0'
+      changed_when: false

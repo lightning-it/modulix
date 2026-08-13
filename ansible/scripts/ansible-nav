@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -7,7 +8,7 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.5}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.6}"
 run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.8}}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
@@ -17,6 +18,15 @@ rh_collections_strict="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT:-true}"
 rh_collections_requirements="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS:-${REPO_ROOT}/collections/requirements-rh.yml}"
 rh_collections_target="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections}"
 rh_collections_use="${RH_COLLECTIONS_USE:-true}"
+ee_only_collections="${ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS:-false}"
+governed_runner_artifact_source="${ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_SOURCE:-}"
+governed_input_source="${ANSIBLE_TOOLBOX_GOVERNED_INPUT_SOURCE:-}"
+engine_binary_requested="${ANSIBLE_TOOLBOX_ENGINE_BINARY:-}"
+ssh_private_key_file="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE:-}"
+ssh_known_hosts_file="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE:-}"
+ssh_private_key_sha256="${ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256:-}"
+ssh_known_hosts_sha256="${ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256:-}"
+network_mode="${ANSIBLE_TOOLBOX_NETWORK_MODE:-default}"
 case "${runtime_mode}" in
   connected)
     run_ee_preload="${ANSIBLE_TOOLBOX_RUN_EE_PRELOAD:-false}"
@@ -43,17 +53,28 @@ usage() {
 Usage:
   ./scripts/ansible-nav run <runbook.yml> [ansible run args...]
   ./scripts/ansible-nav exec -- <command> [args...]
+  ./scripts/ansible-nav provenance-toolbox
+  ./scripts/ansible-nav provenance-run-ee
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
   ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.5)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.6)
   MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.8)
   ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+  ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=true|false   (default: false)
+  ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_SOURCE=<0700 dir> (required by governed playbook execution)
+  ANSIBLE_TOOLBOX_GOVERNED_INPUT_SOURCE=<0700 dir> (mounted read-only at /runner/governed-input)
+  ANSIBLE_TOOLBOX_ENGINE_BINARY=<trusted absolute Podman executable>
+  ANSIBLE_TOOLBOX_NETWORK_MODE=default|none         (default: default)
+  ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=<owner-only exact private key>
+  ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=<digest-bound known_hosts>
+  ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=<expected lowercase SHA-256>
+  ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256=<expected lowercase SHA-256>
   ANSIBLE_VAULT_PASSWORD_FILE=<owner-only file>    (Podman transport requires mode 0400 or 0600)
   RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, for certified collection installs)
 
@@ -102,6 +123,19 @@ running_inside_container() {
 
 detect_container_engine() {
   local requested="$1"
+
+  if [[ -n "${engine_binary_requested}" ]]; then
+    if [[ "${requested}" != "podman" ]]; then
+      echo "A pinned container-engine executable requires ANSIBLE_TOOLBOX_ENGINE=podman." >&2
+      return 1
+    fi
+    if [[ "${engine_binary_requested}" != /* || -L "${engine_binary_requested}" || ! -f "${engine_binary_requested}" || ! -x "${engine_binary_requested}" ]]; then
+      echo "ANSIBLE_TOOLBOX_ENGINE_BINARY must be an absolute executable regular file." >&2
+      return 1
+    fi
+    echo "podman"
+    return 0
+  fi
 
   case "${requested}" in
     auto)
@@ -262,26 +296,6 @@ rewrite_host_path_for_container() {
   echo "${original}"
 }
 
-map_file_for_container() {
-  local original="$1"
-  local target="$2"
-  local rewritten=""
-
-  rewritten="$(rewrite_host_path_for_container "${original}")"
-  if [[ "${rewritten}" != "${original}" ]]; then
-    mapped_file_for_container_result="${rewritten}"
-    return 0
-  fi
-
-  if [[ ! -f "${original}" ]]; then
-    mapped_file_for_container_result="${original}"
-    return 0
-  fi
-
-  container_args+=(-v "${original}:${target}:ro")
-  mapped_file_for_container_result="${target}"
-}
-
 add_env_if_set() {
   local name="$1"
   local value="${!name:-}"
@@ -313,6 +327,49 @@ add_mount() {
   container_args+=(-v "${mount_spec}")
 }
 
+stat_mode() {
+  local path="$1"
+  if stat -c '%a' -- "${path}" >/dev/null 2>&1; then
+    stat -c '%a' -- "${path}"
+  else
+    stat -f '%Lp' -- "${path}"
+  fi
+}
+
+stat_owner() {
+  local path="$1"
+  if stat -c '%u' -- "${path}" >/dev/null 2>&1; then
+    stat -c '%u' -- "${path}"
+  else
+    stat -f '%u' -- "${path}"
+  fi
+}
+
+hash_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}" | awk '{print $1}'
+    return 0
+  fi
+  shasum -a 256 "${file}" | awk '{print $1}'
+}
+
+validate_sha256_binding() {
+  local path="$1"
+  local expected="$2"
+  local label="$3"
+  local observed=""
+  if [[ ! "${expected}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "${label} requires one lowercase SHA-256 binding." >&2
+    return 1
+  fi
+  observed="$(hash_file "${path}")"
+  if [[ "${observed}" != "${expected}" ]]; then
+    echo "${label} does not match its SHA-256 binding." >&2
+    return 1
+  fi
+}
+
 validate_owner_only_secret_file() {
   local path="$1"
   local label="$2"
@@ -324,8 +381,8 @@ validate_owner_only_secret_file() {
     return 1
   fi
 
-  mode="$(stat -c '%a' -- "${path}")"
-  owner="$(stat -c '%u' -- "${path}")"
+  mode="$(stat_mode "${path}")"
+  owner="$(stat_owner "${path}")"
   case "${mode}" in
     400|600) ;;
     *)
@@ -334,6 +391,51 @@ validate_owner_only_secret_file() {
       ;;
   esac
 
+  if [[ "${owner}" != "$(id -u)" ]]; then
+    echo "${label} must be owned by the effective user." >&2
+    return 1
+  fi
+}
+
+validate_trusted_ssh_file() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -f "${path}" ]]; then
+    echo "${label} must reference a regular, non-symlink file." >&2
+    return 1
+  fi
+  mode="$(stat_mode "${path}")"
+  owner="$(stat_owner "${path}")"
+  if (( (8#${mode} & 0022) != 0 )); then
+    echo "${label} must not be group- or world-writable (found ${mode})." >&2
+    return 1
+  fi
+  if [[ "${owner}" != "$(id -u)" && "${owner}" != "0" ]]; then
+    echo "${label} must be owned by root or the effective user." >&2
+    return 1
+  fi
+}
+
+validate_owner_only_directory() {
+  local path="$1"
+  local label="$2"
+  local mode=""
+  local owner=""
+
+  if [[ -L "${path}" || ! -d "${path}" ]]; then
+    echo "${label} must reference a directory, not a symbolic link." >&2
+    return 1
+  fi
+
+  mode="$(stat_mode "${path}")"
+  owner="$(stat_owner "${path}")"
+  if [[ "${mode}" != "700" ]]; then
+    echo "${label} must have mode 0700 (found ${mode})." >&2
+    return 1
+  fi
   if [[ "${owner}" != "$(id -u)" ]]; then
     echo "${label} must be owned by the effective user." >&2
     return 1
@@ -542,6 +644,15 @@ validate_rh_collections_mode "${rh_collections_mode}"
 validate_bool "ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT" "${rh_collections_strict}"
 validate_bool "RH_COLLECTIONS_USE" "${rh_collections_use}"
 validate_bool "ANSIBLE_TOOLBOX_RUN_EE_PRELOAD" "${run_ee_preload}"
+validate_bool "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS" "${ee_only_collections}"
+
+case "${network_mode}" in
+  default|none) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NETWORK_MODE='${network_mode}' (use: default|none)." >&2
+    exit 1
+    ;;
+esac
 
 case "${nav_mode}" in
   stdout|interactive) ;;
@@ -561,10 +672,11 @@ if [[ $# -ge 1 ]]; then
 fi
 
 engine="$(detect_container_engine "${engine_requested}")"
+engine_command="${engine_binary_requested:-${engine}}"
 
 if [[ "${engine}" == "local" ]]; then
-  if [[ "${1:-}" == "run" ]]; then
-    echo "Local fallback is not supported for 'run'." >&2
+  if [[ "${1:-}" == "run" || "${1:-}" == "provenance-run-ee" ]]; then
+    echo "Local fallback is not supported for '${1:-}'." >&2
     echo "Use host wrapper execution with podman socket: /run/user/$(id -u)/podman/podman.sock" >&2
     echo "Hint: systemctl --user enable --now podman.socket" >&2
     exit 1
@@ -572,7 +684,7 @@ if [[ "${engine}" == "local" ]]; then
   exec "${SCRIPT_DIR}/ansible-nav-local" "$@"
 fi
 
-container_args=("${engine}" run --rm)
+container_args=("${engine_command}" run --rm)
 if [[ -t 0 && -t 1 ]]; then
   container_args+=(-it)
 fi
@@ -580,8 +692,16 @@ fi
 if [[ "${engine}" == "podman" ]]; then
   container_args+=(--security-opt label=disable)
 fi
+if [[ "${network_mode}" == "none" ]]; then
+  container_args+=(--network none)
+fi
 
-container_args+=(-v "${REPO_ROOT}:/runner/project" -w /runner/project)
+if [[ "${ee_only_collections}" == "true" ]]; then
+  container_args+=(-v "${REPO_ROOT}:/runner/project:ro")
+else
+  container_args+=(-v "${REPO_ROOT}:/runner/project")
+fi
+container_args+=(-w /runner/project)
 
 inventory_mounted=false
 ssh_agent_mounted=false
@@ -589,7 +709,7 @@ inventory_source=""
 mounted_source_result=""
 run_ee_tar=""
 secrets_dir=""
-mapped_file_for_container_result=""
+ssh_transport_dir=""
 
 cleanup() {
   if [[ -n "${run_ee_tar}" ]]; then
@@ -598,6 +718,10 @@ cleanup() {
   if [[ -n "${secrets_dir}" ]]; then
     chmod -R u+w -- "${secrets_dir}" 2>/dev/null || true
     rm -rf -- "${secrets_dir}"
+  fi
+  if [[ -n "${ssh_transport_dir}" ]]; then
+    chmod -R u+w -- "${ssh_transport_dir}" 2>/dev/null || true
+    rm -rf -- "${ssh_transport_dir}"
   fi
 }
 trap cleanup EXIT
@@ -613,7 +737,11 @@ if mount_requested_source "${ssh_agent_mount_requested}" find_ssh_agent_socket "
   ssh_agent_mounted=true
 fi
 
-collections_path="/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+if [[ "${ee_only_collections}" == "true" ]]; then
+  collections_path="/usr/share/ansible/collections:/usr/share/automation-controller/collections"
+else
+  collections_path="/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+fi
 
 container_args+=(
   -e "HOME=/runner"
@@ -625,12 +753,89 @@ container_args+=(
   -e "ANSIBLE_LOCAL_TEMP=/tmp/.ansible/tmp"
   -e "ANSIBLE_REMOTE_TEMP=${ANSIBLE_REMOTE_TEMP:-~/.ansible/tmp}"
   -e "ANSIBLE_COLLECTIONS_PATH=${collections_path}"
+  -e "ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=False"
+  -e "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=${ee_only_collections}"
 )
 
 add_env_if_set VAULT_ADDR
 add_env_if_set VAULT_SKIP_VERIFY
 add_env_if_set VAULT_TOKEN
 add_env_if_set RH_AUTOMATION_HUB_TOKEN
+add_env_if_set ANSIBLE_NOCOLOR
+add_env_if_set ANSIBLE_DISPLAY_ARGS_TO_STDOUT
+add_env_if_set ANSIBLE_STDOUT_CALLBACK
+add_env_if_set ANSIBLE_CALLBACK_PLUGINS
+add_env_if_set LIT_GOVERNED_ACTION_ID
+add_env_if_set LIT_GOVERNED_EXECUTION_ID
+add_env_if_set LIT_GOVERNED_SAFE_TASKS
+
+if [[ -n "${governed_runner_artifact_source}" ]]; then
+  validate_owner_only_directory \
+    "${governed_runner_artifact_source}" \
+    "ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_SOURCE"
+  add_mount "${governed_runner_artifact_source}" "/runner/raw-artifacts" "rw"
+  container_args+=(-e "ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_DIR=/runner/raw-artifacts")
+fi
+
+if [[ -n "${governed_input_source}" ]]; then
+  validate_owner_only_directory \
+    "${governed_input_source}" \
+    "ANSIBLE_TOOLBOX_GOVERNED_INPUT_SOURCE"
+  add_mount "${governed_input_source}" "/runner/governed-input" "ro"
+fi
+
+if [[ -n "${ssh_private_key_file}" || -n "${ssh_known_hosts_file}" ]]; then
+  if [[ -z "${ssh_private_key_file}" || -z "${ssh_known_hosts_file}" || -z "${ssh_private_key_sha256}" || -z "${ssh_known_hosts_sha256}" ]]; then
+    echo "Governed SSH transport requires the exact private key, known_hosts file and both SHA-256 bindings." >&2
+    exit 1
+  fi
+  if [[ "${engine}" != "podman" ]]; then
+    echo "Governed SSH transport is supported only with Podman." >&2
+    exit 1
+  fi
+  validate_owner_only_secret_file \
+    "${ssh_private_key_file}" \
+    "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE"
+  validate_trusted_ssh_file \
+    "${ssh_known_hosts_file}" \
+    "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE"
+  validate_sha256_binding \
+    "${ssh_private_key_file}" \
+    "${ssh_private_key_sha256}" \
+    "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE"
+  validate_sha256_binding \
+    "${ssh_known_hosts_file}" \
+    "${ssh_known_hosts_sha256}" \
+    "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE"
+  secret_runtime_dir="${TMPDIR:-${XDG_RUNTIME_DIR:-/tmp}}"
+  ssh_transport_dir="$(mktemp -d "${secret_runtime_dir%/}/modulix-ansible-ssh.XXXXXX")"
+  chmod 0700 "${ssh_transport_dir}"
+  install -m 0400 "${ssh_private_key_file}" "${ssh_transport_dir}/id_selected"
+  install -m 0400 "${ssh_known_hosts_file}" "${ssh_transport_dir}/known_hosts"
+  validate_owner_only_secret_file \
+    "${ssh_transport_dir}/id_selected" \
+    "staged governed SSH private key"
+  validate_owner_only_secret_file \
+    "${ssh_transport_dir}/known_hosts" \
+    "staged governed SSH known_hosts"
+  validate_sha256_binding \
+    "${ssh_transport_dir}/id_selected" \
+    "${ssh_private_key_sha256}" \
+    "staged governed SSH private key"
+  validate_sha256_binding \
+    "${ssh_transport_dir}/known_hosts" \
+    "${ssh_known_hosts_sha256}" \
+    "staged governed SSH known_hosts"
+  validate_sha256_binding \
+    "${ssh_private_key_file}" \
+    "${ssh_private_key_sha256}" \
+    "post-copy governed SSH private key"
+  validate_sha256_binding \
+    "${ssh_known_hosts_file}" \
+    "${ssh_known_hosts_sha256}" \
+    "post-copy governed SSH known_hosts"
+  add_mount "${ssh_transport_dir}" "/runner/controller-ssh" "ro"
+fi
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   if [[ "${engine}" != "podman" ]]; then
@@ -690,7 +895,22 @@ case "${subcommand}" in
       "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
       "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
       "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
+      "ANSIBLE_TOOLBOX_EE_ONLY_COLLECTIONS=${ee_only_collections}"
+      "ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=False"
     )
+
+    if [[ -n "${governed_runner_artifact_source}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_RUNNER_ARTIFACT_DIR=/runner/raw-artifacts")
+    fi
+
+    if [[ -n "${ssh_transport_dir}" ]]; then
+      run_nav_env+=(
+        "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_FILE=/runner/controller-ssh/id_selected"
+        "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_FILE=/runner/controller-ssh/known_hosts"
+        "ANSIBLE_TOOLBOX_SSH_PRIVATE_KEY_SHA256=${ssh_private_key_sha256}"
+        "ANSIBLE_TOOLBOX_SSH_KNOWN_HOSTS_SHA256=${ssh_known_hosts_sha256}"
+      )
+    fi
 
     if [[ -n "${auto_collections}" ]]; then
       run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${auto_collections}")
@@ -714,9 +934,9 @@ case "${subcommand}" in
       run_rh_collection_preflight=true
     fi
     if [[ "${run_ee_preload}" == "true" ]]; then
-      ensure_image_present "${engine}" "${run_ee_image}" "${pull_policy}"
+      ensure_image_present "${engine_command}" "${run_ee_image}" "${pull_policy}"
       run_ee_tar="$(mktemp "${TMPDIR:-/tmp}/modulix-run-ee.XXXXXX.tar")"
-      "${engine}" save -o "${run_ee_tar}" "${run_ee_image}"
+      "${engine_command}" save -o "${run_ee_tar}" "${run_ee_image}"
       container_args+=(-v "${run_ee_tar}:/runner/run-ee.tar:ro")
       run_nav_env+=("ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never")
     fi
@@ -732,6 +952,40 @@ case "${subcommand}" in
       in_container_cmd=(bash -lc 'set -euo pipefail; podman load -i /runner/run-ee.tar; exec "$@"' bash "${in_container_cmd[@]}")
     fi
     ;;
+  provenance-toolbox)
+    if [[ $# -ne 0 ]]; then
+      echo "provenance-toolbox accepts no arguments." >&2
+      exit 1
+    fi
+    container_args+=(--network none --read-only --user "$(id -u):$(id -g)")
+    in_container_cmd=(
+      /usr/bin/python3
+      /runner/project/scripts/runtime-collection-provenance.py
+      --image-role
+      toolbox
+      --image
+      "${image}"
+    )
+    ;;
+  provenance-run-ee)
+    if [[ $# -ne 0 ]]; then
+      echo "provenance-run-ee accepts no arguments." >&2
+      exit 1
+    fi
+    container_args+=(--privileged --user 0:0)
+    ensure_image_present "${engine_command}" "${run_ee_image}" "${pull_policy}"
+    run_ee_tar="$(mktemp "${TMPDIR:-/tmp}/modulix-run-ee.XXXXXX.tar")"
+    "${engine_command}" save -o "${run_ee_tar}" "${run_ee_image}"
+    container_args+=(-v "${run_ee_tar}:/runner/run-ee.tar:ro")
+    # The positional "$1" is deliberately expanded by the nested shell.
+    # shellcheck disable=SC2016
+    in_container_cmd=(
+      bash -lc
+      'set -euo pipefail; podman load -i /runner/run-ee.tar >/dev/null; exec podman run --rm --network none --pull=never --read-only --cap-drop=all --security-opt=no-new-privileges --user 65534:65534 -e ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections:/usr/share/automation-controller/collections -e ANSIBLE_COLLECTIONS_SCAN_SYS_PATH=False -v /runner/project/scripts/runtime-collection-provenance.py:/usr/local/libexec/runtime-collection-provenance.py:ro "$1" /usr/bin/python3 /usr/local/libexec/runtime-collection-provenance.py --image-role run_ee --image "$1"'
+      bash
+      "${run_ee_image}"
+    )
+    ;;
   exec)
     if [[ -n "${secrets_dir}" ]]; then
       # Exec retains the invoking numeric UID, so keep that UID mapped to the
@@ -742,7 +996,7 @@ case "${subcommand}" in
     if [[ "${1:-}" == "--" ]]; then
       shift
     fi
-    if container_api_socket="$(find_container_api_socket)"; then
+    if [[ "${ee_only_collections}" != "true" ]] && container_api_socket="$(find_container_api_socket)"; then
       container_args+=(-v "${container_api_socket}:/var/run/docker.sock")
       container_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
     fi
@@ -757,13 +1011,13 @@ case "${subcommand}" in
     exit 0
     ;;
   *)
-    echo "Unsupported subcommand '${subcommand}'. Use 'run' or 'exec'." >&2
+    echo "Unsupported subcommand '${subcommand}'. Use run, exec, provenance-toolbox, or provenance-run-ee." >&2
     usage
     exit 1
     ;;
 esac
 
-ensure_image_present "${engine}" "${execution_image}" "${pull_policy}"
+ensure_image_present "${engine_command}" "${execution_image}" "${pull_policy}"
 
 if [[ "${run_rh_collection_preflight}" == true ]]; then
   rh_collections_requirements_in_container="$(rewrite_host_path_for_container "${rh_collections_requirements}")"
@@ -778,7 +1032,7 @@ if [[ "${run_rh_collection_preflight}" == true ]]; then
     /runner/project/scripts/install-rh-collections
 fi
 
-if [[ -n "${run_ee_tar}" || -n "${secrets_dir}" ]]; then
+if [[ -n "${run_ee_tar}" || -n "${secrets_dir}" || -n "${ssh_transport_dir}" ]]; then
   "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"
 else
   exec "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"

@@ -30,7 +30,9 @@ inventory-owned values.
 - `07-preflight.yml`: verify SSH, DNS, the optional customer-prepared RHEL
   contract, immutable registry EE, artifact sources, and secret backend.
 - `08-tls-selfsigned.yml`: generate temporary controller-local self-signed TLS
-  files for lab/disconnected installs when customer PKI is not available.
+  files for lab/disconnected installs when customer PKI is not available,
+  install the generated CA in the managed AAP host's system trust store, and
+  refresh system trust.
 - `10-deploy.yml`: prepare and deploy AAP, then apply configuration-as-code.
 - `20-ops.yml`: run explicit day-2 AAP operations with `aap_ops_action`.
 - `90-uninstall.yml`: deliberately remove a containerized AAP installation
@@ -116,7 +118,8 @@ Preferred split for production and customer-provided hosts:
 1. stage artifacts with `05-artifacts.yml`
 2. prepare the AAP-specific OS substrate with `06-base-os-prepare.yml`
 3. run preflight with `07-preflight.yml`
-4. optionally generate temporary TLS files with `08-tls-selfsigned.yml`
+4. optionally generate temporary TLS files and establish target-host CA trust
+   with `08-tls-selfsigned.yml`
 5. deploy and configure AAP with `10-deploy.yml`
 
 `10-deploy.yml` has two plays:

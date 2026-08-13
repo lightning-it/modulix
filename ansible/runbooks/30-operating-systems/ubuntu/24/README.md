@@ -41,6 +41,19 @@ operations remain in `10-compute/baremetal/hetzner/`.
   exact policy and that the initial root token is revoked.
 - `18-vault-raft-snapshot.yml` performs an encrypted snapshot backup or a
   separately confirmed restore drill.
+- `19-vault-pki.yml` plans, applies, and reads back a private self-signed Vault
+  PKI hierarchy on one exact host. Apply requires the candidate-bound
+  `APPLY-WUNDERBOX-VAULT-PKI:<host>:<sha256>` confirmation, generates a
+  temporary root token from encrypted Shamir custody, configures the declared
+  root, intermediate, leaf role, and scoped policy through
+  `lit.supplementary.vault_config`, exports only the public root certificate,
+  reissues the encrypted scoped AppRole working copy, and revokes the temporary
+  root token. It restores the public Vault transport CA and, only for apply,
+  the encrypted target-side Shamir recovery copy over pinned managed SSH. The
+  authoritative initialization custody remains the immutable 1Password item;
+  no plaintext share or CA private key is written to the controller or Git.
+  Readback checks the CA chain, exact DNS allowlist, least-privilege
+  capabilities, and negative issuance behavior.
 - `19-tang-reboot-acceptance.yml` proves one non-Tang client can reboot through
   the pinned live Tang trust path.
 

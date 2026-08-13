@@ -53,11 +53,18 @@
 # - This runbook intentionally does not generate environment-specific defaults or secrets.
 # -----------------------------------------------------------------------------
 
+- name: Enforce Wunderbox preflight before deployment
+  ansible.builtin.import_playbook: 07-preflight.yml
+
 - name: Configure wunderboxes
   hosts: wunderboxes
   become: true
   gather_facts: true
+  any_errors_fatal: true
+  serial: 1
   vars:
+    _wunderbox_orchestration_phase: deploy
+    _wunderbox_orchestration_mutating: true
     _wunderbox_services_cfg: >-
       {{
         (
@@ -85,6 +92,18 @@
           | lower
         ) in _enabled_values
       }}
+
+  pre_tasks:
+    - name: Enforce the Wunderbox orchestration boundary
+      ansible.builtin.import_tasks: tasks/orchestration-guard.yml
+      tags: [always]
+
+    - name: End after the read-only Wunderbox deployment plan
+      ansible.builtin.meta: end_play
+      when: >-
+        ansible_check_mode
+        or wunderbox_orchestration_action | default('plan') == 'plan'
+      tags: [always]
 
   tasks:
     - name: Require DHCP production validation before enabling DHCP
@@ -497,6 +516,7 @@
 
     - name: Retire Semaphore from Wunderbox when disabled
       when:
+        - wunderbox_retirement_requested | default(false) | bool
         - (
             wunderbox_service_semaphore_deploy
             | default(_wunderbox_services_cfg.semaphore_deploy | default('disabled'))
@@ -570,7 +590,8 @@
             - /etc/podman/pods/semaphore-postgres.yml
             - /srv/nginx/config/conf.d/semaphore.conf
 
-        - name: Reload nginx after retiring Semaphore vhost
+        # Retirement must reload immediately after its conditional file removal.
+        - name: Reload nginx after retiring Semaphore vhost  # noqa no-handler
           ansible.builtin.command:
             argv:
               - podman

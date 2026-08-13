@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "toolbox": {
+    "schema_version": 1,
+    "image_role": "toolbox",
+    "image": "registry.example.invalid/toolbox@sha256:REPLACE_WITH_64_HEX",
+    "loader": {
+      "collection_paths": [
+        "/usr/share/ansible/collections",
+        "/usr/share/automation-controller/collections"
+      ],
+      "scan_sys_path": false
+    },
+    "collections": {
+      "foundational": {
+        "fqcn": "lit.foundational",
+        "version": "REPLACE_WITH_VERSION",
+        "source_commit": "REPLACE_WITH_FULL_GIT_SHA",
+        "installed_tree_sha256": "REPLACE_WITH_64_HEX"
+      },
+      "ubuntu": {
+        "fqcn": "lit.ubuntu",
+        "version": "REPLACE_WITH_VERSION",
+        "source_commit": "REPLACE_WITH_FULL_GIT_SHA",
+        "installed_tree_sha256": "REPLACE_WITH_64_HEX"
+      }
+    }
+  },
+  "run_ee": {
+    "schema_version": 1,
+    "image_role": "run_ee",
+    "image": "registry.example.invalid/run-ee@sha256:REPLACE_WITH_64_HEX",
+    "loader": {
+      "collection_paths": [
+        "/usr/share/ansible/collections",
+        "/usr/share/automation-controller/collections"
+      ],
+      "scan_sys_path": false
+    },
+    "collections": {
+      "foundational": {
+        "fqcn": "lit.foundational",
+        "version": "REPLACE_WITH_VERSION",
+        "source_commit": "REPLACE_WITH_FULL_GIT_SHA",
+        "installed_tree_sha256": "REPLACE_WITH_64_HEX"
+      },
+      "ubuntu": {
+        "fqcn": "lit.ubuntu",
+        "version": "REPLACE_WITH_VERSION",
+        "source_commit": "REPLACE_WITH_FULL_GIT_SHA",
+        "installed_tree_sha256": "REPLACE_WITH_64_HEX"
+      }
+    }
+  }
+}

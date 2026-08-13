@@ -38,12 +38,12 @@
         - name: Report the reviewed Vault lifecycle plan identity
           ansible.builtin.debug:
             msg:
-              - "operation={{ vault_lifecycle_operation }}"
-              - "target={{ inventory_hostname }}"
-              - "plan_sha256={{ _vault_lifecycle_plan_sha256 }}"
-              - "plan_path={{ _vault_lifecycle_plan_path }}"
-              - >-
-                confirmation={{
+              operation: "{{ vault_lifecycle_operation }}"
+              target: "{{ inventory_hostname }}"
+              plan_sha256: "{{ _vault_lifecycle_plan_sha256 }}"
+              plan_path: "{{ _vault_lifecycle_plan_path }}"
+              confirmation: >-
+                {{
                   {
                     'deploy': 'DEPLOY_VAULT',
                     'initialize': 'INITIALIZE_VAULT',

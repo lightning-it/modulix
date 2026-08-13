@@ -2,7 +2,17 @@
 - name: Operate Wunderbox hosts
   hosts: wunderboxes
   become: true
-  gather_facts: false
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    _wunderbox_orchestration_phase: ops
+    _wunderbox_orchestration_mutating: false
+
+  pre_tasks:
+    - name: Enforce the Wunderbox orchestration boundary
+      ansible.builtin.import_tasks: tasks/orchestration-guard.yml
+      tags: [always]
 
   tasks:
     - name: Show Wunderbox container runtime status

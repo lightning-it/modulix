@@ -80,6 +80,9 @@
             hetzner_baremetal_install_order[: hetzner_baremetal_install_prerequisite_hosts | length]
             == hetzner_baremetal_install_prerequisite_hosts
           - inventory_hostname in hetzner_baremetal_install_order
+          - >-
+            hetzner_installimage_require_successors_in_rescue
+            | default(true) is boolean
           - hetzner_installimage_image | default('') is string
           - hetzner_installimage_image | default('') is match('^/')
           - >-
@@ -167,11 +170,15 @@
         label: "{{ hetzner_installimage_order_host }}"
       tags: [always]
 
-    - name: Prove the target and every successor remain in Hetzner Rescue
+    - name: Prove the required hosts remain in Hetzner Rescue
       ansible.builtin.include_tasks:
         file: tasks/installimage-prove-rescue-successor.yml
       loop: >-
-        {{ hetzner_baremetal_install_order[_hetzner_install_order_position | int :] }}
+        {{
+          hetzner_baremetal_install_order[_hetzner_install_order_position | int :]
+          if hetzner_installimage_require_successors_in_rescue | default(true)
+          else [inventory_hostname]
+        }}
       loop_control:
         loop_var: hetzner_installimage_order_host
         label: "{{ hetzner_installimage_order_host }}"
@@ -278,12 +285,12 @@
             fail_msg: >-
               The installimage role did not return a valid plan hash.
 
-        - name: Show the secret-free installation approval hash
+        - name: Show the secret-free installation approval plan
           ansible.builtin.debug:
-            msg: >-
-              HETZNER_INSTALLIMAGE_PLAN_SHA256={{
-                hetzner_installimage_plan_sha256
-              }}
+            msg:
+              target: "{{ inventory_hostname }}"
+              action: "{{ hetzner_installimage_action | default('plan') }}"
+              plan_sha256: "{{ hetzner_installimage_plan_sha256 }}"
       always:
         - name: Close any controller Vault transport opened for installation
           ansible.builtin.include_tasks: >-

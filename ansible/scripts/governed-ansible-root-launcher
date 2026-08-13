@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+readonly launcher_path="/Library/Application Support/Lightning IT/Governed Ansible/bin/governed-ansible-exec"
+readonly recorder_path="/Library/Application Support/Lightning IT/Governed Ansible/libexec/governed-ansible-exec.py"
+readonly receipt_path="/Library/Application Support/Lightning IT/Governed Ansible/acceptance/execution-anchor.json"
+readonly interpreter_path="/usr/bin/python3"
+
+if [[ "$0" != "${launcher_path}" ]]; then
+  echo "The governed recorder must run from its root-owned installed launcher." >&2
+  exit 126
+fi
+
+unset PYTHONPATH PYTHONHOME PYTHONUSERBASE PYTHONSTARTUP PYTHONINSPECT
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+
+# The launcher, recorder, and acceptance receipt are all carried across exec as
+# already-open descriptors. The recorder therefore proves which launcher
+# bytes established the process, rather than trusting caller-controlled
+# environment strings or re-opening a mutable path after launch.
+exec 7<"${launcher_path}"
+exec 8<"${recorder_path}"
+exec 9<"${receipt_path}"
+export LIT_GOVERNED_LAUNCHER_FD="7"
+export LIT_GOVERNED_RECORDER_FD="8"
+export LIT_GOVERNED_LAUNCH_RECEIPT_FD="9"
+exec "${interpreter_path}" -I "/dev/fd/8" "$@"

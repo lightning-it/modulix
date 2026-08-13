@@ -7,18 +7,18 @@
     ":semanticCommitType(chore)",
     ":semanticCommitScope(deps)"
   ],
-  "labels": [
-    "dependencies",
-    "renovate"
-  ],
-  "baseBranchPatterns": [
-    "develop"
-  ],
+  "labels": ["dependencies", "renovate"],
+  "baseBranchPatterns": ["develop"],
   "timezone": "UTC",
   "schedule": [],
   "rebaseWhen": "behind-base-branch",
   "prConcurrentLimit": 5,
   "packageRules": [
+    {
+      "description": "Do not update Renovate configuration presets as dependencies",
+      "matchManagers": ["renovate-config"],
+      "enabled": false
+    },
     {
       "description": "Automerge safe non-major updates into develop after CI passes",
       "matchUpdateTypes": [
@@ -26,75 +26,50 @@
         "patch",
         "pin",
         "digest",
-        "pinDigest"
+        "pinDigest",
+        "lockFileMaintenance"
       ],
+      "addLabels": ["safe-automerge"],
       "automerge": true,
       "automergeType": "pr"
     },
     {
       "description": "Require manual approval for major updates",
-      "matchUpdateTypes": [
-        "major"
-      ],
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["breaking-update"],
+      "automerge": false,
       "dependencyDashboardApproval": true
     },
     {
       "description": "Keep ansible-core on 2.18.x",
-      "matchManagers": [
-        "pip_requirements"
-      ],
-      "matchFileNames": [
-        "ansible/requirements.txt"
-      ],
-      "matchPackageNames": [
-        "ansible-core"
-      ],
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["ansible/requirements.txt"],
+      "matchPackageNames": ["ansible-core"],
       "allowedVersions": "/^2\\.18\\./"
     },
     {
       "description": "Manage local controller Python pins in ansible requirements",
-      "matchManagers": [
-        "pip_requirements"
-      ],
-      "matchFileNames": [
-        "ansible/requirements.txt"
-      ],
-      "matchPackageNames": [
-        "pyvmomi",
-        "requests"
-      ]
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["ansible/requirements.txt"],
+      "matchPackageNames": ["pyvmomi", "requests"]
     },
     {
       "description": "Keep community.general compatible with linux_system_roles and lit collections",
-      "matchDepNames": [
-        "community.general"
-      ],
-      "matchDatasources": [
-        "galaxy-collection"
-      ],
+      "matchDepNames": ["community.general"],
+      "matchDatasources": ["galaxy-collection"],
       "allowedVersions": "/^11\\./"
     },
     {
       "description": "Keep canonical ansible.posix compatible with linux_system_roles",
-      "matchDepNames": [
-        "ansible.posix"
-      ],
-      "matchDatasources": [
-        "galaxy-collection"
-      ],
-      "matchFileNames": [
-        "ansible/collections/requirements.yml"
-      ],
+      "matchDepNames": ["ansible.posix"],
+      "matchDatasources": ["galaxy-collection"],
+      "matchFileNames": ["ansible/collections/requirements.yml"],
       "allowedVersions": "/^2\\.1\\./"
     },
     {
       "description": "Pin community.vmware for the ansible-core 2.18 collection baseline",
-      "matchDepNames": [
-        "community.vmware"
-      ],
-      "matchDatasources": [
-        "galaxy-collection"
-      ],
+      "matchDepNames": ["community.vmware"],
+      "matchDatasources": ["galaxy-collection"],
       "allowedVersions": "/^5\\.10\\.0$/"
     }
   ],
@@ -102,9 +77,7 @@
     {
       "customType": "regex",
       "description": "Track ee-wunder-devtools-ubi9 image references in agent docs",
-      "managerFilePatterns": [
-        "/(^|.*\\/)AGENTS?\\.md$/"
-      ],
+      "managerFilePatterns": ["/(^|.*\\/)AGENTS?\\.md$/"],
       "matchStrings": [
         "quay\\.io\\/l-it\\/ee-wunder-devtools-ubi9:v(?<currentValue>[0-9.]+)"
       ],
@@ -172,10 +145,7 @@
     {
       "customType": "regex",
       "description": "Track devtools image references in repo docs and agent guidance",
-      "managerFilePatterns": [
-        "/^AGENTS\\.md$/",
-        "/^scripts\\/README\\.md$/"
-      ],
+      "managerFilePatterns": ["/^AGENTS\\.md$/", "/^scripts\\/README\\.md$/"],
       "matchStrings": [
         "quay\\.io\\/l-it\\/ee-wunder-devtools-ubi9:v(?<currentValue>[0-9.]+)"
       ],

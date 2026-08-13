@@ -1,0 +1,93 @@
+---
+- name: Plan, apply, or roll back the exact Goal 04 Robot Rescue key
+  hosts: hetzner_baremetal
+  gather_facts: false
+  connection: local
+  become: false
+  any_errors_fatal: true
+  serial: 1
+
+  vars:
+    _wbx_goal04_expected_host: wunderbox01.prd.edge.pub.l-it.io
+    _wbx_goal04_expected_server: 3035773
+    _wbx_goal04_expected_ipv4: 136.243.38.174
+    _wbx_goal04_key_name: id_ed25519_lit_bootstrap
+    _wbx_goal04_confirmation_expected: >-
+      {{
+        (wbx_goal04_rescue_key_action | default('plan') | upper)
+        ~ '-WBX-G04-RESCUE-KEY:' ~ _wbx_goal04_expected_host
+        ~ ':' ~ (_wbx_goal04_expected_server | string)
+        ~ ':' ~ _wbx_goal04_expected_ipv4
+      }}
+
+  pre_tasks:
+    - name: Require the exact frozen Goal 04 target and action
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_limit | string | trim == _wbx_goal04_expected_host
+          - inventory_hostname == _wbx_goal04_expected_host
+          - hetzner_robot_server_number | int == _wbx_goal04_expected_server
+          - ansible_host == _wbx_goal04_expected_ipv4
+          - hostname_fqdn == _wbx_goal04_expected_host
+          - >-
+            wbx_goal04_rescue_key_action | default('plan')
+            in ['plan', 'apply', 'rollback']
+          - >-
+            wbx_goal04_rescue_key_action | default('plan') == 'plan'
+            or wbx_goal04_rescue_key_confirmation | default('')
+               == _wbx_goal04_confirmation_expected
+          - wunderbox_controller_approval_authority_bootstrap is mapping
+          - >-
+            wunderbox_controller_approval_authority_bootstrap.public_key
+            is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3}$')
+          - >-
+            wunderbox_controller_approval_authority_bootstrap
+            .onepassword_item.expected_fingerprint
+            == 'SHA256:wgY6uOEcOYxkukZOys1UNIZOUZUioHyryTwZmAzSyFQ'
+        fail_msg: >-
+          Goal 04 Rescue-key reconciliation requires the exact frozen target,
+          inventory-pinned key, supported action, and target-bound confirmation.
+        quiet: true
+      tags: [always]
+
+    - name: Resolve Robot API credentials from the selected external backend
+      ansible.builtin.include_tasks: tasks/resolve-robot-credentials.yml
+      no_log: true
+      tags: [always]
+
+    - name: Build the exact Goal 04 Robot SSH-key declaration
+      ansible.builtin.set_fact:
+        _wbx_goal04_robot_ssh_keys:
+          - name: "{{ _wbx_goal04_key_name }}"
+            public_key: >-
+              {{ wunderbox_controller_approval_authority_bootstrap.public_key }}
+            state: >-
+              {{
+                'absent'
+                if wbx_goal04_rescue_key_action | default('plan') == 'rollback'
+                else 'present'
+              }}
+      changed_when: false
+      no_log: true
+
+  tasks:
+    - name: Validate the exact Rescue-key declaration without API changes
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+      vars:
+        hetzner_robot_cac_validate_only: true
+        hetzner_robot_cac_user: ""
+        hetzner_robot_cac_password: ""
+        hetzner_robot_cac_ssh_keys: "{{ _wbx_goal04_robot_ssh_keys }}"
+      when: wbx_goal04_rescue_key_action | default('plan') == 'plan'
+
+    - name: Reconcile the exact Rescue-key declaration
+      ansible.builtin.include_role:
+        name: lit.foundational.hetzner_robot_cac
+      vars:
+        hetzner_robot_cac_user: "{{ _hetzner_robot_user }}"
+        hetzner_robot_cac_password: "{{ _hetzner_robot_password }}"
+        hetzner_robot_cac_ssh_keys: "{{ _wbx_goal04_robot_ssh_keys }}"
+      when: wbx_goal04_rescue_key_action | default('plan') != 'plan'
