@@ -34,12 +34,9 @@ Commit the final local change, ensure the worktree is clean, and run
 2. fetches the governed `origin/develop` ref and runs those checks on an
    isolated synthetic integration tree for the exact fresh base and `HEAD`;
 3. fails if a check changes that integration tree or the developer's branch;
-4. creates one exact committed branch patch relative to the recorded
-   merge-base;
-5. sends that patch through stdin to a read-only GitHub Copilot CLI exact-diff
-   review and to an
-   independent read-only Codex CLI review; and
-6. writes short-lived, developer-controlled advisory evidence into the Git
+4. creates and secret-scans one exact committed branch snapshot relative to
+   the recorded merge-base, without sending it to an external AI service; and
+5. writes short-lived, developer-controlled advisory evidence into the Git
    directory.
 
 The distributed runner derives the repository root from its own canonical
@@ -50,63 +47,39 @@ The fresh-base integration uses a hook-disabled real merge in a private
 worktree and therefore retains pull-request merge semantics on host Git 2.34,
 including stock Ubuntu 22.04.
 
-During iteration,
-`python3 scripts/lit-push-ready.py review` can review committed, staged,
+During iteration, `python3 scripts/lit-push-ready.py review` performs the same
+deterministic exact-patch and secret-safety scan for committed, staged,
 unstaged, and safe UTF-8 untracked content, but it does not produce push
-evidence.
+evidence or invoke AI.
 
-Codex runs as a host-installed CLI. Copilot always runs in the same pinned,
-multi-architecture Wunder Devtool image as the deterministic profile through
-local Docker or Podman; a host `copilot` binary is not used. Only a Copilot
-token obtained from the approved environment or `gh` session is forwarded by
-name, never as a command-line value. Evidence records the container runtime,
-CLI version, and immutable image digest. Both agents are mandatory and fail
-closed when unavailable; access exceptions require a centrally approved
-policy and ADR change, not a local configuration downgrade.
+Local Push-Ready execution is deliberately AI-free. It never invokes Codex,
+GitHub Copilot, another model, or an external AI endpoint; it never copies
+personal AI credentials into an isolated home or container. Evidence records
+this prohibition as `local_ai_egress=prohibited`.
 
-Both agents receive a disposable tracked-only repository snapshot with the
-exact patch applied. Copilot runs without shell, writes, remote delegation,
-repository hooks, workspace MCP, extensions, custom instructions, or a reused
-home. These Copilot boundaries use the fixed CLI safety switches, an isolated
-`COPILOT_HOME`, and explicit Prompt Mode environment controls; the runner never
-injects or overwrites `.github/copilot/settings.local.json`. A before/after Git
-fingerprint fails closed if either agent changes the disposable exact-patch
-snapshot. Codex 0.138.0 or newer runs with strict configuration,
-apps/hooks/network disabled, an untrusted project, and a dynamically named
-permission profile that allows only minimal runtime reads and read access to
-the disposable workspace. A runtime self-test must prove that a sibling canary
-cannot be read before Codex sees repository content. Neither agent may claim
-that the other agent or the GitHub product approved a change.
-
-The local Copilot CLI exact-diff review is a pre-push approximation, not the
-GitHub Copilot pull-request review product. Required GitHub Actions checks and
-the current-head server review remain authoritative. Evidence records that
-product boundary and the remaining runtime and authorization parity gaps in
-machine-readable form. The local evidence is not a security attestation and
-can be controlled by the developer; current-head branch policy, secret
-scanning, GitHub Actions, and the server Copilot review remain security and
-merge boundaries. Local secret-like path/content detection is only
-defense-in-depth.
+Required GitHub Actions checks and the protected current-revision review on the
+exact PR head remain authoritative. Human PRs follow the author-specific GitHub
+review policy. Same-repository Release-App PRs use only the protected MLX-90
+§7.2 Exact-Revision Codex workflow and never fall back to GitHub Copilot. Local
+evidence is not a security attestation and remains developer-controlled.
 
 An optional pre-push hook can run
 `python3 scripts/lit-push-ready.py pre-push --remote-name "$1" --remote-url "$2"`.
 The hook consumes Git's ref-update stream, verifies that every pushed ref
-resolves to the reviewed evidence `HEAD`, and never repeats checks or agent
-calls. Use `python3 scripts/lit-push-ready.py verify` for a manual evidence
+resolves to the validated evidence `HEAD`, and never repeats checks or invokes
+AI. Use `python3 scripts/lit-push-ready.py verify` for a manual evidence
 check. A pre-commit hook is not required.
 
 The pre-push evidence authorizes exactly one same-name branch update at the
-reviewed `HEAD`, and only as a fast-forward when the remote branch already
+validated `HEAD`, and only as a fast-forward when the remote branch already
 exists. Tags, additional branches, deletions, and force pushes require their
-own governed process. A local agent false positive blocks the push until the
-finding is fixed or the central policy is deliberately changed; a false
-negative is caught by the mandatory remote checks and becomes a regression
-test or profile correction.
+own governed process. Defects found by mandatory remote checks become
+regression tests or deterministic profile corrections.
 
 An initial migration that changes `.lit/push-ready.json`, the push-ready
 runner, or its executable CI profile cannot use that same unmerged policy as
 its own trust root. The runner therefore refuses to produce push evidence for
 such a bootstrap change. Run the new deterministic profile and the separate
-dual-agent `review` command on the exact commit, then rely on the protected
-required-CI and current-head Copilot gates for that one migration PR. Bootstrap
+AI-free `review` command on the exact commit, then rely on the protected
+required-CI and current-revision gates for that one migration PR. Bootstrap
 PRs do not count toward correction-free first-push acceptance evidence.
