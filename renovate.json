@@ -71,6 +71,22 @@
       "matchDepNames": ["community.vmware"],
       "matchDatasources": ["galaxy-collection"],
       "allowedVersions": "/^5\\.10\\.0$/"
+    },
+    {
+      "description": "Do not update shared-assets-owned workflow files downstream",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [
+        ".github/workflows/codex-copilot-remediation.yml",
+        ".github/workflows/copilot-review.yml",
+        ".github/workflows/current-revision-rerun.yml",
+        ".github/workflows/openssf-scorecard.yml",
+        ".github/workflows/release-bot-exact-head-review.yml",
+        ".github/workflows/renovate-guarded-automerge.yml",
+        ".github/workflows/semantic-release.yml",
+        ".github/workflows/shared-assets-guarded-automerge.yml",
+        ".github/workflows/sync-main-to-develop.yml"
+      ],
+      "enabled": false
     }
   ],
   "customManagers": [
