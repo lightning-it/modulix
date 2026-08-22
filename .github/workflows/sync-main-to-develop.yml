@@ -184,33 +184,86 @@ jobs:
           create_backmerge_branch() {
             local branch_name="$1"
             local desired_head="$2"
-            local remote_head
+            local created encoded_ref remote_head upload_branch upload_encoded upload_head upload_nonce
 
-            if git \
-              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
-              push \
-              --force-with-lease="refs/heads/${branch_name}:" \
-              origin \
-              "${desired_head}:refs/heads/${branch_name}"; then
-              echo 'Created exact backmerge branch with a create-only lease.'
+            cleanup_upload_ref_best_effort() {
+              local observed=''
+              if ! observed="$(
+                gh api "repos/${REPOSITORY}/git/ref/${BACKMERGE_UPLOAD_ENCODED}" \
+                  --jq .object.sha 2>/dev/null
+              )"; then
+                return 0
+              fi
+              if [ "${observed}" != "${BACKMERGE_UPLOAD_EXPECTED}" ]; then
+                echo '::warning::Refusing to clean an upload ref whose head changed.'
+                return 0
+              fi
+              gh api --method DELETE \
+                "repos/${REPOSITORY}/git/refs/${BACKMERGE_UPLOAD_ENCODED}" \
+                >/dev/null 2>&1 \
+                || echo '::warning::Unable to clean the exact temporary upload ref.'
+            }
+
+            encoded_ref="$(jq -rn --arg value "heads/${branch_name}" '$value|@uri')"
+            if remote_head="$(
+              gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha 2>/dev/null
+            )"; then
+              if [ "${remote_head}" != "${desired_head}" ]; then
+                echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+                return 1
+              fi
+              echo 'Exact backmerge branch already exists; no update required.'
               return 0
             fi
 
-            if ! remote_head="$(
-              git \
-                -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
-                ls-remote --exit-code --heads \
-                origin "refs/heads/${branch_name}" \
-                | awk '{print $1}'
-            )"; then
-              echo "::error::Unable to create or verify the backmerge branch."
+            upload_nonce="$(openssl rand -hex 16)"
+            [[ "${upload_nonce}" =~ ^[0-9a-f]{32}$ ]]
+            upload_branch="backmerge-upload/${desired_head}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${upload_nonce}"
+            upload_encoded="$(jq -rn --arg value "heads/${upload_branch}" '$value|@uri')"
+            if gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" >/dev/null 2>&1; then
+              echo '::error::Random upload ref already exists; refusing to update it.'
               return 1
             fi
-            if [ "${remote_head}" != "${desired_head}" ]; then
-              echo "::error::Backmerge branch collision; refusing to overwrite existing history."
-              return 1
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${token_header}" \
+              push --porcelain origin "HEAD:refs/heads/${upload_branch}"
+            BACKMERGE_UPLOAD_ENCODED="${upload_encoded}"
+            BACKMERGE_UPLOAD_EXPECTED="${desired_head}"
+            trap cleanup_upload_ref_best_effort EXIT
+            upload_head="$(
+              gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" --jq .object.sha
+            )"
+            test "${upload_head}" = "${desired_head}"
+
+            if ! created="$(gh api --method POST \
+                "repos/${REPOSITORY}/git/refs" \
+                -f "ref=refs/heads/${branch_name}" \
+                -f "sha=${desired_head}")"; then
+              remote_head="$(
+                gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha
+              )"
+              if [ "${remote_head}" != "${desired_head}" ]; then
+                cleanup_upload_ref_best_effort
+                echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+                return 1
+              fi
+            else
+              jq -e \
+                --arg ref "refs/heads/${branch_name}" \
+                --arg sha "${desired_head}" '
+                  .ref == $ref and .object.sha == $sha
+                ' <<<"${created}" >/dev/null
             fi
-            echo 'Exact backmerge branch already exists; no update required.'
+            test "$(
+              gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha
+            )" = "${desired_head}"
+            test "$(
+              gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" --jq .object.sha
+            )" = "${desired_head}"
+            gh api --method DELETE \
+              "repos/${REPOSITORY}/git/refs/${upload_encoded}"
+            trap - EXIT
+            unset BACKMERGE_UPLOAD_ENCODED BACKMERGE_UPLOAD_EXPECTED
+            echo 'Uploaded the immutable object and created the final ref atomically.'
           }
 
           local_head="$(git rev-parse HEAD)"
@@ -262,14 +315,78 @@ jobs:
             echo "expected_base=$(jq -r .baseRefOid <<<"${pr_details}")"
             echo "expected_head=$(jq -r .headRefOid <<<"${pr_details}")"
           } >>"${GITHUB_OUTPUT}"
-          pr_id="$(gh pr view "${pr_number}" --repo "${REPOSITORY}" --json id --jq .id)"
-          auto_merge_enabled="$(
-            gh pr view "${pr_number}" --repo "${REPOSITORY}" \
-              --json autoMergeRequest --jq '.autoMergeRequest != null'
-          )"
+
+      - name: Mint protected review dispatch token
+        if: >-
+          steps.exact-review-target.outputs.pr_number != '' &&
+          github.repository != 'lightning-it/.github'
+        id: review-dispatch-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Dispatch protected Exact-Revision review
+        if: >-
+          steps.exact-review-target.outputs.pr_number != '' &&
+          github.repository != 'lightning-it/.github'
+        env:
+          GH_TOKEN: ${{ steps.review-dispatch-app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.exact-review-target.outputs.pr_number }}
+          BASE_REF: ${{ steps.exact-review-target.outputs.base_ref }}
+          EXPECTED_BASE: ${{ steps.exact-review-target.outputs.expected_base }}
+          EXPECTED_HEAD: ${{ steps.exact-review-target.outputs.expected_head }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_BASE}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_HEAD}" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run release-bot-exact-head-review.yml \
+            --repo "${REPOSITORY}" \
+            --ref "${BASE_REF}" \
+            -f "pr_number=${PR_NUMBER}" \
+            -f "base_ref=${BASE_REF}" \
+            -f "expected_base=${EXPECTED_BASE}" \
+            -f "expected_head=${EXPECTED_HEAD}"
+
+      - name: Enable protected ancestry auto-merge
+        if: steps.exact-review-target.outputs.pr_number != ''
+        env:
+          EXPECTED_AUTHOR: >-
+            ${{ github.repository == 'lightning-it/.github' &&
+            'app/lightning-it-shared-assets-sync' ||
+            'app/lightning-it-release-automation' }}
+          EXPECTED_BASE: ${{ steps.exact-review-target.outputs.expected_base }}
+          EXPECTED_HEAD: ${{ steps.exact-review-target.outputs.expected_head }}
+          GH_TOKEN: >-
+            ${{ steps.release-app.outputs.token ||
+            steps.workflow-source-app.outputs.token }}
+          PR_NUMBER: ${{ steps.exact-review-target.outputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr_details="$(gh pr view "${PR_NUMBER}" --repo "${REPOSITORY}" \
+            --json author,autoMergeRequest,baseRefName,baseRefOid,headRefOid,id,isDraft,state)"
+          jq -e \
+            --arg author "${EXPECTED_AUTHOR}" \
+            --arg base "${EXPECTED_BASE}" \
+            --arg head "${EXPECTED_HEAD}" '
+              .author.login == $author
+              and .state == "OPEN"
+              and .isDraft == false
+              and .baseRefName == "develop"
+              and .baseRefOid == $base
+              and .headRefOid == $head
+            ' <<<"${pr_details}" >/dev/null
+          auto_merge_enabled="$(jq -r '.autoMergeRequest != null' <<<"${pr_details}")"
           case "${auto_merge_enabled}" in
             true) ;;
             false)
+              pr_id="$(jq -er .id <<<"${pr_details}")"
               query="mutation(\$pr:ID!){enablePullRequestAutoMerge("
               query+="input:{pullRequestId:\$pr,mergeMethod:MERGE}){"
               query+="pullRequest{autoMergeRequest{enabledAt}}}}"
