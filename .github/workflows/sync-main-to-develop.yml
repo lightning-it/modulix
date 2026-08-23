@@ -234,24 +234,38 @@ jobs:
             )"
             test "${upload_head}" = "${desired_head}"
 
-            if ! created="$(gh api --method POST \
-                "repos/${REPOSITORY}/git/refs" \
-                -f "ref=refs/heads/${branch_name}" \
-                -f "sha=${desired_head}")"; then
-              remote_head="$(
-                gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha
-              )"
-              if [ "${remote_head}" != "${desired_head}" ]; then
-                cleanup_upload_ref_best_effort
-                echo "::error::Backmerge branch collision; refusing to overwrite existing history."
-                return 1
+            final_ref_ready=false
+            for create_delay in 0 1 2 4 8; do
+              if [ "${create_delay}" -gt 0 ]; then
+                sleep "${create_delay}"
               fi
-            else
-              jq -e \
-                --arg ref "refs/heads/${branch_name}" \
-                --arg sha "${desired_head}" '
-                  .ref == $ref and .object.sha == $sha
-                ' <<<"${created}" >/dev/null
+              if created="$(gh api --method POST \
+                  "repos/${REPOSITORY}/git/refs" \
+                  -f "ref=refs/heads/${branch_name}" \
+                  -f "sha=${desired_head}" 2>/dev/null)"; then
+                jq -e \
+                  --arg ref "refs/heads/${branch_name}" \
+                  --arg sha "${desired_head}" '
+                    .ref == $ref and .object.sha == $sha
+                  ' <<<"${created}" >/dev/null
+              fi
+              if remote_head="$(
+                gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" \
+                  --jq .object.sha 2>/dev/null
+              )"; then
+                if [ "${remote_head}" != "${desired_head}" ]; then
+                  cleanup_upload_ref_best_effort
+                  echo "::error::Backmerge branch collision; refusing to overwrite existing history."
+                  return 1
+                fi
+                final_ref_ready=true
+                break
+              fi
+            done
+            if [ "${final_ref_ready}" != true ]; then
+              cleanup_upload_ref_best_effort
+              echo '::error::GitHub did not materialize the immutable backmerge ref after bounded retries.'
+              return 1
             fi
             test "$(
               gh api "repos/${REPOSITORY}/git/ref/${encoded_ref}" --jq .object.sha
