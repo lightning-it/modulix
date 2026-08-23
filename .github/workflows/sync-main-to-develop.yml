@@ -229,10 +229,27 @@ jobs:
             BACKMERGE_UPLOAD_ENCODED="${upload_encoded}"
             BACKMERGE_UPLOAD_EXPECTED="${desired_head}"
             trap cleanup_upload_ref_best_effort EXIT
-            upload_head="$(
-              gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" --jq .object.sha
-            )"
-            test "${upload_head}" = "${desired_head}"
+            upload_ref_ready=false
+            for upload_visibility_delay in 0 1 2 4 8; do
+              if [ "${upload_visibility_delay}" -gt 0 ]; then
+                sleep "${upload_visibility_delay}"
+              fi
+              if upload_head="$(
+                gh api "repos/${REPOSITORY}/git/ref/${upload_encoded}" \
+                  --jq .object.sha 2>/dev/null
+              )"; then
+                if [ "${upload_head}" != "${desired_head}" ]; then
+                  echo '::error::Temporary backmerge upload ref changed unexpectedly.'
+                  return 1
+                fi
+                upload_ref_ready=true
+                break
+              fi
+            done
+            if [ "${upload_ref_ready}" != true ]; then
+              echo '::error::GitHub did not materialize the exact temporary backmerge ref after bounded retries.'
+              return 1
+            fi
 
             final_ref_ready=false
             for create_delay in 0 1 2 4 8; do
