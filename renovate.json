@@ -77,6 +77,7 @@
       "matchManagers": ["github-actions"],
       "matchFileNames": [
         ".github/workflows/codex-copilot-remediation.yml",
+        ".github/workflows/copilot-review-refresh.yml",
         ".github/workflows/copilot-review.yml",
         ".github/workflows/current-revision-rerun.yml",
         ".github/workflows/openssf-scorecard.yml",
