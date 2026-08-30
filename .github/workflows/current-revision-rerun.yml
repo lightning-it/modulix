@@ -587,16 +587,8 @@ jobs:
               ' <<<"${producer}" >/dev/null
           else
             if [ "${external_kind}" = ancestry-backmerge ]; then
-              if [ "${evidence_version}" = v6 ]; then
-                if [ "${REPOSITORY}" = 'lightning-it/.github' ]; then
-                  test "${author}" = 'lightning-it-shared-assets-sync[bot]'
-                else
-                  test "${author}" = 'lightning-it-release-automation[bot]'
-                fi
-              else
-                test "${REPOSITORY}" = 'lightning-it/.github'
-                test "${author}" = 'lightning-it-shared-assets-sync[bot]'
-              fi
+              test "${REPOSITORY}" = 'lightning-it/.github'
+              test "${author}" = 'lightning-it-shared-assets-sync[bot]'
               test "${base_ref}" = develop
               test "$(jq -r .review_path <<<"${neutral_summary}")" = \
                 'deterministic evidence-bound ancestry exemption'
