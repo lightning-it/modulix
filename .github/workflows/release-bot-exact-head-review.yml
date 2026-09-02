@@ -1021,6 +1021,7 @@ jobs:
       - name: Dispatch the protected re-evaluation helper from the exact base
         env:
           BASE_REF: ${{ inputs.base_ref }}
+          EXECUTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
           EXPECTED_BASE: ${{ inputs.expected_base }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
           GH_TOKEN: ${{ github.token }}
@@ -1034,7 +1035,8 @@ jobs:
           [[ "${EXPECTED_HEAD}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
           [[ "${PRODUCER_RUN_ID}" =~ ^[1-9][0-9]*$ ]]
-          test "${GITHUB_WORKFLOW_SHA}" = "${EXPECTED_BASE}"
+          [[ "${EXECUTED_WORKFLOW_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${EXECUTED_WORKFLOW_SHA}" = "${EXPECTED_BASE}"
           test "${GITHUB_REF}" = "refs/heads/${BASE_REF}"
           test "${GITHUB_REF_PROTECTED}" = true
           live_base="$(gh api \
