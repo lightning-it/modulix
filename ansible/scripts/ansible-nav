@@ -8,7 +8,7 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 runtime_mode="${ANSIBLE_TOOLBOX_RUNTIME_MODE:-${ANSIBLE_TOOLBOX_MODE:-connected}}"
-image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.7}"
+image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.8}"
 run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-${MODULIX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.8}}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
@@ -59,7 +59,7 @@ Usage:
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
   ANSIBLE_TOOLBOX_RUNTIME_MODE=connected|disconnected (default: connected)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.7)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.11.8)
   MODULIX_RUN_EE_IMAGE=<image:tag>                (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.23.8)
   ANSIBLE_TOOLBOX_RUN_EE_PRELOAD=true|false       (default: false)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
