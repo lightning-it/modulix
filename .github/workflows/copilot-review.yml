@@ -10,15 +10,13 @@ name: Current revision review gate
 on:
   pull_request_target:
     types:
-      [
-        opened,
-        synchronize,
-        reopened,
-        ready_for_review,
-        edited,
-        labeled,
-        unlabeled,
-      ]
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - edited
+      - labeled
+      - unlabeled
 
 permissions:
   contents: read
